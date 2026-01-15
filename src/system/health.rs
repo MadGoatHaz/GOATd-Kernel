@@ -84,7 +84,6 @@ impl HealthManager {
     fn aur_packages() -> std::collections::HashSet<&'static str> {
         let mut set = std::collections::HashSet::new();
         set.insert("modprobed-db");
-        set.insert("scx-scheds");
         set
     }
 
@@ -114,6 +113,7 @@ impl HealthManager {
 
         let optional_tools = vec![
             "modprobed-db",
+            "scx-tools",
         ];
 
         let aur_pkgs = Self::aur_packages();
@@ -229,9 +229,12 @@ impl HealthManager {
     pub fn generate_fix_command(report: &HealthReport) -> String {
         let mut commands = Vec::new();
 
-        // Install missing OFFICIAL packages only (not AUR)
-        if !report.missing_official_packages.is_empty() {
-            let pkg_list = report.missing_official_packages.join(" ");
+        // Install missing OFFICIAL packages and optional tools (not AUR)
+        let mut all_official = report.missing_official_packages.clone();
+        all_official.extend(report.missing_optional_tools.clone());
+        
+        if !all_official.is_empty() {
+            let pkg_list = all_official.join(" ");
             commands.push(format!("pacman -S --needed --noconfirm {}", pkg_list));
         }
 

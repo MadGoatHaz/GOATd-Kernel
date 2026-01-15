@@ -159,8 +159,8 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
         );
     }
     
-    // Fix System Environment button - only if there are official packages or GPG keys to fix
-    if !health_report.missing_official_packages.is_empty() || !health_report.missing_gpg_keys.is_empty() {
+    // Fix System Environment button - only if there are official packages, optional tools, or GPG keys to fix
+    if !health_report.missing_official_packages.is_empty() || !health_report.missing_gpg_keys.is_empty() || !health_report.missing_optional_tools.is_empty() {
         ui.separator();
         if ui.button("🔧 Fix System Environment (pkexec)").clicked() {
             let controller_clone = Arc::clone(controller);
@@ -180,7 +180,7 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
             });
         }
         ui.label("ℹ You will see a system authentication prompt (pkexec).");
-        ui.label("ℹ This only fixes official packages and GPG keys. AUR packages must be installed manually.");
+        ui.label("ℹ This fixes official packages, optional tools, and GPG keys. AUR packages must be installed manually.");
     }
     
     ui.separator();
@@ -231,7 +231,7 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
             ui.colored_label(
                 egui::Color32::from_rgb(200, 150, 100),
                 "SCX scheduler packages are not installed. \
-                 Install from AUR: yay -S scx-scheds"
+                 Install: sudo pacman -S scx-tools"
             );
         }
         SCXReadiness::ServiceMissing => {

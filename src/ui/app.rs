@@ -185,6 +185,10 @@ pub struct UIState {
     /// Cached list of missing AUR packages from the last health check
     /// Used to determine if UI features should be blocked due to missing dependencies
     pub missing_aur_packages: Vec<String>,
+    
+    /// Cached list of missing optional tools from the last health check
+    /// Used to determine if UI features should be blocked due to missing dependencies (e.g., scx-tools)
+    pub missing_optional_tools: Vec<String>,
 }
 
 impl Default for Tab {
@@ -249,8 +253,9 @@ impl Default for UIState {
             cached_theme_idx: None,
             cached_visuals: None,
             missing_aur_packages: Vec::new(),
+            missing_optional_tools: Vec::new(),
         }
-   }
+    }
 }
 
 /// Main Application UI Structure
@@ -658,6 +663,7 @@ impl eframe::App for AppUI {
         // This allows UI elements tied to missing dependencies to be disabled/greyed out
         let health_report = crate::system::health::HealthManager::check_system_health();
         self.ui_state.missing_aur_packages = health_report.missing_aur_packages.clone();
+        self.ui_state.missing_optional_tools = health_report.missing_optional_tools.clone();
         
         // SYNC SCX STATUS: Update UIState with current kernel SCX status
         // This ensures the Kernel Manager tab always shows accurate SCX state
