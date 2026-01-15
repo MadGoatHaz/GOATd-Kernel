@@ -132,6 +132,9 @@ pub fn finalize_kernel_config(
     if !config.user_toggled_hardening {
         config.hardening = profile_def.hardening_level.clone();
     }
+    if !config.user_toggled_native_optimizations {
+        config.native_optimizations = profile_def.native_optimizations;
+    }
     
     // PHASE 9.3: Honor user overrides for LTO (CRITICAL FIX)
     // If user explicitly set LTO level in UI, respect it - profile default should NOT override
@@ -154,9 +157,9 @@ pub fn finalize_kernel_config(
     }
     
     eprintln!(
-        "[Finalizer] [STEP 2] Applied profile defaults: HZ={}, Preemption={}, Clang={}, Polly={} (user_toggled={}), MGLRU={} (user_toggled={}), Modprobed={}, Whitelist={}",
+        "[Finalizer] [STEP 2] Applied profile defaults: HZ={}, Preemption={}, Clang={}, Polly={} (user_toggled={}), MGLRU={} (user_toggled={}), NativeOpt={} (user_toggled={}), Modprobed={}, Whitelist={}",
         config.hz, config.preemption, config.force_clang, config.use_polly, config.user_toggled_polly, config.use_mglru, config.user_toggled_mglru,
-        config.use_modprobed, config.use_whitelist
+        config.native_optimizations, config.user_toggled_native_optimizations, config.use_modprobed, config.use_whitelist
     );
 
     // =========================================================================

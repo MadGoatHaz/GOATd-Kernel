@@ -214,7 +214,7 @@ impl Default for UIState {
             use_whitelist: false,
             use_polly: false,
             use_mglru: false,
-            native_optimizations: false,
+            native_optimizations: true,
             selected_scx_profile: None,
             scx_enabled: false,
             active_scx_binary: String::new(),

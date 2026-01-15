@@ -1,0 +1,25 @@
+[testgoat@testgoat GOATd-Kernel-master]$ ./goatdkernel.sh
+Checking Rust toolchain...
+Warning: cargo not found in PATH
+✓ Dependency check complete
+
+ ██████╗  ██████╗  █████╗ ████████╗     ██╗
+███╔═══╝ ██╔═══██╗██╔══██╗╚══██╔══╝ ██████║
+██║  ███╗██║   ██║███████║   ██║   ██╔══██║
+██║   ██║██║   ██║██╔══██║   ██║   ██║  ██║
+╚██████╔╝╚██████╔╝██║  ██║   ██║   ╚█████╔╝
+
+Starting GOATd Kernel...
+Building with Cargo...
+Verifying build environment...
+✓ Cargo.toml (at /home/testgoat/Documents/GOATd-Kernel-master/Cargo.toml)
+Missing critical dependencies:
+  ✗ cargo
+  ✗ rustc
+
+Install Rust from: https://rustup.rs/
+Or on Arch: sudo pacman -S rust
+
+Verify project structure:
+./goatdkernel.sh: line 150: RUST_SOURCE: unbound variable
+[testgoat@testgoat GOATd-Kernel-master]$

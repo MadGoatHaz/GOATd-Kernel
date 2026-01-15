@@ -15,7 +15,7 @@ lazy_static! {
                 "Balanced (Clang, EEVDF, -O2)".to_string(),
                 "A reasonable default for most systems. Balances performance and stability.".to_string(),
                 true, LtoType::Thin, false, HardeningLevel::Standard,
-                "Voluntary".to_string(), 300, false, false,
+                "Voluntary".to_string(), 300, false, false, true,
             ),
         );
 
@@ -26,7 +26,7 @@ lazy_static! {
                 "High-performance (Clang, 1000Hz, Polly)".to_string(),
                 "Optimizes for ultra-low latency and maximum FPS. Best for competitive gaming and real-time interactive apps.".to_string(),
                 true, LtoType::Thin, true, HardeningLevel::Standard,
-                "Full".to_string(), 1000, true, true,
+                "Full".to_string(), 1000, true, true, true,
             ),
         );
 
@@ -37,7 +37,7 @@ lazy_static! {
                 "Professional (Clang, Hardened)".to_string(),
                 "Balances aggressive performance with hardened security and rock-solid stability. Best for professional development.".to_string(),
                 true, LtoType::Thin, true, HardeningLevel::Hardened,
-                "Full".to_string(), 1000, false, true,
+                "Full".to_string(), 1000, false, true, true,
             ),
         );
 
@@ -48,7 +48,7 @@ lazy_static! {
                 "High-throughput (Clang, Full LTO, EEVDF, 100Hz)".to_string(),
                 "Maximizes throughput and multi-core efficiency for non-interactive workloads. Best for hosting and databases.".to_string(),
                 true, LtoType::Full, true, HardeningLevel::Hardened,
-                "Server".to_string(), 100, false, true,
+                "Server".to_string(), 100, false, true, true,
             ),
         );
 
@@ -59,7 +59,7 @@ lazy_static! {
                 "Power-efficient (Clang, EEVDF, Thin LTO)".to_string(),
                 "Prioritizes power efficiency and thermal management while maintaining responsiveness. Best for maximizing battery life.".to_string(),
                 true, LtoType::Thin, true, HardeningLevel::Standard,
-                "Voluntary".to_string(), 300, false, true,
+                "Voluntary".to_string(), 300, false, true, true,
             ),
         );
 
@@ -81,6 +81,7 @@ pub struct ProfileDefinition {
     pub hz: u32,                        // Hz
     pub use_polly: bool,                // Polly?
     pub use_mglru: bool,                // MGLRU?
+    pub native_optimizations: bool,     // Native optimizations (-march=native)?
 }
 
 impl ProfileDefinition {
@@ -97,6 +98,7 @@ impl ProfileDefinition {
         hz: u32,
         use_polly: bool,
         use_mglru: bool,
+        native_optimizations: bool,
     ) -> Self {
         ProfileDefinition {
             name,
@@ -110,6 +112,7 @@ impl ProfileDefinition {
             hz,
             use_polly,
             use_mglru,
+            native_optimizations,
         }
     }
 }
@@ -159,6 +162,7 @@ mod tests {
         assert_eq!(profile.hz, 1000);
         assert!(profile.use_polly);
         assert!(profile.use_mglru);
+        assert!(profile.native_optimizations);
     }
 
     #[test]
@@ -169,6 +173,7 @@ mod tests {
         assert_eq!(profile.default_lto, LtoType::Thin);
         assert!(!profile.enable_module_stripping);
         assert_eq!(profile.hardening_level, HardeningLevel::Standard);
+        assert!(profile.native_optimizations);
     }
 
     #[test]
@@ -180,6 +185,7 @@ mod tests {
         assert!(profile.enable_module_stripping);
         assert_eq!(profile.hardening_level, HardeningLevel::Hardened);
         assert!(profile.use_mglru);  // Server uses MGLRU for memory efficiency
+        assert!(profile.native_optimizations);
     }
 
     #[test]
@@ -192,6 +198,7 @@ mod tests {
         assert_eq!(profile.hardening_level, HardeningLevel::Standard);
         assert_eq!(profile.preemption, "Voluntary");
         assert_eq!(profile.hz, 300);
+        assert!(profile.native_optimizations);
     }
 
     #[test]
@@ -204,5 +211,6 @@ mod tests {
         assert_eq!(profile.hardening_level, HardeningLevel::Hardened);
         assert_eq!(profile.preemption, "Full");
         assert_eq!(profile.hz, 1000);
+        assert!(profile.native_optimizations);
     }
 }

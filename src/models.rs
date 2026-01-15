@@ -261,6 +261,7 @@ pub struct KernelConfig {
     pub scx_available: Vec<String>,       // Available SCX schedulers
     pub scx_active_scheduler: Option<String>, // Currently active SCX scheduler
     pub native_optimizations: bool,       // Enable -march=native
+    pub user_toggled_native_optimizations: bool, // User manually toggled native optimizations
 }
 
 impl Default for KernelConfig {
@@ -292,6 +293,7 @@ impl Default for KernelConfig {
             scx_available: Vec::new(),    // No SCX schedulers available by default
             scx_active_scheduler: None,   // No active SCX scheduler by default
             native_optimizations: true,   // Default: native optimizations enabled
+            user_toggled_native_optimizations: false, // Not manually toggled by default
         }
     }
 }
@@ -493,6 +495,7 @@ mod tests {
             scx_available: vec!["scx_bpfland".to_string()],
             scx_active_scheduler: None,
             native_optimizations: true,
+            user_toggled_native_optimizations: false,
         };
         assert_eq!(config.lto_type, LtoType::Thin);
         assert_eq!(config.hardening, HardeningLevel::Standard);
@@ -510,6 +513,7 @@ mod tests {
         assert_eq!(config.preemption, "Voluntary");
         assert_eq!(config.force_clang, true);
         assert!(config.lto_shield_modules.is_empty());
+        assert!(config.native_optimizations);
     }
 
     #[test]

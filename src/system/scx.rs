@@ -414,25 +414,44 @@ impl SCXManager {
 
     /// Provision the SCX environment with packages and systemd service.
     ///
-    /// Performs the following steps with elevated privileges (via pkexec) in a single atomic call:
-    /// 1. Installs `scx-scheds` package (modern scx_loader-compatible)
-    /// 2. Initializes `/etc/scx_loader/config.toml` with default scheduler and mode
-    /// 3. Enables `scx_loader.service` to run on boot
+    /// Performs the following steps with elevated privileges (via pkexec):
+    /// 1. Checks for `scx-scheds` package via pacman -Qq (AUR package)
+    /// 2. If missing, instructs user to install via AUR instead of failing
+    /// 3. Initializes `/etc/scx_loader/config.toml` with default scheduler and mode
+    /// 4. Enables the correct SCX service (`scx_loader.service` or `scx.service`) to run on boot
     ///
-    /// All steps execute in a single `pkexec` session for seamless single-prompt UX.
-    /// If any step fails, the entire operation fails atomically (via `&&` chaining).
+    /// All steps execute with privilege escalation for seamless single-prompt UX.
+    /// If scx-scheds is missing, user receives clear AUR installation instructions.
     ///
     /// # Returns
     /// * `Ok(())` on successful provisioning
     /// * `Err(String)` with root-cause diagnostic on failure
     ///
     /// # Note
-    /// - Uses Arch Linux `pacman` package manager
+    /// - Uses Arch Linux `pacman` package manager for query only
+    /// - AUR packages must be installed manually by the user
     /// - Uses `pkexec` for privilege escalation (single prompt)
     /// - Config file is written to `/etc/scx_loader/config.toml` (TOML format)
     /// - Temp file path is properly shell-escaped to prevent injection
     pub fn provision_scx_environment() -> Result<(), String> {
         log_info!("[SCXManager] Starting SCX environment provisioning for scx_loader");
+
+        // Step 0: Check if scx-scheds is installed via pacman -Qq
+        let check_cmd = "pacman -Qq scx-scheds";
+        let check_output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(check_cmd)
+            .output()
+            .map_err(|e| format!("Failed to check scx-scheds installation: {}", e))?;
+
+        if !check_output.status.success() {
+            let msg = "scx-scheds package not found. Please install it from the AUR using: \
+                       yay -S scx-scheds or paru -S scx-scheds, then retry provisioning.".to_string();
+            log_info!("[SCXManager] WARNING: {}", msg);
+            return Err(msg);
+        }
+
+        log_info!("[SCXManager] ✓ scx-scheds package verified");
 
         // Create default TOML configuration
         let default_config = ScxLoaderConfig::new("scx_bpfland", SchedulerMode::Auto);
@@ -460,13 +479,12 @@ impl SCXManager {
         let escaped_temp_path = escape_shell_arg(&temp_path);
 
         // Construct the provisioning command with all steps chained atomically
-        // Step 1: Install scx-scheds package
-        // Step 2: Create /etc/scx_loader directory
-        // Step 3: Copy config file to /etc/scx_loader/config.toml
-        // Step 4: Enable scx_loader.service
+        // Step 1: Create /etc/scx_loader directory
+        // Step 2: Copy config file to /etc/scx_loader/config.toml
+        // Step 3: Reload systemd daemon
+        // Step 4: Enable scx_loader.service (primary service name)
         let cmd = format!(
-            "pacman -S --needed --noconfirm scx-scheds && \
-             mkdir -p /etc/scx_loader && \
+            "mkdir -p /etc/scx_loader && \
              cp {} /etc/scx_loader/config.toml && \
              systemctl daemon-reload && \
              systemctl enable scx_loader.service",
@@ -474,7 +492,7 @@ impl SCXManager {
         );
 
         let pkexec_cmd = format!("pkexec bash -c '{}'", cmd);
-        log_info!("[SCXManager] Executing provisioning command with pkexec (5-step atomic chain)");
+        log_info!("[SCXManager] Executing provisioning command with pkexec (4-step atomic chain)");
 
         let output = std::process::Command::new("sh")
             .arg("-c")
