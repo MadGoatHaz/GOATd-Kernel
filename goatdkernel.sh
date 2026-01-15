@@ -144,10 +144,10 @@ bootstrap_environment() {
         done
         echo ""
         echo "Install Rust from: https://rustup.rs/"
-        echo "Or on Arch: sudo pacman -S rust"
+        echo "Or on Arch: sudo pacman -S --needed rust base-devel git"
         echo ""
         echo "Verify project structure:"
-        echo "  ls -la $RUST_SOURCE/"
+        echo "  ls -la ${PROJECT_ROOT}/"
         return 1
     fi
     
@@ -276,15 +276,89 @@ build_rust_binary_dry_run() {
     fi
 }
 
+# Detect if running on Arch Linux
+detect_arch_linux() {
+    if [ -f /etc/os-release ]; then
+        grep -q "^ID=arch$" /etc/os-release
+        return $?
+    else
+        return 1
+    fi
+}
+
+# Check and prompt for Arch Linux system packages
+check_and_install_arch_deps() {
+    if ! detect_arch_linux; then
+        return 0  # Not on Arch, skip
+    fi
+    
+    echo -e "${YELLOW}Detected Arch Linux. Checking system packages...${NC}"
+    
+    local missing_arch_deps=()
+    local required_packages=("rust" "base-devel" "git")
+    
+    for package in "${required_packages[@]}"; do
+        if ! pacman -Q "$package" &> /dev/null; then
+            missing_arch_deps+=("$package")
+        else
+            echo -e "${GREEN}✓${NC} $package (installed)"
+        fi
+    done
+    
+    if [ ${#missing_arch_deps[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${YELLOW}Missing Arch packages:${NC}"
+        for pkg in "${missing_arch_deps[@]}"; do
+            echo -e "  ${RED}✗${NC} $pkg"
+        done
+        echo ""
+        echo -e "${BLUE}To install missing packages, run:${NC}"
+        echo ""
+        echo "  sudo pacman -S --needed ${missing_arch_deps[*]}"
+        echo ""
+        echo -e "${YELLOW}Would you like to install them now? (y/n)${NC}"
+        read -r -p "> " response
+        
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}Installing missing packages...${NC}"
+            sudo pacman -S --needed "${missing_arch_deps[@]}"
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ Packages installed successfully${NC}"
+                return 0
+            else
+                echo -e "${RED}Error: Package installation failed${NC}"
+                return 1
+            fi
+        else
+            echo -e "${YELLOW}Skipping package installation${NC}"
+            return 1
+        fi
+    else
+        echo -e "${GREEN}✓ All required packages are installed${NC}"
+        return 0
+    fi
+}
+
 check_dependencies() {
-    echo "Checking Rust toolchain..."
+    echo "Checking Rust toolchain and system dependencies..."
+    
+    # Check for Arch Linux packages first
+    if ! check_and_install_arch_deps; then
+        # Only warn if not on Arch (on Arch, it's more critical)
+        if detect_arch_linux; then
+            echo -e "${RED}Warning: Some required packages are missing${NC}"
+            return 1
+        fi
+    fi
     
     # Verify Cargo is available
     if ! command -v cargo &> /dev/null; then
         echo -e "${YELLOW}Warning: cargo not found in PATH${NC}"
+        return 1
     fi
     
     echo -e "${GREEN}✓ Dependency check complete${NC}"
+    return 0
 }
 
 install_deps() {
