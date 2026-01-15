@@ -384,6 +384,33 @@ impl SCXManager {
         readiness
     }
 
+    /// Find the SCX systemd service file on the system
+    ///
+    /// Checks for both modern (`scx_loader.service`) and legacy (`scx.service`) service names
+    /// in standard systemd directories. Returns the found service name or None if not found.
+    ///
+    /// # Returns
+    /// `Some(service_name)` if found, `None` otherwise
+    fn find_scx_service() -> Option<String> {
+        // Check both system and user-local service directories for both service names
+        let service_candidates = [
+            ("/usr/lib/systemd/system/scx_loader.service", "scx_loader.service"),
+            ("/etc/systemd/system/scx_loader.service", "scx_loader.service"),
+            ("/usr/lib/systemd/system/scx.service", "scx.service"),
+            ("/etc/systemd/system/scx.service", "scx.service"),
+        ];
+
+        for (path, service_name) in &service_candidates {
+            if Path::new(path).exists() {
+                log_info!("[SCXManager] Found SCX service: {} at {}", service_name, path);
+                return Some(service_name.to_string());
+            }
+        }
+
+        log_info!("[SCXManager] No SCX service found (checked both scx_loader.service and scx.service)");
+        None
+    }
+
     /// Compute SCX readiness by performing all checks
     /// (Internal helper, called by get_scx_readiness after cache miss)
     fn compute_scx_readiness() -> SCXReadiness {
@@ -398,14 +425,9 @@ impl SCXManager {
             return SCXReadiness::PackagesMissing;
         }
 
-        // Check for modern scx_loader systemd service unit (v1.0.19+)
-        let service_paths = [
-            "/usr/lib/systemd/system/scx_loader.service",
-            "/etc/systemd/system/scx_loader.service",
-        ];
-        let service_exists = service_paths.iter().any(|p| Path::new(p).exists());
-
-        if !service_exists {
+        // Check for SCX systemd service unit (supports both scx_loader.service and scx.service)
+        if !Self::find_scx_service().is_some() {
+            log_info!("[SCXManager] No SCX service unit found (checked scx_loader.service and scx.service)");
             return SCXReadiness::ServiceMissing;
         }
 
@@ -475,21 +497,36 @@ impl SCXManager {
         let temp_path = temp_config.path().to_string_lossy().to_string();
         log_info!("[SCXManager] Config template written to: {}", temp_path);
 
-        // Safely escape the temporary file path for shell interpolation
-        let escaped_temp_path = escape_shell_arg(&temp_path);
+        // Find which SCX service is available on the system
+        let scx_service = match Self::find_scx_service() {
+            Some(service) => service,
+            None => {
+                let msg = "SCX service not found. The scx-scheds package appears to be installed, \
+                           but the systemd service file is missing. Verify the installation is complete \
+                           (check /usr/lib/systemd/system/ for scx_loader.service or scx.service).".to_string();
+                log_info!("[SCXManager] ERROR: {}", msg);
+                return Err(msg);
+            }
+        };
 
-        // Construct the provisioning command with all steps chained atomically
-        // Step 1: Create /etc/scx_loader directory
-        // Step 2: Copy config file to /etc/scx_loader/config.toml
-        // Step 3: Reload systemd daemon
-        // Step 4: Enable scx_loader.service (primary service name)
-        let cmd = format!(
-            "mkdir -p /etc/scx_loader && \
-             cp {} /etc/scx_loader/config.toml && \
-             systemctl daemon-reload && \
-             systemctl enable scx_loader.service",
-            escaped_temp_path
-        );
+        log_info!("[SCXManager] ✓ Using SCX service: {}", scx_service);
+
+        // Safely escape the temporary file path for shell interpolation
+         let escaped_temp_path = escape_shell_arg(&temp_path);
+
+         // Construct the provisioning command with all steps chained atomically
+         // Step 1: Create /etc/scx_loader directory
+         // Step 2: Copy config file to /etc/scx_loader/config.toml
+         // Step 3: Reload systemd daemon
+         // Step 4: Enable the detected SCX service (scx_loader.service or scx.service)
+         let cmd = format!(
+             "mkdir -p /etc/scx_loader && \
+              cp {} /etc/scx_loader/config.toml && \
+              systemctl daemon-reload && \
+              systemctl enable {}",
+             escaped_temp_path,
+             scx_service
+         );
 
         let pkexec_cmd = format!("pkexec bash -c '{}'", cmd);
         log_info!("[SCXManager] Executing provisioning command with pkexec (4-step atomic chain)");
@@ -556,7 +593,16 @@ impl SCXManager {
         }
 
         if stderr.contains("enable") || (stdout.contains("enable") && stderr.contains("already")) {
-            return "Systemd error: Failed to enable scx_loader service. Verify /etc/systemd/system/scx_loader.service exists and is valid.".to_string();
+            return "Systemd error: Failed to enable SCX service. The service file may not exist or may be invalid. \
+                    Verify that scx-scheds is properly installed and provides either scx_loader.service or scx.service.".to_string();
+        }
+
+        // Check for service not found (unit file doesn't exist)
+        if stderr.contains("not find a unit") ||
+           stderr.contains("No such file") ||
+           stderr.contains("does not exist") {
+            return "Service file not found: Neither scx_loader.service nor scx.service exists. \
+                    This indicates an incomplete scx-scheds installation. Please reinstall scx-scheds or use a different package variant.".to_string();
         }
 
         // Generic fallback with full output for debugging

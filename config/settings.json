@@ -16,7 +16,7 @@
   "user_toggled_hardening": false,
   "user_toggled_lto": true,
   "user_toggled_bore": false,
-  "workspace_path": "/var/cache/goatd",
+  "workspace_path": ".",
   "security_level": "Standard",
   "startup_audit": false,
   "theme_mode": "Nord Dark",
