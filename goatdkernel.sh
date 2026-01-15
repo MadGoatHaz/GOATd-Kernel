@@ -276,97 +276,82 @@ build_rust_binary_dry_run() {
     fi
 }
 
-# Detect if running on Arch Linux
+# Detect if running on Arch Linux (extremely permissive - multiple checks)
 detect_arch_linux() {
+    # Check 1: Look for /etc/os-release with "arch" in ID field (case-insensitive)
     if [ -f /etc/os-release ]; then
-        # Check for ID=arch (unquoted) or ID="arch" (quoted) in /etc/os-release
-        if grep -E '^ID=("?arch"?|"arch"|arch)$' /etc/os-release &> /dev/null; then
-            echo -e "${BLUE}[ARCH DETECTION]${NC} Detected Arch Linux${NC}" >&2
+        if grep -i '^ID=' /etc/os-release | grep -qi 'arch'; then
+            echo -e "${BLUE}[ARCH DETECTION]${NC} Detected Arch Linux in /etc/os-release${NC}" >&2
             return 0
-        else
-            return 1
         fi
-    else
-        echo -e "${BLUE}[ARCH DETECTION]${NC} /etc/os-release not found${NC}" >&2
-        return 1
     fi
+    
+    # Check 2: Check if pacman exists (most reliable indicator of Arch-based system)
+    if command -v pacman &> /dev/null; then
+        echo -e "${BLUE}[ARCH DETECTION]${NC} Detected pacman package manager - Arch-based system${NC}" >&2
+        return 0
+    fi
+    
+    # Not an Arch-based system
+    return 1
 }
 
-# Check and prompt for Arch Linux system packages
+# Check and aggressively install Arch Linux system packages
 check_and_install_arch_deps() {
-    if ! detect_arch_linux; then
-        echo -e "${BLUE}[ARCH CHECK]${NC} Not running on Arch Linux, skipping Arch-specific checks${NC}" >&2
-        return 0  # Not on Arch, skip
+    # STEP 1: Check if pacman exists (most reliable indicator of Arch-based system)
+    if ! command -v pacman &> /dev/null; then
+        echo -e "${BLUE}[ARCH CHECK]${NC} pacman not found - not an Arch-based system, skipping${NC}" >&2
+        return 0  # Not on Arch, skip gracefully
     fi
     
-    echo -e "${YELLOW}Detected Arch Linux. Checking system packages...${NC}"
+    echo -e "${YELLOW}Detected Arch-based system (pacman found). Installing required packages...${NC}"
     
-    local missing_arch_deps=()
     local required_packages=("rust" "base-devel" "git")
     
-    echo -e "${BLUE}[ARCH CHECK]${NC} Verifying required packages...${NC}" >&2
-    for package in "${required_packages[@]}"; do
-        if ! pacman -Q "$package" &> /dev/null; then
-            echo -e "${BLUE}[ARCH CHECK]${NC} Missing: $package${NC}" >&2
-            missing_arch_deps+=("$package")
-        else
-            echo -e "${GREEN}✓${NC} $package (installed)"
-        fi
-    done
+    # STEP 2: Immediately attempt to install all required packages
+    # The --needed flag ensures only missing packages are installed (safe and idempotent)
+    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git${NC}" >&2
+    echo -e "${YELLOW}Installing Arch packages (sudo password required)...${NC}"
+    echo ""
     
-    if [ ${#missing_arch_deps[@]} -gt 0 ]; then
+    if sudo pacman -S --needed --noconfirm rust base-devel git; then
         echo ""
-        echo -e "${YELLOW}Missing Arch packages:${NC}"
-        for pkg in "${missing_arch_deps[@]}"; do
-            echo -e "  ${RED}✗${NC} $pkg"
-        done
-        echo ""
-        echo -e "${YELLOW}Installing required packages (sudo password required)...${NC}"
-        echo ""
+        echo -e "${GREEN}✓ Packages installed successfully${NC}"
         
-        echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed ${missing_arch_deps[*]}${NC}" >&2
-        sudo pacman -S --needed "${missing_arch_deps[@]}"
-        if [ $? -eq 0 ]; then
-            echo ""
-            echo -e "${GREEN}✓ Packages installed successfully${NC}"
-            
-            # Refresh PATH in case rust binaries were added to /usr/bin
-            echo -e "${BLUE}[ARCH INSTALL]${NC} Refreshing PATH and verifying installation...${NC}" >&2
-            export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
-            
-            # Re-verify all packages are now installed
-            local still_missing=()
-            for package in "${required_packages[@]}"; do
-                if ! pacman -Q "$package" &> /dev/null; then
-                    echo -e "${BLUE}[ARCH INSTALL]${NC} Still missing after install: $package${NC}" >&2
-                    still_missing+=("$package")
-                else
-                    echo -e "${BLUE}[ARCH INSTALL]${NC} Confirmed installed: $package${NC}" >&2
-                fi
-            done
-            
-            if [ ${#still_missing[@]} -gt 0 ]; then
-                echo -e "${RED}Error: Some packages still missing after installation: ${still_missing[*]}${NC}"
-                return 1
+        # STEP 3: Refresh PATH in case rust binaries were added to /usr/bin
+        echo -e "${BLUE}[ARCH INSTALL]${NC} Refreshing PATH and verifying installation...${NC}" >&2
+        export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+        
+        # STEP 4: Re-verify all packages are now installed
+        echo -e "${BLUE}[ARCH INSTALL]${NC} Verifying all packages are installed...${NC}" >&2
+        local still_missing=()
+        for package in "${required_packages[@]}"; do
+            if ! pacman -Q "$package" &> /dev/null; then
+                echo -e "${BLUE}[ARCH INSTALL]${NC} Still missing after install: $package${NC}" >&2
+                still_missing+=("$package")
+            else
+                echo -e "${BLUE}[ARCH INSTALL]${NC} ✓ Confirmed installed: $package${NC}" >&2
             fi
-            
-            # Explicitly verify cargo is now in PATH
-            if command -v cargo &> /dev/null; then
-                local cargo_version=$(cargo --version 2>/dev/null || echo "unknown")
-                echo -e "${GREEN}✓ cargo is now available in PATH: $cargo_version${NC}"
-            fi
-            
-            return 0
-        else
-            echo ""
-            echo -e "${RED}Error: Package installation failed${NC}"
-            echo -e "${RED}Cannot continue without required packages. Please install manually:${NC}"
-            echo "  sudo pacman -S --needed ${missing_arch_deps[*]}"
+        done
+        
+        if [ ${#still_missing[@]} -gt 0 ]; then
+            echo -e "${RED}Error: Some packages still missing after installation: ${still_missing[*]}${NC}"
             return 1
         fi
-    else
-        echo -e "${GREEN}✓ All required packages are installed${NC}"
+        
+        # STEP 5: Explicitly verify cargo is now in PATH
+        if command -v cargo &> /dev/null; then
+            local cargo_version=$(cargo --version 2>/dev/null || echo "unknown")
+            echo -e "${GREEN}✓ cargo is now available in PATH: $cargo_version${NC}"
+        fi
+        
         return 0
+    else
+        echo ""
+        echo -e "${RED}Error: Package installation failed${NC}"
+        echo -e "${RED}Cannot continue without required packages. Please install manually:${NC}"
+        echo "  sudo pacman -S --needed --noconfirm rust base-devel git"
+        return 1
     fi
 }
 
@@ -374,11 +359,11 @@ check_dependencies() {
     echo -e "${YELLOW}Checking Rust toolchain and system dependencies...${NC}"
     echo ""
     
-    # STEP 1: Check for Arch Linux packages first
-    echo -e "${BLUE}[DEPS]${NC} Step 1: Checking Arch Linux specific dependencies${NC}"
+    # STEP 1: Check for Arch Linux packages FIRST (pacman-based installation)
+    echo -e "${BLUE}[DEPS]${NC} Step 1: Checking for Arch-based system (pacman)${NC}"
     if ! check_and_install_arch_deps; then
-        # On Arch Linux, package installation is mandatory - do not continue without it
-        if detect_arch_linux; then
+        # Installation failed on Arch system
+        if command -v pacman &> /dev/null; then
             echo -e "${RED}Error: Required packages could not be installed on Arch Linux. Cannot continue.${NC}" >&2
             return 1
         fi
@@ -396,14 +381,28 @@ check_dependencies() {
         echo -e "${YELLOW}Current PATH search:${NC}"
         echo "  $PATH" | tr ':' '\n' | sed 's/^/    /'
         echo ""
-        echo -e "${YELLOW}Install Rust from: https://rustup.rs/${NC}"
-        if detect_arch_linux; then
-            echo -e "${YELLOW}Or on Arch: sudo pacman -S rust${NC}"
+        
+        # HARD FAILURE: If pacman is missing AND cargo is missing, fail hard
+        if ! command -v pacman &> /dev/null; then
+            echo -e "${RED}FATAL: Neither pacman (Arch package manager) nor cargo (Rust) found.${NC}"
+            echo -e "${RED}This system cannot automatically install required dependencies.${NC}"
             echo ""
-            echo -e "${YELLOW}If you just installed rust, you may need to:${NC}"
-            echo "  1. Close and re-open your terminal"
-            echo "  2. Or run: source /etc/profile.d/rust.sh (if it exists)"
+            echo -e "${YELLOW}Options:${NC}"
+            echo "  1. Install Rust from: https://rustup.rs/"
+            echo "  2. Or manually install: sudo pacman -S rust base-devel git (on Arch)"
+            echo "  3. Or install: sudo apt-get install cargo rustc build-essential (on Debian/Ubuntu)"
+            echo "  4. Or install: sudo dnf install cargo rustc gcc (on Fedora/RHEL)"
+            echo ""
+            return 1
         fi
+        
+        # If we reach here, pacman exists but cargo install failed
+        echo -e "${YELLOW}Install Rust from: https://rustup.rs/${NC}"
+        echo -e "${YELLOW}Or on Arch: sudo pacman -S rust${NC}"
+        echo ""
+        echo -e "${YELLOW}If you just installed rust, you may need to:${NC}"
+        echo "  1. Close and re-open your terminal"
+        echo "  2. Or run: source /etc/profile.d/rust.sh (if it exists)"
         return 1
     fi
     
