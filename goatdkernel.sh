@@ -312,25 +312,32 @@ check_and_install_arch_deps() {
             echo -e "  ${RED}✗${NC} $pkg"
         done
         echo ""
-        echo -e "${BLUE}To install missing packages, run:${NC}"
+        echo -e "${YELLOW}Installing required packages (sudo password required)...${NC}"
         echo ""
-        echo "  sudo pacman -S --needed ${missing_arch_deps[*]}"
-        echo ""
-        echo -e "${YELLOW}Would you like to install them now? (y/n)${NC}"
-        read -r -p "> " response
         
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            echo -e "${YELLOW}Installing missing packages...${NC}"
-            sudo pacman -S --needed "${missing_arch_deps[@]}"
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}✓ Packages installed successfully${NC}"
-                return 0
-            else
-                echo -e "${RED}Error: Package installation failed${NC}"
+        sudo pacman -S --needed "${missing_arch_deps[@]}"
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo -e "${GREEN}✓ Packages installed successfully${NC}"
+            
+            # Verify all packages are now installed
+            local still_missing=()
+            for package in "${required_packages[@]}"; do
+                if ! pacman -Q "$package" &> /dev/null; then
+                    still_missing+=("$package")
+                fi
+            done
+            
+            if [ ${#still_missing[@]} -gt 0 ]; then
+                echo -e "${RED}Error: Some packages still missing after installation: ${still_missing[*]}${NC}"
                 return 1
             fi
+            return 0
         else
-            echo -e "${YELLOW}Skipping package installation${NC}"
+            echo ""
+            echo -e "${RED}Error: Package installation failed${NC}"
+            echo -e "${RED}Cannot continue without required packages. Please install manually:${NC}"
+            echo "  sudo pacman -S --needed ${missing_arch_deps[*]}"
             return 1
         fi
     else
@@ -344,16 +351,21 @@ check_dependencies() {
     
     # Check for Arch Linux packages first
     if ! check_and_install_arch_deps; then
-        # Only warn if not on Arch (on Arch, it's more critical)
+        # On Arch Linux, package installation is mandatory - do not continue without it
         if detect_arch_linux; then
-            echo -e "${RED}Warning: Some required packages are missing${NC}"
+            echo -e "${RED}Error: Required packages could not be installed. Cannot continue.${NC}"
             return 1
         fi
     fi
     
     # Verify Cargo is available
     if ! command -v cargo &> /dev/null; then
-        echo -e "${YELLOW}Warning: cargo not found in PATH${NC}"
+        echo -e "${RED}Error: cargo not found in PATH${NC}"
+        echo ""
+        echo -e "${YELLOW}Install Rust from: https://rustup.rs/${NC}"
+        if detect_arch_linux; then
+            echo -e "${YELLOW}Or on Arch: sudo pacman -S rust${NC}"
+        fi
         return 1
     fi
     
