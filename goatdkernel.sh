@@ -329,15 +329,19 @@ check_and_install_arch_deps() {
         "graphviz"
         "python-sphinx"
         "texlive-latexextra"
+        "llvm"
+        "clang"
+        "lld"
+        "polly"
     )
     
     # STEP 2: Immediately attempt to install all required packages
     # The --needed flag ensures only missing packages are installed (safe and idempotent)
-    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra${NC}" >&2
+    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly${NC}" >&2
     echo -e "${YELLOW}Installing Arch packages (sudo password required)...${NC}"
     echo ""
     
-    if sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra; then
+    if sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly; then
         echo ""
         echo -e "${GREEN}✓ Packages installed successfully${NC}"
         
