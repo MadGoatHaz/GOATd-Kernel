@@ -333,15 +333,16 @@ check_and_install_arch_deps() {
         "clang"
         "lld"
         "polly"
+        "modprobed-db"
     )
     
     # STEP 2: Immediately attempt to install all required packages
     # The --needed flag ensures only missing packages are installed (safe and idempotent)
-    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly${NC}" >&2
+    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly modprobed-db${NC}" >&2
     echo -e "${YELLOW}Installing Arch packages (sudo password required)...${NC}"
     echo ""
     
-    if sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly; then
+    if sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly modprobed-db; then
         echo ""
         echo -e "${GREEN}✓ Packages installed successfully${NC}"
         
@@ -370,6 +371,24 @@ check_and_install_arch_deps() {
         if command -v cargo &> /dev/null; then
             local cargo_version=$(cargo --version 2>/dev/null || echo "unknown")
             echo -e "${GREEN}✓ cargo is now available in PATH: $cargo_version${NC}"
+        fi
+        
+        # STEP 6: Initialize modprobed-db database if newly installed
+        # This populates the database with currently loaded modules, enabling
+        # automatic module filtering on the first kernel build
+        echo ""
+        echo -e "${BLUE}[MODPROBED-DB]${NC} Initializing modprobed-db database...${NC}"
+        if command -v modprobed-db &> /dev/null; then
+            if modprobed-db store 2>/dev/null; then
+                echo -e "${GREEN}✓ modprobed-db database populated with loaded modules${NC}"
+                echo -e "${BLUE}[MODPROBED-DB]${NC} Database location: $HOME/.config/modprobed.db${NC}"
+                echo -e "${BLUE}[MODPROBED-DB]${NC} Module filtering will be AUTOMATIC on next kernel build${NC}"
+            else
+                echo -e "${YELLOW}[MODPROBED-DB]${NC} Warning: modprobed-db store failed, but package is available${NC}"
+                echo -e "${YELLOW}[MODPROBED-DB]${NC} You can manually populate the database later with: modprobed-db store${NC}"
+            fi
+        else
+            echo -e "${YELLOW}[MODPROBED-DB]${NC} modprobed-db not found in PATH (unexpected)${NC}"
         fi
         
         return 0
