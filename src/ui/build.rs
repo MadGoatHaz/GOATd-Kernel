@@ -242,13 +242,23 @@ pub fn render_build(
         ui.heading("Module & Safety Flags");
         
         ui.horizontal(|ui| {
-            if ui.checkbox(&mut app.ui_state.use_modprobed, "Use modprobed-db (Driver Auto-Discovery)").changed() {
-                let controller_clone = Arc::clone(controller);
-                let modprobed_enabled = app.ui_state.use_modprobed;
-                tokio::spawn(async move {
-                    let controller = controller_clone.read().await;
-                    let _ = controller.handle_modprobed_change(modprobed_enabled);
-                });
+            // Check if modprobed-db is missing
+            let modprobed_missing = app.ui_state.missing_aur_packages.contains(&"modprobed-db".to_string());
+            
+            // Disable checkbox if modprobed-db is not installed
+            if modprobed_missing {
+                // Show disabled checkbox with tooltip
+                let response = ui.add_enabled(false, egui::Checkbox::new(&mut app.ui_state.use_modprobed, "Use modprobed-db (Driver Auto-Discovery)"));
+                response.on_hover_text("modprobed-db is not installed. Install with: yay -S modprobed-db");
+            } else {
+                if ui.checkbox(&mut app.ui_state.use_modprobed, "Use modprobed-db (Driver Auto-Discovery)").changed() {
+                    let controller_clone = Arc::clone(controller);
+                    let modprobed_enabled = app.ui_state.use_modprobed;
+                    tokio::spawn(async move {
+                        let controller = controller_clone.read().await;
+                        let _ = controller.handle_modprobed_change(modprobed_enabled);
+                    });
+                }
             }
         });
         

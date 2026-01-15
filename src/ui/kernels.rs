@@ -7,7 +7,6 @@ use eframe::egui;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::ui::controller::AppController;
-use crate::system::scx::SCXManager;
 use super::app::AppUI;
 
 /// Extract kernel version from formatted kernel string
@@ -286,22 +285,6 @@ pub fn render_kernel_manager(
                     
                     ui.label(diagnostic_msg);
                     ui.separator();
-                    
-                    // Provision button (if not kernel issue)
-                    if scx_readiness != SCXReadiness::KernelMissingSupport {
-                        if ui.button("Provision SCX Environment").clicked() {
-                            tokio::spawn(async move {
-                                match SCXManager::provision_scx_environment() {
-                                    Ok(()) => {
-                                        eprintln!("[UI] [SCX] ✓ SCX environment provisioned successfully");
-                                    }
-                                    Err(e) => {
-                                        eprintln!("[UI] [SCX] ✗ Failed to provision SCX environment: {}", e);
-                                    }
-                                }
-                            });
-                        }
-                    }
                 });
                 
                 ui.separator();
@@ -398,110 +381,128 @@ pub fn render_kernel_manager(
                 ui.separator();
                 
                 // ========== GRANULAR SCX CONTROL ==========
+                // Check if scx-scheds is missing
+                let scx_scheds_missing = app.ui_state.missing_aur_packages.contains(&"scx-scheds".to_string());
+                
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("🎛️ Permanent Scheduler Configuration").strong());
                     ui.separator();
                     
-                    // Scheduler Type Dropdown with description
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("Scheduler Type").strong());
-                        ui.label(egui::RichText::new("Choose the SCX scheduler that best fits your workload").small().italics());
-                        
-                        if app.ui_state.available_scx_schedulers.is_empty() {
-                            ui.monospace("[No SCX schedulers available]");
-                        } else {
-                            let mut selected_sched_idx = app.ui_state.selected_scx_type_idx.unwrap_or(0);
-                            let sched_text = app.ui_state.available_scx_schedulers
-                                .get(selected_sched_idx)
-                                .cloned()
-                                .unwrap_or_else(|| "(Select scheduler)".to_string());
+                    // Show block message if scx-scheds is missing
+                    if scx_scheds_missing {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(200, 150, 100),
+                            "⚠ SCX Scheduler Feature Unavailable"
+                        );
+                        ui.label("The scx-scheds package is not installed on your system.");
+                        ui.label("Advanced SCX scheduler selection is disabled.");
+                        ui.separator();
+                        ui.label(egui::RichText::new("To enable this feature:").strong());
+                        ui.monospace("yay -S scx-scheds");
+                        ui.label("After installation, restart the application.");
+                    } else {
+                        // Scheduler Type Dropdown with description
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Scheduler Type").strong());
+                            ui.label(egui::RichText::new("Choose the SCX scheduler that best fits your workload").small().italics());
                             
-                            egui::ComboBox::from_id_source("scx_scheduler_type_combo")
-                                .selected_text(&sched_text)
-                                .width(340.0)
-                                .show_ui(ui, |ui| {
-                                    for (i, sched) in app.ui_state.available_scx_schedulers.iter().enumerate() {
-                                        if ui.selectable_value(&mut selected_sched_idx, i, sched).changed() {
-                                            app.ui_state.selected_scx_type_idx = Some(selected_sched_idx);
-                                            eprintln!("[UI] [SCX] Selected scheduler: {} (index {})", sched, selected_sched_idx);
-                                            // Trigger metadata update when scheduler changes
-                                            if let Some(mode_idx) = app.ui_state.selected_scx_mode_idx {
-                                                let mode_str = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"]
-                                                    .get(mode_idx)
-                                                    .copied()
-                                                    .unwrap_or("Auto");
-                                                app.ui_state.active_scx_metadata = Some(
-                                                    crate::system::scx::get_scx_metadata(&sched, mode_str)
-                                                );
+                            if app.ui_state.available_scx_schedulers.is_empty() {
+                                ui.monospace("[No SCX schedulers available]");
+                            } else {
+                                let mut selected_sched_idx = app.ui_state.selected_scx_type_idx.unwrap_or(0);
+                                let sched_text = app.ui_state.available_scx_schedulers
+                                    .get(selected_sched_idx)
+                                    .cloned()
+                                    .unwrap_or_else(|| "(Select scheduler)".to_string());
+                                
+                                egui::ComboBox::from_id_source("scx_scheduler_type_combo")
+                                    .selected_text(&sched_text)
+                                    .width(340.0)
+                                    .show_ui(ui, |ui| {
+                                        for (i, sched) in app.ui_state.available_scx_schedulers.iter().enumerate() {
+                                            if ui.selectable_value(&mut selected_sched_idx, i, sched).changed() {
+                                                app.ui_state.selected_scx_type_idx = Some(selected_sched_idx);
+                                                eprintln!("[UI] [SCX] Selected scheduler: {} (index {})", sched, selected_sched_idx);
+                                                // Trigger metadata update when scheduler changes
+                                                if let Some(mode_idx) = app.ui_state.selected_scx_mode_idx {
+                                                    let mode_str = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"]
+                                                        .get(mode_idx)
+                                                        .copied()
+                                                        .unwrap_or("Auto");
+                                                    app.ui_state.active_scx_metadata = Some(
+                                                        crate::system::scx::get_scx_metadata(&sched, mode_str)
+                                                    );
+                                                }
                                             }
                                         }
-                                    }
-                                });
+                                    });
+                            }
+                            });
+                            
+                            ui.separator();
+                            
+                            // Mode Dropdown with description
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Scheduler Mode").strong());
+                                ui.label(egui::RichText::new("Configure optimization profile for your specific workload type").small().italics());
+                                
+                                let modes = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"];
+                                let mode_descriptions = vec![
+                                    "Automatic adaptive scheduling for general use",
+                                    "Optimized for frame delivery and interactive responsiveness",
+                                    "Minimized latency for precision timing and jitter sensitivity",
+                                    "Power-efficient scheduling for battery-powered devices",
+                                    "Throughput-optimized for server and batch workloads",
+                                ];
+                                let mut selected_mode_idx = app.ui_state.selected_scx_mode_idx.unwrap_or(0);
+                                let mode_text = modes.get(selected_mode_idx).copied().unwrap_or("Auto");
+                                
+                                egui::ComboBox::from_id_source("scx_mode_combo")
+                                    .selected_text(mode_text)
+                                    .width(340.0)
+                                    .show_ui(ui, |ui| {
+                                        for (i, mode) in modes.iter().enumerate() {
+                                            let desc = mode_descriptions.get(i).copied().unwrap_or("");
+                                            let display_text = format!("{} - {}", mode, desc);
+                                            if ui.selectable_value(&mut selected_mode_idx, i, display_text).changed() {
+                                                app.ui_state.selected_scx_mode_idx = Some(selected_mode_idx);
+                                                eprintln!("[UI] [SCX] Selected mode: {} (index {})", mode, selected_mode_idx);
+                                                // Trigger metadata update when mode changes
+                                                if let Some(sched_idx) = app.ui_state.selected_scx_type_idx {
+                                                    if let Some(sched) = app.ui_state.available_scx_schedulers.get(sched_idx) {
+                                                        app.ui_state.active_scx_metadata = Some(
+                                                            crate::system::scx::get_scx_metadata(sched, *mode)
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                            });
                         }
                     });
-                    
-                    ui.separator();
-                    
-                    // Mode Dropdown with description
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("Scheduler Mode").strong());
-                        ui.label(egui::RichText::new("Configure optimization profile for your specific workload type").small().italics());
-                        
-                        let modes = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"];
-                        let mode_descriptions = vec![
-                            "Automatic adaptive scheduling for general use",
-                            "Optimized for frame delivery and interactive responsiveness",
-                            "Minimized latency for precision timing and jitter sensitivity",
-                            "Power-efficient scheduling for battery-powered devices",
-                            "Throughput-optimized for server and batch workloads",
-                        ];
-                        let mut selected_mode_idx = app.ui_state.selected_scx_mode_idx.unwrap_or(0);
-                        let mode_text = modes.get(selected_mode_idx).copied().unwrap_or("Auto");
-                        
-                        egui::ComboBox::from_id_source("scx_mode_combo")
-                            .selected_text(mode_text)
-                            .width(340.0)
-                            .show_ui(ui, |ui| {
-                                for (i, mode) in modes.iter().enumerate() {
-                                    let desc = mode_descriptions.get(i).copied().unwrap_or("");
-                                    let display_text = format!("{} - {}", mode, desc);
-                                    if ui.selectable_value(&mut selected_mode_idx, i, display_text).changed() {
-                                        app.ui_state.selected_scx_mode_idx = Some(selected_mode_idx);
-                                        eprintln!("[UI] [SCX] Selected mode: {} (index {})", mode, selected_mode_idx);
-                                        // Trigger metadata update when mode changes
-                                        if let Some(sched_idx) = app.ui_state.selected_scx_type_idx {
-                                            if let Some(sched) = app.ui_state.available_scx_schedulers.get(sched_idx) {
-                                                app.ui_state.active_scx_metadata = Some(
-                                                    crate::system::scx::get_scx_metadata(sched, *mode)
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                    });
-                });
                 
                 ui.separator();
                 
-                // Activate Permanent Change Button with enhanced UI
-                ui.group(|ui| {
-                    ui.label(egui::RichText::new("🚀 Apply Configuration").strong());
-                    ui.label(egui::RichText::new("Activate the selected scheduler and mode permanently via scx_loader").small().italics());
-                    ui.separator();
-                    
-                    let can_activate = !app.ui_state.available_scx_schedulers.is_empty()
-                        && app.ui_state.selected_scx_type_idx.is_some()
-                        && app.ui_state.selected_scx_mode_idx.is_some()
-                        && !app.ui_state.scx_activating;
-                    
-                    let button_text = if app.ui_state.scx_activating {
-                        "⟳ Activating... (Authorization Required)"
-                    } else {
-                        "✓ Activate Permanent Change"
-                    };
-                    
-                    if ui.add_enabled(can_activate, egui::Button::new(button_text).min_size([340.0, 40.0].into())).clicked() {
+                // Activate Permanent Change Button with enhanced UI (only if scx-scheds is available)
+                if !scx_scheds_missing {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("🚀 Apply Configuration").strong());
+                        ui.label(egui::RichText::new("Activate the selected scheduler and mode permanently via scx_loader").small().italics());
+                        ui.separator();
+                        
+                        let can_activate = !app.ui_state.available_scx_schedulers.is_empty()
+                            && app.ui_state.selected_scx_type_idx.is_some()
+                            && app.ui_state.selected_scx_mode_idx.is_some()
+                            && !app.ui_state.scx_activating;
+                        
+                        let button_text = if app.ui_state.scx_activating {
+                            "⟳ Activating... (Authorization Required)"
+                        } else {
+                            "✓ Activate Permanent Change"
+                        };
+                        
+                        if ui.add_enabled(can_activate, egui::Button::new(button_text).min_size([340.0, 40.0].into())).clicked() {
                         if let (Some(sched_idx), Some(mode_idx)) = (app.ui_state.selected_scx_type_idx, app.ui_state.selected_scx_mode_idx) {
                             if let (Some(scheduler), Some(mode_text)) = (
                                 app.ui_state.available_scx_schedulers.get(sched_idx),
@@ -546,13 +547,14 @@ pub fn render_kernel_manager(
                                 });
                             }
                         }
-                    } else if app.ui_state.scx_activating {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(255, 200, 0),
-                            "⟳ Activation in progress... Check system authorization dialog"
-                        );
-                    }
-                });
+                        } else if app.ui_state.scx_activating {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 200, 0),
+                                "⟳ Activation in progress... Check system authorization dialog"
+                            );
+                        }
+                    });
+                }
                 
                 ui.separator();
                 
