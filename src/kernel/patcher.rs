@@ -1365,13 +1365,20 @@ EOF
              BEFORE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
              printf "[PHASE-G2.5] Module count after 'Setting config...': $BEFORE_COUNT\n" >&2
              
-             # STEP 4: Re-apply modprobed filtering
-             printf "[PHASE-G2.5] Re-running: yes \"\" | make LLVM=1 LLVM_IAS=1 LSMOD=$HOME/.config/modprobed.db localmodconfig\n" >&2
-             if yes "" | make LLVM=1 LLVM_IAS=1 LSMOD="$HOME/.config/modprobed.db" localmodconfig > /dev/null 2>&1; then
-                 AFTER_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
-                 printf "[PHASE-G2.5] Module count after re-filtering: $AFTER_COUNT\n" >&2
+             # STEP 4: Re-apply modprobed filtering (only if modprobed.db exists)
+             MODPROBED_DB_PATH="$HOME/.config/modprobed.db"
+             
+             # Check if modprobed.db exists BEFORE attempting to use it
+             if [[ -f "$MODPROBED_DB_PATH" ]]; then
+                 printf "[PHASE-G2.5] Re-running: yes \"\" | make LLVM=1 LLVM_IAS=1 LSMOD=$MODPROBED_DB_PATH localmodconfig\n" >&2
+                 if yes "" | make LLVM=1 LLVM_IAS=1 LSMOD="$MODPROBED_DB_PATH" localmodconfig > /dev/null 2>&1; then
+                     AFTER_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
+                     printf "[PHASE-G2.5] Module count after re-filtering: $AFTER_COUNT\n" >&2
+                 else
+                     printf "[PHASE-G2.5] WARNING: Re-filtering failed, continuing with current config (localmodconfig command error)\n" >&2
+                 fi
              else
-                 printf "[PHASE-G2.5] WARNING: Re-filtering failed, continuing with current config\n" >&2
+                 printf "[PHASE-G2.5] INFO: modprobed.db not found at $MODPROBED_DB_PATH, skipping re-filtering (expected on fresh install)\n" >&2
              fi
              
              # STEP 5: Restore CONFIG_CMDLINE* parameters
