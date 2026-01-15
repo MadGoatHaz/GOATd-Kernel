@@ -1,0 +1,125 @@
+#!/hint/bash
+# GOATd Kernel Build - makepkg Configuration Example
+#
+# This configuration enables intelligent asset caching and compiler caching
+# to significantly speed up kernel rebuilds.
+#
+# Installation:
+#   1. Copy this file to /etc/makepkg.conf (requires root or sudo)
+#   2. Or set environment variables before building:
+#      export SRCDEST="/tmp/kernel-sources"
+#      export CCACHE_DIR="$HOME/.cache/ccache"
+#
+# See plans/ASSET_CACHING_IMPLEMENTATION.md for more details.
+
+# ============================================================================
+# INTELLIGENT ASSET CACHING - SRCDEST
+# ============================================================================
+# SRCDEST specifies where makepkg stores downloaded sources.
+# By setting this to a persistent location, we avoid re-downloading
+# the same kernel sources for every build.
+# 
+# Options:
+#   /tmp/kernel-sources        - Temporary location (survives reboots in Linux)
+#   /var/cache/makepkg/sources - System-wide persistent cache
+#   ~/.cache/kernel-sources    - User-specific persistent cache
+#
+# The variable can also be set via environment:
+#   export SRCDEST="/tmp/kernel-sources"
+#
+# Default behavior: makepkg downloads to current directory (wasteful)
+SRCDEST="/tmp/kernel-sources"
+
+# ============================================================================
+# COMPILER CACHING - CCACHE
+# ============================================================================
+# Enable ccache in BUILDENV to cache compiled object files.
+# This speeds up rebuilds by ~60-70% if source hasn't changed.
+#
+# Implementation note: we prepend /usr/lib/ccache/bin to PATH in executor.rs
+# to ensure ccache wraps gcc/g++/clang before the real compilers.
+#
+# Default: BUILDENV=(distcc color ccache check !sign)
+# GOATd: Enable ccache and disable distcc for kernel builds
+BUILDENV=(color ccache check !sign)
+
+# ============================================================================
+# PARALLEL BUILD JOBS
+# ============================================================================
+# Run N parallel make jobs. Speeds up compilation significantly.
+# Typically set to: number of CPU cores + 1 for best results
+# 
+# This is automatically set in executor.rs using num_cpus::get()
+# but can be overridden here:
+#
+# Example for 16-core system:
+MAKEFLAGS="-j17"
+
+# ============================================================================
+# BUILD OUTPUT OPTIONS
+# ============================================================================
+# Show detailed build output for debugging
+CFLAGS="-march=native -O3 -pipe -fno-plt -fno-caller-saves"
+CXXFLAGS="-march=native -O3 -pipe -fno-plt -fno-caller-saves"
+
+# ============================================================================
+# PACKAGE OUTPUT DIRECTORY
+# ============================================================================
+# Where to store built packages (.pkg.tar.zst files)
+# Default: current directory
+PKGDEST="/var/cache/goatd/linux"
+
+# ============================================================================
+# SOURCE INTEGRITY CHECKING
+# ============================================================================
+# Skip checksums if sources are already available (speeds up --nobuild)
+CHECK_BEFORE_INSTALL=yes
+
+# ============================================================================
+# SIGNING AND VERIFICATION
+# ============================================================================
+# GPG key for package signing (optional for GOATd kernels)
+#GPGKEY="0x0000000000000000"
+
+# ============================================================================
+# OPTIONAL: AGGRESSIVE OPTIMIZATION
+# ============================================================================
+# For maximum performance on kernel builds, consider:
+#
+# 1. Link-Time Optimization (LTO)
+#    This is configured via GOATD_LTO_LEVEL in executor.rs
+#    CFLAGS already includes optimization hints
+#
+# 2. Profile-Guided Optimization (PGO)
+#    Not applicable for kernel compilation
+#
+# 3. Using newer compilers
+#    Ensure gcc/clang versions support needed features:
+#    - LTO requires GCC 5.0+ or Clang 3.8+
+#    - FLU requires GCC 8.0+
+
+# ============================================================================
+# DEBUGGING AND LOGGING
+# ============================================================================
+# Keep build logs for troubleshooting:
+# makepkg -e (keep extracted source for inspection)
+# makepkg -L (view build log)
+#
+# Enable debug symbols in packages:
+DEBUG_CFLAGS="-g"
+DEBUG_CXXFLAGS="-g"
+
+# ============================================================================
+# ENVIRONMENT NOTES
+# ============================================================================
+# The build system also sets these via environment variables in executor.rs:
+#
+# - GOATD_LTO_LEVEL     : LTO level (full, thin, none)
+# - GOATD_USE_MODPROBED_DB : Enable modprobed database
+# - GOATD_USE_KERNEL_WHITELIST : Enable driver whitelist
+# - GOATD_KERNEL_HARDENING : Hardening level
+# - GOATD_SECURE_BOOT   : Secure boot support
+# - CCACHE_DIR          : Compiler cache directory
+# - SRCDEST             : Source files cache directory (also defined here)
+#
+# These take precedence over PKGBUILD defaults.

@@ -1,0 +1,86 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+Copyright (C) 2025 GOATd Kernel Builder Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+COMMERCIAL USAGE LICENSING CLAUSE
+
+Notwithstanding the above GPL-3.0 license, the following additional terms 
+apply to this software:
+
+## Individual Use
+
+GOATd Kernel Builder is provided free of charge for personal, non-commercial 
+use under the terms of the GNU General Public License Version 3.0 (GPL-3.0).
+
+## Corporate & Business Use
+
+Any utilization of the technology, code, methodology, or derived work contained 
+within this software in a corporate, business, commercial, or professional 
+environment is STRICTLY SUBJECT to a per-basis licensing cost.
+
+The licensing cost shall be:
+- Determined through direct negotiation between the developer (madgoat) and 
+  the client organization
+- Based on factors including but not limited to: scope of use, number of users, 
+  deployment environment, and commercial revenue impact
+- Documented in a written Software License Agreement signed by both parties
+
+## Licensing Requirement & Contact
+
+If you intend to use GOATd Kernel Builder, its code, or derived technologies 
+in any commercial, business, or professional setting (including but not limited to):
+- Corporate kernel customization
+- Commercial Linux distributions
+- Enterprise deployment and support services
+- Cloud/SaaS offerings
+- Embedded systems for commercial resale
+- Any use that generates revenue (directly or indirectly)
+
+YOU MUST contact the developer (madgoat) PRIOR to deployment to:
+1. Discuss your intended use case
+2. Negotiate appropriate licensing terms
+3. Obtain written authorization
+
+Unauthorized commercial use is a material breach of this license and may result 
+in legal action.
+
+## Contact Information
+
+For licensing inquiries regarding commercial use:
+- GitHub Issues: Report via the project repository
+- Email: Contact through the project's official channels
+
+## Interpretation
+
+- "Commercial use" includes any use in a business, profit-generating, or 
+  professional context, regardless of whether revenue is directly generated 
+  from this software
+- "Derived work" includes any application, service, or product that incorporates, 
+  builds upon, or uses the technologies, methodologies, or code from this project
+- "Individual" means a natural person using the software for their own personal 
+  benefit, not on behalf of any organization
+
+---
+
+FULL GPL-3.0 LICENSE TEXT
+
+For the complete GPL-3.0 license terms, see: https://www.gnu.org/licenses/gpl-3.0.txt
+
+The GPL-3.0 license applies in full to this software, subject to the Commercial 
+Usage Licensing Clause above.

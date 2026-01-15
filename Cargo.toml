@@ -1,0 +1,62 @@
+[package]
+name = "goatd_kernel"
+version = "0.1.0"
+edition = "2021"
+description = "GOATd Kernel Builder - Pure Rust + egui UI"
+authors = ["GOATd Kernel Team"]
+license = "GPL-2.0+"
+repository = "https://github.com/yourusername/goatd-kernel"
+readme = "README.md"
+
+[[bin]]
+name = "goatd_kernel"
+path = "src/main.rs"
+
+[lib]
+name = "goatd_kernel"
+path = "src/lib.rs"
+
+[dependencies]
+# egui Framework (Immediate Mode GUI) - Primary UI Framework
+egui = "0.27"
+eframe = { version = "0.27", features = ["default"] }
+egui-winit = "0.27"
+egui_glow = "0.27"
+glow = "0.13"
+winit = "0.30"
+
+# Logging abstraction for level-based logging control
+log = "0.4"
+
+# Cross-runtime safe channels for reliable inter-thread communication
+crossbeam-channel = "0.4"
+
+tokio = { version = "1", features = ["full", "test-util"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+alpm = "5.0"
+regex = "1.10"
+anyhow = "1.0"
+thiserror = "1.0"
+lazy_static = "1.4"
+once_cell = "1.19"
+tempfile = "3"
+git2 = { version = "0.19", features = ["vendored-libgit2", "https"] }
+rfd = "0.15"
+num_cpus = "1.16"
+reqwest = { version = "0.11", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = "0.33"
+futures = "0.3"
+flate2 = "1.0"
+rtrb = "0.3"
+hdrhistogram = "7.5"
+nix = { version = "0.29", features = ["mman", "sched"] }
+libc = "0.2"
+dirs = "5.0"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.4"
+mockito = "1.2"
