@@ -384,14 +384,17 @@ impl SCXManager {
         readiness
     }
 
-    /// Find the SCX systemd service file on the system
+    /// Find the SCX systemd service file on the system (no caching)
     ///
     /// Checks for both modern (`scx_loader.service`) and legacy (`scx.service`) service names
     /// in standard systemd directories. Returns the found service name or None if not found.
     ///
+    /// This function performs a fresh filesystem check every time and does not cache results,
+    /// allowing for detection of newly installed service files after package installation or daemon-reload.
+    ///
     /// # Returns
     /// `Some(service_name)` if found, `None` otherwise
-    fn find_scx_service() -> Option<String> {
+    pub fn find_scx_service() -> Option<String> {
         // Check both system and user-local service directories for both service names
         let service_candidates = [
             ("/usr/lib/systemd/system/scx_loader.service", "scx_loader.service"),
@@ -444,6 +447,11 @@ impl SCXManager {
     ///
     /// All steps execute with privilege escalation for seamless single-prompt UX.
     /// If scx-scheds is missing, user receives clear AUR installation instructions.
+    ///
+    /// # Special Handling for Service Registry Lag
+    /// If the service file is not found after package installation, instead of failing hard,
+    /// the function returns a "User Action Required" error that guides the user to reload
+    /// systemd units (via daemon-reload) or restart the application.
     ///
     /// # Returns
     /// * `Ok(())` on successful provisioning
@@ -501,10 +509,14 @@ impl SCXManager {
         let scx_service = match Self::find_scx_service() {
             Some(service) => service,
             None => {
-                let msg = "SCX service not found. The scx-scheds package appears to be installed, \
-                           but the systemd service file is missing. Verify the installation is complete \
-                           (check /usr/lib/systemd/system/ for scx_loader.service or scx.service).".to_string();
-                log_info!("[SCXManager] ERROR: {}", msg);
+                // Service not found but package is installed - likely systemd registry lag
+                // Return a user-actionable message instead of hard error
+                let msg = "[USER_ACTION_REQUIRED] SCX package detected but Service not registered. \
+                           This can happen immediately after package installation due to systemd registry lag. \
+                           Try one of these solutions: (1) Use the 'Reload System Units' button in the Dashboard, \
+                           (2) Run 'systemctl daemon-reload' manually, or (3) Restart the application. \
+                           After reloading, try provisioning again.".to_string();
+                log_info!("[SCXManager] USER_ACTION_REQUIRED: {}", msg);
                 return Err(msg);
             }
         };

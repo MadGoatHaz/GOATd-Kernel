@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::ui::controller::AppController;
 use crate::system::health::{HealthManager, HealthStatus};
+use crate::system::scx::{SCXManager, SCXReadiness};
 
 /// Render the Dashboard tab content
 pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController>>) {
@@ -180,6 +181,91 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
         }
         ui.label("ℹ You will see a system authentication prompt (pkexec).");
         ui.label("ℹ This only fixes official packages and GPG keys. AUR packages must be installed manually.");
+    }
+    
+    ui.separator();
+    
+    // SCX Readiness Status Section
+    ui.heading("SCX Scheduler Status");
+    
+    let scx_readiness = SCXManager::get_scx_readiness();
+    let scx_installed = !SCXManager::is_scx_installed().is_empty();
+    
+    let (scx_color, scx_status_text) = match scx_readiness {
+        SCXReadiness::Ready => (
+            egui::Color32::from_rgb(100, 200, 100),
+            "✓ Ready"
+        ),
+        SCXReadiness::KernelMissingSupport => (
+            egui::Color32::from_rgb(200, 100, 100),
+            "✗ Kernel Missing CONFIG_SCHED_CLASS_EXT"
+        ),
+        SCXReadiness::PackagesMissing => (
+            egui::Color32::from_rgb(200, 150, 100),
+            "⚠ Packages Not Installed"
+        ),
+        SCXReadiness::ServiceMissing => (
+            egui::Color32::from_rgb(200, 150, 100),
+            "⚠ Service Not Registered"
+        ),
+    };
+    
+    ui.horizontal(|ui| {
+        ui.label("Status:");
+        ui.colored_label(scx_color, scx_status_text);
+    });
+    
+    // Show specific guidance based on readiness state
+    match scx_readiness {
+        SCXReadiness::Ready => {
+            ui.label("✓ SCX environment is fully configured and ready to use.");
+        }
+        SCXReadiness::KernelMissingSupport => {
+            ui.colored_label(
+                egui::Color32::from_rgb(200, 100, 100),
+                "Your kernel does not support CONFIG_SCHED_CLASS_EXT. \
+                 A custom kernel build with SCX support is required."
+            );
+        }
+        SCXReadiness::PackagesMissing => {
+            ui.colored_label(
+                egui::Color32::from_rgb(200, 150, 100),
+                "SCX scheduler packages are not installed. \
+                 Install from AUR: yay -S scx-scheds"
+            );
+        }
+        SCXReadiness::ServiceMissing => {
+            ui.colored_label(
+                egui::Color32::from_rgb(200, 150, 100),
+                "SCX package detected but Service not registered. \
+                 This can happen after fresh package installation due to systemd registry lag."
+            );
+            
+            // Only show the reload button if package is installed but service is missing
+            if scx_installed {
+                ui.separator();
+                if ui.button("🔄 Reload System Units (systemctl daemon-reload)").clicked() {
+                    let controller_clone = Arc::clone(controller);
+                    tokio::spawn(async move {
+                        eprintln!("[DASHBOARD] [SCX] Starting systemd daemon-reload...");
+                        let controller_guard = controller_clone.read().await;
+                        
+                        // Execute pkexec systemctl daemon-reload
+                        match controller_guard.system.batch_privileged_commands(vec!["systemctl daemon-reload"]) {
+                            Ok(()) => {
+                                eprintln!("[DASHBOARD] [SCX] ✓ Systemd units reloaded successfully");
+                                eprintln!("[DASHBOARD] [SCX] SCX service should now be visible. Try provisioning again.");
+                            }
+                            Err(e) => {
+                                eprintln!("[DASHBOARD] [SCX] ✗ Failed to reload systemd units: {}", e);
+                            }
+                        }
+                    });
+                }
+                ui.label("ℹ Reloads systemd unit files and refreshes service registry.");
+                ui.label("ℹ After reloading, you may need to retry provisioning SCX environment.");
+            }
+        }
     }
     
     ui.separator();
