@@ -306,15 +306,25 @@ check_and_install_arch_deps() {
     
     echo -e "${YELLOW}Detected Arch-based system (pacman found). Installing required packages...${NC}"
     
-    local required_packages=("rust" "base-devel" "git")
+    local required_packages=(
+        "rust"
+        "base-devel"
+        "git"
+        "bc"
+        "rust-bindgen"
+        "rust-src"
+        "graphviz"
+        "python-sphinx"
+        "texlive-latexextra"
+    )
     
     # STEP 2: Immediately attempt to install all required packages
     # The --needed flag ensures only missing packages are installed (safe and idempotent)
-    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git${NC}" >&2
+    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra${NC}" >&2
     echo -e "${YELLOW}Installing Arch packages (sudo password required)...${NC}"
     echo ""
     
-    if sudo pacman -S --needed --noconfirm rust base-devel git; then
+    if sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra; then
         echo ""
         echo -e "${GREEN}✓ Packages installed successfully${NC}"
         
