@@ -1,7 +1,7 @@
 /// Kernel Manager View
 ///
 /// Manages installed kernels, built artifacts, installations, uninstalls,
-/// and Sched_ext (SCX) configuration.
+/// and SCX Scheduler (sched-ext) configuration.
 
 use eframe::egui;
 use std::sync::Arc;
@@ -321,9 +321,9 @@ pub fn render_kernel_manager(
                 }
             }
             
-            // Sched_ext Section
+            // SCX Scheduler Section
             ui.group(|ui| {
-                ui.heading("⚙️ Sched_ext (SCX) Configuration");
+                ui.heading("⚙️ SCX Scheduler (sched-ext) Configuration");
                 ui.separator();
                 
                 // Initialize available SCX schedulers on first render
@@ -381,24 +381,28 @@ pub fn render_kernel_manager(
                 ui.separator();
                 
                 // ========== GRANULAR SCX CONTROL ==========
-                // Check if scx-tools is missing
+                // Check if BOTH scx-tools and scx-scheds are available
                 let scx_tools_missing = app.ui_state.missing_optional_tools.contains(&"scx-tools".to_string());
+                let scx_scheds_missing = app.ui_state.missing_optional_tools.contains(&"scx-scheds".to_string());
+                let scx_packages_missing = scx_tools_missing || scx_scheds_missing;
                 
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("🎛️ Permanent Scheduler Configuration").strong());
                     ui.separator();
                     
-                    // Show block message if scx-tools is missing
-                    if scx_tools_missing {
+                    // Show block message if scx-tools or scx-scheds is missing
+                    if scx_packages_missing {
                         ui.colored_label(
                             egui::Color32::from_rgb(200, 150, 100),
                             "⚠ SCX Scheduler Feature Unavailable"
                         );
-                        ui.label("The scx-tools package is not installed on your system.");
+                        ui.label("Required SCX packages are not installed on your system:");
+                        ui.label(format!("  • scx-tools: {}", if scx_tools_missing { "missing" } else { "installed" }));
+                        ui.label(format!("  • scx-scheds: {}", if scx_scheds_missing { "missing" } else { "installed" }));
                         ui.label("Advanced SCX scheduler selection is disabled.");
                         ui.separator();
                         ui.label(egui::RichText::new("To enable this feature:").strong());
-                        ui.label("Use the 'Fix System Environment' button on the Dashboard tab to auto-install scx-tools.");
+                        ui.label("Use the 'Fix System Environment' button on the Dashboard tab to auto-install both packages.");
                         ui.label("After installation, restart the application.");
                     } else {
                         // Scheduler Type Dropdown with description
@@ -484,8 +488,8 @@ pub fn render_kernel_manager(
                 
                 ui.separator();
                 
-                // Activate Permanent Change Button with enhanced UI (only if scx-tools is available)
-                if !scx_tools_missing {
+                // Activate Permanent Change Button with enhanced UI (only if both packages are available)
+                if !scx_packages_missing {
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("🚀 Apply Configuration").strong());
                         ui.label(egui::RichText::new("Activate the selected scheduler and mode permanently via scx_loader").small().italics());

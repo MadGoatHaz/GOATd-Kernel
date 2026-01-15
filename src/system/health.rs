@@ -114,6 +114,7 @@ impl HealthManager {
         let optional_tools = vec![
             "modprobed-db",
             "scx-tools",
+            "scx-scheds",
         ];
 
         let aur_pkgs = Self::aur_packages();
