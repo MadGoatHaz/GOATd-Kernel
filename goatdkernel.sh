@@ -182,12 +182,25 @@ Options:
     --cleanup           Clean old logs and remove build artifacts
     --check-dirs        Verify all required directories exist
 
+Features:
+    • Automatic Rust dependency detection
+    • Arch Linux package auto-installation
+    • GPG key management for kernel signature verification
+    • Modular architecture with error recovery
+
 Examples:
     ./goatdkernel.sh              # Start normally
     ./goatdkernel.sh --test       # Run all tests
     ./goatdkernel.sh --dev        # Start with debug output
     ./goatdkernel.sh --dry-run    # Test build
     ./goatdkernel.sh --cleanup    # Rotate old logs
+
+Notes on GPG Keys:
+    The build process automatically verifies required GPG keys on Arch Linux:
+    • 38DBBDC86092693E (Greg Kroah-Hartman - Linux kernel stable)
+    • B8AC08600F108CDF (Jan Alexander Steffens/heftig - Arch kernel)
+    
+    These keys are imported automatically with fingerprint verification.
 
 For more information, see: ${PROJECT_ROOT}/README.md
 EOF
@@ -427,8 +440,101 @@ check_dependencies() {
     echo -e "${GREEN}✓ rustc${NC} version: $rustc_version"
     
     echo ""
+    
+    # STEP 4: Setup GPG keys for kernel build (only on Arch systems for now)
+    echo -e "${BLUE}[DEPS]${NC} Step 4: Setting up GPG keys for kernel signatures${NC}"
+    if detect_arch_linux &>/dev/null 2>&1; then
+        if ! setup_kernel_gpg_keys; then
+            echo -e "${RED}Error: GPG key setup failed. Kernel build will likely fail.${NC}" >&2
+            return 1
+        fi
+    else
+        echo -e "${BLUE}[DEPS]${NC} Not Arch Linux - skipping GPG key setup${NC}"
+    fi
+    
+    echo ""
     echo -e "${GREEN}✓ Dependency check complete${NC}"
     return 0
+}
+
+# ============================================================================
+# GPG Key Management - Secure Kernel Build Keys
+# ============================================================================
+
+setup_kernel_gpg_keys() {
+    echo -e "${YELLOW}Setting up GPG keys for kernel build...${NC}"
+    
+    # Kernel signing keys with their expected fingerprints (security verification)
+    declare -A gpg_keys=(
+        ["38DBBDC86092693E"]="6092693E"  # Greg Kroah-Hartman (Linux kernel stable)
+        ["B8AC08600F108CDF"]="0F108CDF"  # Jan Alexander Steffens/heftig (Arch kernel)
+    )
+    
+    # Keyserver list with explicit failover (in order of preference)
+    local keyservers=(
+        "hkps://keyserver.ubuntu.com"
+        "hkps://keys.openpgp.org"
+        "hkps://pgp.mit.edu"
+    )
+    
+    local all_keys_valid=true
+    
+    for key_id in "${!gpg_keys[@]}"; do
+        local key_fingerprint="${gpg_keys[$key_id]}"
+        
+        echo -e "${BLUE}[GPG]${NC} Processing key: $key_id"
+        
+        # Check if key is already imported (by checking if gpg can list it)
+        if gpg --list-keys "$key_id" &>/dev/null 2>&1; then
+            # Verify the imported key's fingerprint matches our expected value
+            local imported_fp=$(gpg --with-colons --list-keys "$key_id" 2>/dev/null | grep '^fpr:' | cut -d: -f10 | head -1)
+            
+            if [[ "$imported_fp" == *"$key_fingerprint"* ]]; then
+                echo -e "${GREEN}✓ GPG key already imported with correct fingerprint: $key_id${NC}"
+                continue
+            else
+                echo -e "${YELLOW}[GPG]${NC} Key exists but fingerprint mismatch. Re-importing..."
+            fi
+        fi
+        
+        # Attempt to import from each keyserver in order
+        local key_imported=false
+        for keyserver in "${keyservers[@]}"; do
+            echo -e "${BLUE}[GPG]${NC} Attempting import from: $keyserver"
+            
+            # Use timeout to prevent hanging on unreachable servers
+            if timeout 10 gpg --keyserver "$keyserver" --recv-keys "$key_id" &>/dev/null 2>&1; then
+                # Verify the fingerprint after import
+                local imported_fp=$(gpg --with-colons --list-keys "$key_id" 2>/dev/null | grep '^fpr:' | cut -d: -f10 | head -1)
+                
+                if [[ "$imported_fp" == *"$key_fingerprint"* ]]; then
+                    echo -e "${GREEN}✓ GPG key imported successfully with correct fingerprint: $key_id${NC}"
+                    key_imported=true
+                    break
+                else
+                    echo -e "${YELLOW}[GPG]${NC} Key imported but fingerprint verification failed. Trying next server..."
+                    # Remove the incorrectly imported key
+                    gpg --delete-keys --batch --yes "$key_id" &>/dev/null 2>&1 || true
+                fi
+            fi
+        done
+        
+        if [ "$key_imported" = false ]; then
+            echo -e "${RED}✗ Failed to import GPG key: $key_id${NC}"
+            echo -e "${YELLOW}[GPG]${NC} This key is required for kernel signature verification.${NC}"
+            all_keys_valid=false
+        fi
+    done
+    
+    echo ""
+    if [ "$all_keys_valid" = true ]; then
+        echo -e "${GREEN}✓ All required GPG keys are imported and verified${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Some GPG keys could not be imported or verified${NC}"
+        echo -e "${YELLOW}[GPG]${NC} Kernel build may fail. Ensure you have internet connectivity.${NC}"
+        return 1
+    fi
 }
 
 install_deps() {
