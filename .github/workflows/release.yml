@@ -1,0 +1,79 @@
+name: Create Binary Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    name: Build and Release Binary
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release --locked
+        env:
+          CARGO_TERM_VERBOSE: true
+
+      - name: Create tarball for binary
+        run: |
+          VERSION="${{ github.ref }}" 
+          VERSION="${VERSION#refs/tags/v}"
+          mkdir -p goatdkernel-${VERSION}-x86_64
+          cp target/release/goatd_kernel goatdkernel-${VERSION}-x86_64/
+          cp README.md goatdkernel-${VERSION}-x86_64/
+          cp LICENSE goatdkernel-${VERSION}-x86_64/
+          tar -czf goatdkernel-${VERSION}-x86_64.tar.gz goatdkernel-${VERSION}-x86_64/
+          
+          # Also create a checksum file
+          sha256sum goatdkernel-${VERSION}-x86_64.tar.gz > goatdkernel-${VERSION}-x86_64.tar.gz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            goatdkernel-*-x86_64.tar.gz
+            goatdkernel-*-x86_64.tar.gz.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print release info
+        run: |
+          VERSION="${{ github.ref }}"
+          VERSION="${VERSION#refs/tags/v}"
+          echo "Released binary: goatdkernel-${VERSION}-x86_64.tar.gz"
+          echo "SHA256:"
+          cat goatdkernel-${VERSION}-x86_64.tar.gz.sha256
