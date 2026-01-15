@@ -42,7 +42,51 @@ ssh aur.archlinux.org
 # Should show: Welcome to the Arch Linux User Repository
 ```
 
-## Workflow: Releasing a New Version
+### 4. Clone AUR Repositories
+```bash
+# Clone both AUR packages locally
+mkdir -p ~/aur
+git clone ssh://aur@aur.archlinux.org/goatdkernel.git ~/aur/goatdkernel
+git clone ssh://aur@aur.archlinux.org/goatdkernel-bin.git ~/aur/goatdkernel-bin
+```
+
+## Workflow: One-Command Release & AUR Push
+
+The repository includes an automated release script (`scripts/release.sh`) that handles the entire release workflow with a single command.
+
+### Quick Start: One-Command Release
+
+```bash
+# From the GOATd-Kernel repository root
+./scripts/release.sh 0.2.0
+```
+
+That's it! The script will:
+
+1. **Update version** in `Cargo.toml`
+2. **Create Git tag** (`v0.2.0`)
+3. **Push tag to GitHub** (triggers GitHub Actions binary build)
+4. **Wait for binary release** (monitors GitHub Actions)
+5. **Update both AUR packages** (`goatdkernel` and `goatdkernel-bin`)
+6. **Generate `.SRCINFO`** for both packages
+7. **Push to AUR** automatically
+
+### Manual Verification
+
+While the script handles everything, you can manually verify:
+
+```bash
+# Monitor GitHub Actions
+open https://github.com/MadGoatHaz/GOATd-Kernel/actions
+
+# Check AUR package pages
+open https://aur.archlinux.org/packages/goatdkernel
+open https://aur.archlinux.org/packages/goatdkernel-bin
+```
+
+## Legacy Workflow: Manual Step-by-Step (Reference)
+
+For reference, here's the manual process that the script automates:
 
 ### Step 1: Tag the Release in GitHub
 
@@ -122,52 +166,82 @@ git commit -m "Update to version 0.2.0"
 git push
 ```
 
-## Quick Reference: Full Update Script
+## Script Reference: `scripts/release.sh`
 
-Here's a bash script to automate the AUR update process:
+The automated release script provides the following features:
 
+### Prerequisites
+- AUR repositories cloned locally (default: `~/aur/goatdkernel` and `~/aur/goatdkernel-bin`)
+- SSH access to AUR configured
+- Clean Git working directory
+
+### Usage
 ```bash
-#!/bin/bash
-set -euo pipefail
-
-VERSION="${1:?Usage: $0 <version>}"
-REPO_DIR="${2:-.}"
-
-# 1. Get the SHA256
-echo "Fetching SHA256 from GitHub Release..."
-SHA256=$(curl -s "https://github.com/MadGoatHaz/GOATd-Kernel/releases/download/v${VERSION}/goatdkernel-${VERSION}-x86_64.tar.gz.sha256" | awk '{print $1}')
-echo "SHA256: $SHA256"
-
-# 2. Update source package
-echo "Updating source package..."
-cd ~/aur/goatdkernel
-cp "${REPO_DIR}/pkgbuilds/source/PKGBUILD" ./
-sed -i "s/pkgver=.*/pkgver=${VERSION}/" PKGBUILD
-makepkg --printsrcinfo > .SRCINFO
-git add PKGBUILD .SRCINFO
-git commit -m "Update to version ${VERSION}"
-git push
-echo "✓ Source package updated"
-
-# 3. Update binary package
-echo "Updating binary package..."
-cd ~/aur/goatdkernel-bin
-cp "${REPO_DIR}/pkgbuilds/binary/PKGBUILD" ./
-sed -i "s/pkgver=.*/pkgver=${VERSION}/" PKGBUILD
-sed -i "s/'SKIP' 'SKIP'/'${SHA256}' 'SKIP'/" PKGBUILD
-makepkg --printsrcinfo > .SRCINFO
-git add PKGBUILD .SRCINFO
-git commit -m "Update to version ${VERSION}"
-git push
-echo "✓ Binary package updated"
-
-echo "✓ All AUR packages updated to ${VERSION}"
+./scripts/release.sh <version>
+# Example: ./scripts/release.sh 0.2.0
 ```
 
-Save as `update-aur.sh` and run:
+### Configuration
+The script respects the `AUR_BASE_DIR` environment variable:
 ```bash
-bash update-aur.sh 0.2.0 /path/to/GOATd-Kernel
+# Use custom AUR directory
+AUR_BASE_DIR=/custom/path ./scripts/release.sh 0.2.0
 ```
+
+### What It Does
+
+1. **Validates input**: Checks version format (X.Y.Z)
+2. **Pre-flight checks**: Ensures clean repo, AUR clones exist, required tools available
+3. **Version bump**: Updates `Cargo.toml` and creates version commit
+4. **Git tagging**: Creates annotated tag and pushes to GitHub
+5. **GitHub Actions wait**: Polls GitHub API for binary release completion
+6. **SHA256 fetch**: Automatically retrieves SHA256 from GitHub Release
+7. **AUR sync**: Updates both PKGBUILD files with new version and SHA256
+8. **SRCINFO generation**: Runs `makepkg --printsrcinfo` for both packages
+9. **AUR push**: Commits and pushes both packages to AUR
+
+### Error Handling
+
+The script includes robust error handling:
+- Exits on missing requirements
+- Validates version format before proceeding
+- Checks for uncommitted changes
+- Verifies AUR repositories exist
+- Handles git branch name variations (main/master)
+- Gracefully handles timeout for GitHub release build
+
+### Troubleshooting Script Issues
+
+**"Missing required commands"**
+```bash
+# Ensure you have: git, sed, curl, makepkg
+sudo pacman -S base-devel
+```
+
+**"AUR repositories not properly set up"**
+```bash
+# Clone the repositories
+mkdir -p ~/aur
+git clone ssh://aur@aur.archlinux.org/goatdkernel.git ~/aur/goatdkernel
+git clone ssh://aur@aur.archlinux.org/goatdkernel-bin.git ~/aur/goatdkernel-bin
+
+# Or set custom directory
+export AUR_BASE_DIR=/your/custom/path
+./scripts/release.sh 0.2.0
+```
+
+**"Working directory has uncommitted changes"**
+```bash
+# Commit or stash your changes
+git commit -am "Your message"
+# or
+git stash
+```
+
+**"SSH Connection Issues"**
+- Verify SSH key is added to AUR account
+- Check `.ssh/config` has correct settings for aur.archlinux.org
+- Test with: `ssh -vv aur.archlinux.org`
 
 ## Troubleshooting
 
@@ -213,7 +287,7 @@ When you push a tag (e.g., `v0.2.0`), GitHub Actions automatically:
 3. **Computes SHA256** and saves to `.sha256` file
 4. **Creates GitHub Release** with both files attached
 
-You only need to copy the SHA256 and update the binary PKGBUILD. No manual compilation needed!
+You only need to run the release script, which handles the rest!
 
 ## Resources
 
@@ -221,3 +295,4 @@ You only need to copy the SHA256 and update the binary PKGBUILD. No manual compi
 - **PKGBUILD Format**: https://wiki.archlinux.org/title/PKGBUILD
 - **AUR Submission Guidelines**: https://wiki.archlinux.org/title/AUR_submission_guidelines
 - **GitHub Releases API**: https://docs.github.com/en/rest/releases
+- **makepkg Documentation**: https://wiki.archlinux.org/title/Makepkg
