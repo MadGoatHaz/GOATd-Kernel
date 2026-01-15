@@ -1365,11 +1365,19 @@ EOF
              BEFORE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
              printf "[PHASE-G2.5] Module count after 'Setting config...': $BEFORE_COUNT\n" >&2
              
-             # STEP 4: Re-apply modprobed filtering (only if modprobed.db exists)
-             MODPROBED_DB_PATH="$HOME/.config/modprobed.db"
+             # STEP 4: Re-apply modprobed filtering with robust path detection
+             # Find modprobed.db using multiple fallback strategies
+             MODPROBED_DB_PATH=""
+             for candidate in "$HOME/.config/modprobed.db" /root/.config/modprobed.db /home/*/.config/modprobed.db; do
+                 if [[ -f "$candidate" ]]; then
+                     MODPROBED_DB_PATH="$candidate"
+                     printf "[PHASE-G2.5] [PATH-DETECTION] Found modprobed.db at: $MODPROBED_DB_PATH\n" >&2
+                     break
+                 fi
+             done
              
              # Check if modprobed.db exists BEFORE attempting to use it
-             if [[ -f "$MODPROBED_DB_PATH" ]]; then
+             if [[ -n "$MODPROBED_DB_PATH" && -f "$MODPROBED_DB_PATH" ]]; then
                  printf "[PHASE-G2.5] Re-running: yes \"\" | make LLVM=1 LLVM_IAS=1 LSMOD=$MODPROBED_DB_PATH localmodconfig\n" >&2
                  if yes "" | make LLVM=1 LLVM_IAS=1 LSMOD="$MODPROBED_DB_PATH" localmodconfig > /dev/null 2>&1; then
                      AFTER_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
@@ -1494,12 +1502,18 @@ EOF
     MODPROBED_DB_PATH=""
     
     # Try common locations - search in order of likelihood
+    # Priority: $HOME first (normal context), /root (root context), then /home/* (actual users)
     for candidate in "$HOME/.config/modprobed.db" /root/.config/modprobed.db /home/*/.config/modprobed.db; do
         if [[ -f "$candidate" ]]; then
             MODPROBED_DB_PATH="$candidate"
+            printf "[PHASE-G2] [PATH-DETECTION] Found modprobed.db at: $MODPROBED_DB_PATH\n" >&2
             break
         fi
     done
+    
+    # Diagnostic logging for path resolution
+    printf "[PHASE-G2] [PATH-DETECTION] HOME env var: \$HOME\n" >&2
+    printf "[PHASE-G2] [PATH-DETECTION] Checked locations: \$HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db\n" >&2
     
     if [[ -n "$MODPROBED_DB_PATH" && -f "$MODPROBED_DB_PATH" ]]; then
         printf "[PHASE-G2] POST-MODPROBED: Starting hard enforcer to protect filtered modules\n" >&2
@@ -1691,8 +1705,23 @@ EOF
     # modprobed-db file ($HOME/.config/modprobed.db) and automatically
     # deselects all CONFIG_*=m module options that aren't in the database.
     
-    if [[ -f "$HOME/.config/modprobed.db" ]]; then
-        printf "[MODPROBED] Found modprobed-db at $HOME/.config/modprobed.db\n" >&2
+    # ROBUST PATH DETECTION: Use multiple fallback strategies to find modprobed.db
+    # This handles cases where $HOME might be /root but modprobed.db is at /home/user/.config/
+    MODPROBED_DB_PATH=""
+    for candidate in "$HOME/.config/modprobed.db" /root/.config/modprobed.db /home/*/.config/modprobed.db; do
+        if [[ -f "$candidate" ]]; then
+            MODPROBED_DB_PATH="$candidate"
+            break
+        fi
+    done
+    
+    # DIAGNOSTIC LOGGING: Log what paths were checked and what was found
+    printf "[MODPROBED] [PATH-DETECTION] HOME env var: \$HOME\n" >&2
+    printf "[MODPROBED] [PATH-DETECTION] Resolved modprobed.db path: $MODPROBED_DB_PATH\n" >&2
+    printf "[MODPROBED] [PATH-DETECTION] Checked: \$HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db\n" >&2
+    
+    if [[ -n "$MODPROBED_DB_PATH" && -f "$MODPROBED_DB_PATH" ]]; then
+        printf "[MODPROBED] Found modprobed-db at $MODPROBED_DB_PATH\n" >&2
         printf "[MODPROBED] Running localmodconfig to filter kernel modules...\n" >&2
         printf "[MODPROBED] This will automatically filter kernel modules to those in use\n" >&2
         printf "[MODPROBED] Using modprobed database: $HOME/.config/modprobed.db\n" >&2
@@ -1761,7 +1790,8 @@ EOF
             printf "[MODPROBED] Continuing with full config\n" >&2
         fi
     else
-        printf "[MODPROBED] INFO: modprobed-db not found at $HOME/.config/modprobed.db\n" >&2
+        printf "[MODPROBED] [PATH-DETECTION] INFO: modprobed-db not found\n" >&2
+        printf "[MODPROBED] [PATH-DETECTION] Checked: \$HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db\n" >&2
         printf "[MODPROBED] INFO: To enable automatic module filtering, populate modprobed-db with:\n" >&2
         printf "[MODPROBED] INFO:   $ modprobed-db store\n" >&2
         printf "[MODPROBED] INFO: (assumes modprobed-db package is installed)\n" >&2
