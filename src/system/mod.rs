@@ -2,6 +2,7 @@
 
 pub mod scx;
 pub mod performance;
+pub mod health;
 
 use std::path::Path;
 use regex::Regex;

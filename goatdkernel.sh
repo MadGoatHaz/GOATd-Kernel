@@ -107,59 +107,25 @@ rotate_logs() {
 # Functions
 # ============================================================================
 
-# Environment Bootstrap - Zero-Touch Startup
+# Environment Bootstrap - Minimal cargo check (GUI handles rest)
 bootstrap_environment() {
-    echo -e "${YELLOW}Verifying build environment...${NC}"
-    
-    local missing_deps=()
-    local warnings=()
-    
-    # Check for Cargo (Rust)
+    # Check for Cargo (Rust) - the only hard requirement
     if ! command -v cargo &> /dev/null; then
-        missing_deps+=("cargo")
-    else
-        local rustc_version=$(rustc --version 2>/dev/null || echo "unknown")
-        echo -e "${GREEN}✓ cargo${NC} (Rust $(echo $rustc_version | awk '{print $2}'))"
-    fi
-    
-    # Check for rustc
-    if ! command -v rustc &> /dev/null; then
-        missing_deps+=("rustc")
-    else
-        echo -e "${GREEN}✓ rustc${NC} (Rust compiler)"
+        echo -e "${RED}Error: cargo (Rust) not found${NC}"
+        echo ""
+        echo "Install Rust from: https://rustup.rs/"
+        echo "Or on Arch: sudo pacman -S rust"
+        echo ""
+        return 1
     fi
     
     # Verify Cargo.toml exists
     if [ ! -f "$PROJECT_ROOT/Cargo.toml" ]; then
-        missing_deps+=("Cargo.toml")
-    else
-        echo -e "${GREEN}✓ Cargo.toml${NC} (at $PROJECT_ROOT/Cargo.toml)"
-    fi
-    
-    # Report missing dependencies
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        echo -e "${RED}Missing critical dependencies:${NC}"
-        for dep in "${missing_deps[@]}"; do
-            echo -e "  ${RED}✗${NC} $dep"
-        done
-        echo ""
-        echo "Install Rust from: https://rustup.rs/"
-        echo "Or on Arch: sudo pacman -S --needed rust base-devel git"
-        echo ""
-        echo "Verify project structure:"
-        echo "  ls -la ${PROJECT_ROOT}/"
+        echo -e "${RED}Error: Cargo.toml not found at $PROJECT_ROOT/Cargo.toml${NC}"
         return 1
     fi
     
-    # Report warnings
-    if [ ${#warnings[@]} -gt 0 ]; then
-        echo -e "${YELLOW}Warnings:${NC}"
-        for warning in "${warnings[@]}"; do
-            echo -e "  ${YELLOW}!${NC} $warning"
-        done
-    fi
-    
-    echo -e "${GREEN}✓ Environment bootstrap complete${NC}"
+    echo -e "${GREEN}✓ Cargo available${NC}"
     return 0
 }
 
@@ -403,84 +369,8 @@ check_and_install_arch_deps() {
     fi
 }
 
-check_dependencies() {
-    echo -e "${YELLOW}Checking Rust toolchain and system dependencies...${NC}"
-    echo ""
-    
-    # STEP 1: Check for Arch Linux packages FIRST (pacman-based installation)
-    echo -e "${BLUE}[DEPS]${NC} Step 1: Checking for Arch-based system (pacman)${NC}"
-    if ! check_and_install_arch_deps; then
-        # Installation failed on Arch system
-        if command -v pacman &> /dev/null; then
-            echo -e "${RED}Error: Required packages could not be installed on Arch Linux. Cannot continue.${NC}" >&2
-            return 1
-        fi
-    fi
-    
-    echo ""
-    
-    # STEP 2: Verify Cargo is available (with explicit path search and logging)
-    echo -e "${BLUE}[DEPS]${NC} Step 2: Checking for cargo in PATH${NC}"
-    echo -e "${BLUE}[DEPS]${NC} Current PATH: $PATH${NC}" >&2
-    
-    if ! command -v cargo &> /dev/null; then
-        echo -e "${RED}Error: cargo not found in PATH${NC}"
-        echo ""
-        echo -e "${YELLOW}Current PATH search:${NC}"
-        echo "  $PATH" | tr ':' '\n' | sed 's/^/    /'
-        echo ""
-        
-        # HARD FAILURE: If pacman is missing AND cargo is missing, fail hard
-        if ! command -v pacman &> /dev/null; then
-            echo -e "${RED}FATAL: Neither pacman (Arch package manager) nor cargo (Rust) found.${NC}"
-            echo -e "${RED}This system cannot automatically install required dependencies.${NC}"
-            echo ""
-            echo -e "${YELLOW}Options:${NC}"
-            echo "  1. Install Rust from: https://rustup.rs/"
-            echo "  2. Or manually install: sudo pacman -S rust base-devel git (on Arch)"
-            echo "  3. Or install: sudo apt-get install cargo rustc build-essential (on Debian/Ubuntu)"
-            echo "  4. Or install: sudo dnf install cargo rustc gcc (on Fedora/RHEL)"
-            echo ""
-            return 1
-        fi
-        
-        # If we reach here, pacman exists but cargo install failed
-        echo -e "${YELLOW}Install Rust from: https://rustup.rs/${NC}"
-        echo -e "${YELLOW}Or on Arch: sudo pacman -S rust${NC}"
-        echo ""
-        echo -e "${YELLOW}If you just installed rust, you may need to:${NC}"
-        echo "  1. Close and re-open your terminal"
-        echo "  2. Or run: source /etc/profile.d/rust.sh (if it exists)"
-        return 1
-    fi
-    
-    # STEP 3: Log cargo verification
-    local cargo_version=$(cargo --version 2>/dev/null || echo "unknown")
-    local rustc_version=$(rustc --version 2>/dev/null || echo "unknown")
-    local cargo_path=$(command -v cargo)
-    
-    echo -e "${BLUE}[DEPS]${NC} Step 3: Verifying Rust installation${NC}"
-    echo -e "${GREEN}✓ cargo${NC} found at: $cargo_path"
-    echo -e "${GREEN}✓ cargo${NC} version: $cargo_version"
-    echo -e "${GREEN}✓ rustc${NC} version: $rustc_version"
-    
-    echo ""
-    
-    # STEP 4: Setup GPG keys for kernel build (only on Arch systems for now)
-    echo -e "${BLUE}[DEPS]${NC} Step 4: Setting up GPG keys for kernel signatures${NC}"
-    if detect_arch_linux &>/dev/null 2>&1; then
-        if ! setup_kernel_gpg_keys; then
-            echo -e "${RED}Error: GPG key setup failed. Kernel build will likely fail.${NC}" >&2
-            return 1
-        fi
-    else
-        echo -e "${BLUE}[DEPS]${NC} Not Arch Linux - skipping GPG key setup${NC}"
-    fi
-    
-    echo ""
-    echo -e "${GREEN}✓ Dependency check complete${NC}"
-    return 0
-}
+# Dependencies are now handled by the GUI health check system
+# This function is kept for reference but is no longer called
 
 # ============================================================================
 # GPG Key Management - Secure Kernel Build Keys
@@ -789,13 +679,13 @@ main() {
             exit $?
             ;;
         --dev)
-            check_dependencies
+            bootstrap_environment || exit 1
             print_banner
             run_dev "${@:2}"
             exit 0
             ;;
         --dry-run)
-            check_dependencies
+            bootstrap_environment || exit 1
             print_banner
             build_rust_binary_dry_run
             exit $?
@@ -809,8 +699,8 @@ main() {
             exit $?
             ;;
         "")
-            # Default: run the app
-            check_dependencies
+            # Default: run the app (GUI handles system health)
+            bootstrap_environment || exit 1
             print_banner
             run_app
             exit 0

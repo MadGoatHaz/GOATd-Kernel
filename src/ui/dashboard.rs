@@ -6,6 +6,7 @@ use eframe::egui;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::ui::controller::AppController;
+use crate::system::health::{HealthManager, HealthStatus};
 
 /// Render the Dashboard tab content
 pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController>>) {
@@ -98,6 +99,88 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
             }
             ui.end_row();
         });
+    
+    ui.separator();
+    
+    // System Health Status Section
+    ui.heading("System Health");
+    
+    let health_report = HealthManager::check_system_health();
+    
+    // Display health status with color coding
+    let status_color = match health_report.status {
+        HealthStatus::Excellent => egui::Color32::from_rgb(100, 200, 100),  // Green
+        HealthStatus::Good => egui::Color32::from_rgb(150, 150, 100),      // Yellow-ish
+        HealthStatus::Incomplete => egui::Color32::from_rgb(200, 150, 100), // Orange
+        HealthStatus::Poor => egui::Color32::from_rgb(200, 100, 100),      // Red
+    };
+    
+    ui.horizontal(|ui| {
+        ui.label("Status:");
+        ui.colored_label(status_color, health_report.status.as_str());
+    });
+    
+    ui.label(&health_report.message);
+    
+    // Show missing OFFICIAL packages if any
+    if !health_report.missing_official_packages.is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 100, 100),
+            format!("Missing official packages: {}", health_report.missing_official_packages.join(", "))
+        );
+    }
+    
+    // Show missing GPG keys if any
+    if !health_report.missing_gpg_keys.is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 150, 100),
+            format!("Missing GPG keys: {}", health_report.missing_gpg_keys.join(", "))
+        );
+    }
+    
+    // Show missing AUR packages if any
+    if !health_report.missing_aur_packages.is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 150, 100),
+            format!("🔧 AUR Packages Missing: {}", health_report.missing_aur_packages.join(", "))
+        );
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 150, 100),
+            "  → Install manually: yay -S ".to_string() + &health_report.missing_aur_packages.join(" ")
+        );
+    }
+    
+    // Show optional tools if missing
+    if !health_report.missing_optional_tools.is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(150, 150, 100),
+            format!("Optional: {}", health_report.missing_optional_tools.join(", "))
+        );
+    }
+    
+    // Fix System Environment button - only if there are official packages or GPG keys to fix
+    if !health_report.missing_official_packages.is_empty() || !health_report.missing_gpg_keys.is_empty() {
+        ui.separator();
+        if ui.button("🔧 Fix System Environment (pkexec)").clicked() {
+            let controller_clone = Arc::clone(controller);
+            let fix_cmd = crate::system::health::HealthManager::generate_fix_command(&health_report);
+            
+            tokio::spawn(async move {
+                eprintln!("[DASHBOARD] [HEALTH] Starting system fix with command: {}", fix_cmd);
+                let controller_guard = controller_clone.read().await;
+                match controller_guard.system.batch_privileged_commands(vec![&fix_cmd]) {
+                    Ok(()) => {
+                        eprintln!("[DASHBOARD] [HEALTH] ✓ System environment fixed successfully");
+                    }
+                    Err(e) => {
+                        eprintln!("[DASHBOARD] [HEALTH] ✗ Failed to fix system environment: {}", e);
+                    }
+                }
+            });
+        }
+        ui.label("ℹ You will see a system authentication prompt (pkexec).");
+        ui.label("ℹ This only fixes official packages and GPG keys. AUR packages must be installed manually.");
+    }
     
     ui.separator();
     
