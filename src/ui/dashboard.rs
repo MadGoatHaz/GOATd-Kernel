@@ -172,6 +172,12 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
                 match controller_guard.system.batch_privileged_commands(vec![&fix_cmd]) {
                     Ok(()) => {
                         eprintln!("[DASHBOARD] [HEALTH] ✓ System environment fixed successfully");
+                        // CRITICAL FIX: Request a repaint after successful fix to refresh health state
+                        // This ensures the UI immediately reflects the updated health status
+                        if let Some(ctx) = controller_guard.get_ui_context() {
+                            ctx.request_repaint();
+                            eprintln!("[DASHBOARD] [HEALTH] ✓ Requested UI repaint to refresh health state");
+                        }
                     }
                     Err(e) => {
                         eprintln!("[DASHBOARD] [HEALTH] ✗ Failed to fix system environment: {}", e);

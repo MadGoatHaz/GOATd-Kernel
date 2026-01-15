@@ -1546,6 +1546,17 @@ impl AppController {
         }
     }
 
+    /// Get the UI context for requesting repaints
+    ///
+    /// Returns the stored egui::Context if available, allowing background tasks
+    /// to request UI updates via ctx.request_repaint()
+    pub fn get_ui_context(&self) -> Option<egui::Context> {
+        self.perf_ui_context
+            .read()
+            .ok()
+            .and_then(|ctx_lock| ctx_lock.clone())
+    }
+
     /// Stop performance monitoring and persist results
     pub fn stop_performance_monitoring(&self) -> Result<(), String> {
         if !self.perf_monitoring_active.load(Ordering::Acquire) {
