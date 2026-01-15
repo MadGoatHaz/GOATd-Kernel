@@ -27,20 +27,100 @@ Welcome to GOATd Kernel Builder—a comprehensive toolkit for building, customiz
 - **Clang 16+** (for kernel compilation)
 - **sudo privileged access** (for kernel build and installation)
 
-### Running GOATd Kernel Builder
+### Installation: Running GOATd Kernel Builder
 
-1. Clone or download the project:
+**Automatic Setup (Arch Linux - Recommended)**:
+
+Simply run:
+```bash
+./goatdkernel.sh
+```
+
+The launcher script will automatically:
+- Detect that you're on Arch Linux (via `pacman`)
+- Install all required system packages (`rust`, `base-devel`, `llvm`, `clang`, etc.)
+- Setup GPG keys for kernel signature verification
+- Initialize `modprobed-db` if installed (auto-discovery of loaded drivers)
+- Build the Rust binary and launch the GUI
+
+**Manual Setup (Other Distributions)**:
+
+1. Ensure Rust is installed:
    ```bash
-   cd /path/to/GOATd Kernel
-   cargo run --release
+   rustc --version
+   cargo --version
+   # If not installed, visit https://rustup.rs/
    ```
 
-2. The **egui** interface will launch in a native window. You'll be prompted for sudo credentials for administrative operations.
+2. Install LLVM/Clang 16+ (manual requirement for non-Arch systems):
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install clang llvm lld
+   
+   # Fedora
+   sudo dnf install clang llvm lld
+   
+   # macOS
+   brew install llvm
+   ```
 
-3. Grant **Polkit authorization** for SCX scheduler management (one-time setup):
+3. Build and launch the application:
+   ```bash
+   cd /path/to/GOATd\ Kernel
+   ./goatdkernel.sh
+   # Or manually: cargo build --release && ./target/release/goatd_kernel
+   ```
+
+4. The **egui** interface will launch in a native window. You'll be prompted for sudo credentials for administrative operations.
+
+5. Grant **Polkit authorization** for SCX scheduler management (one-time setup):
    ```bash
    # Polkit will prompt the first time you attempt SCX operations
    ```
+
+---
+
+### Modprobed-DB Auto-Initialization
+
+**What it does**: On **Arch Linux systems**, the launcher script automatically initializes `modprobed-db` if it's installed.
+
+**Auto-Initialization Process**:
+1. Script detects if `modprobed-db` command is available
+2. If present, runs: `modprobed-db store`
+3. This populates `~/.config/modprobed.db` with all currently loaded kernel modules
+4. Enables automatic hardware-aware module filtering on your next kernel build
+
+**Manual Initialization** (if needed):
+```bash
+modprobed-db store
+```
+
+**Database Location**: `~/.config/modprobed.db`
+
+**Result**: Your next kernel will include ONLY the drivers for hardware you're actively using (~170 instead of 6,000+ modules), reducing build time by 70%.
+
+---
+
+### LLVM Toolchain Requirements
+
+**Why LLVM matters**: GOATd enforces **Clang-based compilation exclusively** for all kernels.
+
+**Why this is important**:
+- **Polly Loop Optimization**: Advanced vectorization via `-mllvm -polly` flags for better CPU cache utilization
+- **LTO (Link-Time Optimization)**: Full whole-program optimization requires LLVM toolchain
+- **Modern ISA Support**: Proper `-march` targeting for AVX-512, other modern CPU features
+- **Consistent Optimization**: No ambiguity from GCC vs. Clang differences
+
+**Automatic Detection & Installation**:
+- On Arch Linux, `./goatdkernel.sh` automatically installs: `llvm`, `clang`, `lld`, `polly`
+- If not on Arch, you **must** install these packages manually before building
+
+**Verification**:
+```bash
+clang --version  # Should be 16.0.0 or later
+llvm-ar --version
+llvm-objcopy --version
+```
 
 ---
 

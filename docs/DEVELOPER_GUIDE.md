@@ -9,12 +9,13 @@ This guide provides architectural overview, code organization, testing standards
 1. [Architecture Overview](#architecture-overview)
 2. [Project Structure](#project-structure)
 3. [Toolchain Requirements](#toolchain-requirements)
-4. [Development Setup](#development-setup)
-5. [Core Concepts](#core-concepts)
-6. [Testing & Quality Assurance](#testing--quality-assurance)
-7. [Building & Deployment](#building--deployment)
-8. [Contributing](#contributing)
-9. [Debugging Tips](#debugging-tips)
+4. [Dependency Management](#dependency-management)
+5. [Development Setup](#development-setup)
+6. [Core Concepts](#core-concepts)
+7. [Testing & Quality Assurance](#testing--quality-assurance)
+8. [Building & Deployment](#building--deployment)
+9. [Contributing](#contributing)
+10. [Debugging Tips](#debugging-tips)
 
 ---
 
@@ -176,6 +177,89 @@ tests/
 - **sysfs**: For thermal and SMI monitoring
 - **MSR-Tools**: For SMI/TSC introspection
 - **stress-ng**: For synthetic workload generation
+
+---
+
+## Dependency Management
+
+### Overview
+
+GOATd implements **automatic out-of-the-box dependency resolution** via the launcher script [`goatdkernel.sh`](goatdkernel.sh) and carefully pinned versions in [`Cargo.toml`](../Cargo.toml) for critical system dependencies.
+
+### Zero-Touch Dependency Installation (Arch Linux)
+
+The `goatdkernel.sh` script handles all system-level dependency detection and installation for Arch-based systems:
+
+**File**: [`goatdkernel.sh`](../goatdkernel.sh) lines 313–404
+
+**Key Functions**:
+
+1. **`detect_arch_linux()`** (lines 292–310)
+   - Detects Arch Linux via `/etc/os-release` or `pacman` existence
+   - Permissive detection supports Arch variants (EndeavourOS, Manjaro, etc.)
+
+2. **`check_and_install_arch_deps()`** (lines 313–404)
+   - **Step 1**: Verifies pacman is available; skips gracefully on non-Arch systems
+   - **Step 2**: Installs all required packages with `sudo pacman -S --needed --noconfirm`
+   - **Step 3**: Refreshes `PATH` for newly installed binaries
+   - **Step 4**: Verifies all packages are installed (re-checks each one)
+   - **Step 5**: Confirms cargo is in PATH with version info
+   - **Step 6**: Special handling for **modprobed-db** (AUR optional dependency):
+     - Attempts to initialize database with `modprobed-db store`
+     - Provides helpful guidance if not installed
+     - Not required but recommended for 70%+ faster builds
+
+3. **`check_dependencies()`** (lines 406–483)
+   - **Step 1**: Calls `check_and_install_arch_deps()` for Arch systems
+   - **Step 2**: Verifies cargo is in PATH (explicit path search with fallback)
+   - **Step 3**: Logs Rust version and cargo path
+   - **Step 4**: Calls `setup_kernel_gpg_keys()` on Arch systems
+
+4. **`setup_kernel_gpg_keys()`** (lines 489–563)
+   - Automatically imports kernel signing keys:
+     - **38DBBDC86092693E**: Greg Kroah-Hartman (Linux kernel stable)
+     - **B8AC08600F108CDF**: Jan Alexander Steffens/heftig (Arch kernel)
+   - Multi-keyserver failover: Ubuntu keyserver → OpenPGP.org → MIT
+   - Fingerprint verification after import to ensure security
+   - Tolerant of already-imported keys (idempotent)
+
+### Critical Dependency Pinning in Cargo.toml
+
+**`rfd = "0.13"` (line 46 in Cargo.toml)**
+
+**What it does**: File/folder dialog selection abstraction used by the GUI for kernel source selection.
+
+**Why pinned to exactly 0.13**:
+- rfd 0.14+ increased dependencies on internal `ashpd` library (for Wayland support)
+- System-installed `ashpd` versions may conflict with bundled versions
+- Pinning 0.13 ensures compatibility with common system `ashpd` installations across distributions
+
+**Risk if unpinned**: Breaking GUI dialog on systems with incompatible `ashpd` versions, particularly on non-Arch distributions where version mismatches are common.
+
+**LLVM Toolchain Pins**:
+- No hard pins on llvm/clang versions in Cargo.toml (system-installed)
+- Enforced at runtime via global `_FORCE_CLANG=1` environment variable in kernel build process
+- Minimum Clang 16.0.0+ verified during `check_dependencies()`
+
+### Automatic GPG Key Verification Flow
+
+```
+./goatdkernel.sh (default)
+  ↓
+check_dependencies()
+  ↓
+detect_arch_linux()
+  ↓
+setup_kernel_gpg_keys()
+  │
+  ├─ For each key (Greg, Arch maintainer):
+  │  ├─ Check if already imported with valid fingerprint
+  │  └─ If missing/invalid, retry with keyserver failover
+  │
+  └─ Log fingerprints for transparency + security verification
+```
+
+**Failover Strategy**: Attempts each keyserver with 10-second timeout (prevents hanging on unreachable servers). If all keyservers fail, warns user but continues (kernel build may still work with pre-cached keys).
 
 ---
 

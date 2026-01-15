@@ -4,6 +4,25 @@
 
 ---
 
+## Quick Start: One-Command Install (Arch Linux)
+
+On **Arch Linux and Arch-based systems**, simply run:
+
+```bash
+./goatdkernel.sh
+```
+
+The script will automatically:
+- ✅ Detect your Arch system and install all required packages via `pacman`
+- ✅ Setup GPG keys for kernel signature verification (Greg Kroah-Hartman, Arch kernel maintainers)
+- ✅ Initialize the LLVM/Clang 16+ toolchain for kernel compilation
+- ✅ Auto-discover and populate `modprobed-db` for hardware-aware module filtering
+- ✅ Build and launch the GOATd Kernel GUI
+
+**Zero additional setup required.**
+
+---
+
 ## Purpose
 
 GOATd Kernel is a comprehensive solution for building, managing, and deploying custom Linux kernels tailored to hardware-specific configurations. It bridges the gap between raw kernel compilation and end-user kernel management by automating the entire lifecycle: from microarchitecture detection and configuration to deployment, verification, and post-install optimization.
@@ -17,6 +36,13 @@ The project uses a unified Rust + egui stack with a modular component architectu
 ---
 
 ## Key Features
+
+### 0. **Out-of-the-Box Reliability: Zero-Touch Automation**
+- **Arch Linux Auto-Install**: Single command `./goatdkernel.sh` triggers automatic detection and installation of all required system packages via `pacman` (Rust, LLVM/Clang, base-devel, etc.)
+- **Automatic GPG Key Verification**: Kernel signature keys (Greg Kroah-Hartman, Arch kernel maintainers) imported and verified automatically with fingerprint validation and multi-keyserver failover
+- **LLVM Toolchain Setup**: Clang 16+ (`llvm`, `clang`, `lld`, `polly`) automatically detected or installed; enforced globally via `_FORCE_CLANG=1`
+- **Modprobed-DB Auto-Initialization**: If present, automatically runs `modprobed-db store` to populate the hardware module database on first launch
+- **Ashpd Compatibility Lock**: Pinned `rfd = "0.13"` in `Cargo.toml` for guaranteed compatibility with system `ashpd` library versions
 
 ### 1. **Pure Rust Core + egui UI**
 - **Full Rust Architecture**
