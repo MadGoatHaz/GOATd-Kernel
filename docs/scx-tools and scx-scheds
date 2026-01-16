@@ -1,0 +1,91 @@
+
+This guide covers the scx-tools and scx-scheds packages on Arch Linux, focusing on developer needs, permanent configuration, and usage.[1][2]
+1. Package Overview & Installation
+Arch Linux officially supports sched_ext (the kernel feature) and these userspace tools since kernel 6.12.[1][2][3]
+scx-scheds: Contains the actual BPF scheduler binaries (e.g., scx_rusty, scx_lavd, scxtop).[1][2]
+scx-tools: Contains management daemons and CLI tools (scx_loader, scxctl).[1][2][3]
+Installation:
+code
+Bash
+sudo pacman -S scx-scheds scx-tools
+For bleeding-edge versions, you can use scx-scheds-git and scx-tools-git from the AUR.[3]
+2. Quick Start (Manual Usage)
+You can load a scheduler manually to test it immediately.[1][2][3] This does not persist after reboot.
+List available schedulers:
+The schedulers are installed in /usr/bin/.[1][2][3] You can list them with:
+code
+Bash
+ls /usr/bin/scx_*
+Start a scheduler:
+code
+Bash
+sudo scx_rusty
+(Press Ctrl+C to stop the scheduler and revert to the default Linux kernel scheduler, EEVDF).[4]
+Verify it's running:
+code
+Bash
+scxctl get
+# OR
+cat /sys/kernel/sched_ext/state
+
+3. Persistent Configuration (The "Right" Way)
+The recommended way to manage schedulers is using the scx_loader daemon, which allows for mode switching (Gaming, PowerSave) and persistence.[1][2][3]
+A. Enable the Service
+Disable the simple service if active, and enable the loader service:
+code
+Bash
+sudo systemctl enable --now scx_loader.service
+[1][2][3]
+B. Configuration File
+The configuration file is located at /etc/scx_loader.toml (or /etc/scx_loader/config.toml).[1][2][3] If it doesn't exist, create it.
+Example /etc/scx_loader.toml for Developers:
+code
+Toml
+# Set the default scheduler to load on boot
+default_sched = "scx_rusty"
+
+# Set the default mode (Auto, Gaming, LowLatency, PowerSave, Server)
+default_mode = "Auto"
+
+# Configure specific flags for schedulers
+[scheds.scx_rusty]
+# Custom flags for "Auto" mode
+auto_mode = []
+# Custom flags for "Gaming" mode
+gaming_mode = ["--performance"]
+
+[scheds.scx_lavd]
+# scx_lavd has its own "autopilot" feature
+auto_mode = ["--autopilot"]
+[1][2][3]
+C. Switching Modes & Schedulers
+You can switch schedulers or modes dynamically without restarting the service using scxctl:
+Switch Scheduler: scxctl switch scx_lavd[2]
+Switch Mode: scxctl switch --mode gaming[2]
+Switch Both: scxctl switch scx_bpfland --mode lowlatency[2]
+4. Developer Guide: Tools & Analysis
+For developers building or tuning schedulers, scx-scheds includes powerful observability tools.[1][2][3]
+A. scxtop (The Top for Schedulers)
+Included in scx-scheds, this is a TUI utility specifically for monitoring sched_ext performance.[1][2][3][5][6]
+code
+Bash
+sudo scxtop
+[2][5]* Views: Press h for help.[1][2][3][5] It shows per-CPU usage, dispatch queue (DSQ) stats, and scheduler-specific metrics.[1][3]
+B. Built-in Statistics
+Most schedulers have a --monitor or --stats flag to dump internal metrics to stdout.[1][2][3]
+code
+Bash
+sudo scx_rusty --monitor 1
+(Prints stats every 1 second)[2]
+C. Choosing a Scheduler for Dev Workloads
+scx_rusty: Recommended General Purpose. Multi-domain, cache-aware.[1][2][3] rigorous stress testing.[1][2][3] Good for compilation jobs (make -j$(nproc)).
+scx_bpfland: Interactive/Desktop. Runs core logic in eBPF (kernel side), minimizing userspace switching overhead.[1][3] Excellent for desktop responsiveness while under load.
+scx_lavd: Gaming/Latency. "Latency-criticality Aware Virtual Deadline".[1][2][3] Prioritizes tasks that need low latency (games, audio) over throughput.
+scx_simple: Educational. A minimal scheduler implementation useful for studying the API.[1][2][3]
+5. Troubleshooting & Tips
+Kernel Logs: If a scheduler fails to load, check the kernel buffer:
+code
+Bash
+sudo dmesg | grep sched_ext
+Reverting: If a scheduler hangs the system (rare, but possible with custom BPF code), the kernel watchdog usually kills it after a timeout (default 30s), reverting to the standard scheduler.[1][2]
+Conflict: Ensure you don't have both scx.service (legacy) and scx_loader.service enabled simultaneously.

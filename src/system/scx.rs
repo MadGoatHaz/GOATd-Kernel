@@ -111,11 +111,28 @@ impl std::fmt::Display for SchedulerMode {
     }
 }
 
+/// Per-scheduler configuration with mode-specific flags
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchedulerConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_mode: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gaming_mode: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lowlatency_mode: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub powersave_mode: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_mode: Option<Vec<String>>,
+}
+
 /// SCX Loader Configuration - TOML serializable format for /etc/scx_loader/config.toml
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScxLoaderConfig {
     pub default_sched: String,
     pub default_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheds: Option<std::collections::HashMap<String, SchedulerConfig>>,
 }
 
 impl ScxLoaderConfig {
@@ -123,7 +140,18 @@ impl ScxLoaderConfig {
         ScxLoaderConfig {
             default_sched: scheduler.to_string(),
             default_mode: mode.to_string(),
+            scheds: None,
         }
+    }
+
+    pub fn with_scheduler_config(mut self, scheduler: &str, config: SchedulerConfig) -> Self {
+        if self.scheds.is_none() {
+            self.scheds = Some(std::collections::HashMap::new());
+        }
+        if let Some(ref mut scheds) = self.scheds {
+            scheds.insert(scheduler.to_string(), config);
+        }
+        self
     }
 
     pub fn to_toml_string(&self) -> Result<String, toml::ser::Error> {
@@ -627,6 +655,7 @@ impl PersistentSCXManager {
     /// Apply granular SCX scheduler configuration via direct scheduler and mode selection
     ///
     /// This method allows UI to directly specify scheduler binary and mode without relying on profiles.
+    /// **CRITICAL**: Includes systemctl enable to ensure persistence across reboots.
     ///
     /// # Arguments
     /// * `scheduler` - Scheduler binary name (e.g., "scx_bpfland", "scx_lavd", "scx_rusty")
@@ -690,15 +719,16 @@ impl PersistentSCXManager {
         // Escape temp path for shell
         let escaped_temp_path = escape_shell_arg(&temp_path);
 
-        // Execute Polkit-elevated command: mkdir, copy, and restart service
+        // Execute Polkit-elevated command: mkdir, copy, enable service, and restart service
+        // CRITICAL: systemctl enable ensures persistence across reboots
         let shell_cmd = format!(
-            "mkdir -p /etc/scx_loader && cp {} /etc/scx_loader/config.toml && systemctl restart scx_loader.service",
+            "mkdir -p /etc/scx_loader && cp {} /etc/scx_loader/config.toml && systemctl daemon-reload && systemctl enable scx_loader.service && systemctl restart scx_loader.service",
             escaped_temp_path
         );
         let pkexec_cmd = format!("pkexec bash -c \"{}\"", shell_cmd);
 
         log_info!(
-            "[PersistentSCXManager] Executing Polkit-elevated TOML deployment via pkexec"
+            "[PersistentSCXManager] Executing Polkit-elevated TOML deployment with persistence enable via pkexec"
         );
 
         match std::process::Command::new("sh")
@@ -709,7 +739,7 @@ impl PersistentSCXManager {
             Ok(output) => {
                 if output.status.success() {
                     log_info!(
-                        "[PersistentSCXManager] ✓ Scheduler activated: {} ({})",
+                        "[PersistentSCXManager] ✓ Scheduler activated and persisted: {} ({})",
                         scheduler,
                         mode
                     );
@@ -792,9 +822,9 @@ pub fn get_scx_metadata(scheduler: &str, mode: &str) -> ScxMetadata {
         },
         "scx_bpfland" => match mode {
             "Auto" => ScxMetadata::new(
-                "scx_bpfland: Advanced BPF-based load balancer with dynamic load distribution".to_string(),
-                "General-purpose workloads, mixed workstation use, adaptive scheduling".to_string(),
-                "-m balance".to_string(),
+                "scx_bpfland: Advanced BPF-based load balancer with dynamic load distribution. Auto-mode detects workload type and adapts scheduling automatically.".to_string(),
+                "General-purpose workloads, mixed workstation use, adaptive scheduling, auto-adjusting performance".to_string(),
+                "".to_string(),
                 RecommendationLevel::Recommended,
             ),
             "Gaming" => ScxMetadata::new(

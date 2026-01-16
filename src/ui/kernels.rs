@@ -388,6 +388,7 @@ pub fn render_kernel_manager(
                 
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("🎛️ Permanent Scheduler Configuration").strong());
+                    ui.label(egui::RichText::new("Configured via scx_loader.service with /etc/scx_loader/config.toml (persists across reboots)").small().italics());
                     ui.separator();
                     
                     // Show block message if scx-tools or scx-scheds is missing
@@ -452,11 +453,11 @@ pub fn render_kernel_manager(
                                 
                                 let modes = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"];
                                 let mode_descriptions = vec![
-                                    "Automatic adaptive scheduling for general use",
-                                    "Optimized for frame delivery and interactive responsiveness",
-                                    "Minimized latency for precision timing and jitter sensitivity",
-                                    "Power-efficient scheduling for battery-powered devices",
-                                    "Throughput-optimized for server and batch workloads",
+                                    "Automatic adaptive scheduling - scheduler detects workload & adjusts in real-time",
+                                    "Optimized for frame delivery and interactive responsiveness - gaming & responsive apps",
+                                    "Minimized latency for precision timing - audio, video, real-time apps",
+                                    "Power-efficient scheduling - laptops, battery-powered devices, low power systems",
+                                    "Throughput-optimized for server and batch workloads - microservices, batch jobs",
                                 ];
                                 let mut selected_mode_idx = app.ui_state.selected_scx_mode_idx.unwrap_or(0);
                                 let mode_text = modes.get(selected_mode_idx).copied().unwrap_or("Auto");
