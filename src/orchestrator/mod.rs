@@ -871,6 +871,7 @@ mod tests {
             scx_available: vec![],
             scx_active_scheduler: None,
             native_optimizations: true,
+            user_toggled_native_optimizations: false,
         };
 
         let (_, cancel_rx) = tokio::sync::watch::channel(false);
@@ -931,6 +932,7 @@ mod tests {
             scx_available: vec![],
             scx_active_scheduler: None,
             native_optimizations: true,
+            user_toggled_native_optimizations: false,
         };
 
         let (_, cancel_rx) = tokio::sync::watch::channel(false);
@@ -993,6 +995,8 @@ mod tests {
             lto_shield_modules: vec![],
             scx_available: vec![],
             scx_active_scheduler: None,
+            native_optimizations: true,
+            user_toggled_native_optimizations: false,
         };
 
         let (_, cancel_rx) = tokio::sync::watch::channel(false);

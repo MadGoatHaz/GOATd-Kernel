@@ -53,6 +53,8 @@ fn create_test_config() -> KernelConfig {
         user_toggled_lto: false,
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     }
 }
 

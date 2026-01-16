@@ -264,6 +264,8 @@ mod tests {
              lto_shield_modules: vec![],
              scx_available: vec![],
              scx_active_scheduler: None,
+             native_optimizations: true,
+             user_toggled_native_optimizations: false,
           };
 
           let state = OrchestrationState::new(hw.clone(), config.clone());
@@ -319,6 +321,8 @@ mod tests {
              lto_shield_modules: vec![],
              scx_available: vec![],
              scx_active_scheduler: None,
+             native_optimizations: true,
+             user_toggled_native_optimizations: false,
          };
 
          let mut state = OrchestrationState::new(hw, config);
@@ -374,6 +378,8 @@ mod tests {
              lto_shield_modules: vec![],
              scx_available: vec![],
              scx_active_scheduler: None,
+             native_optimizations: true,
+             user_toggled_native_optimizations: false,
          };
 
         let mut state = OrchestrationState::new(hw, config);
@@ -428,6 +434,8 @@ mod tests {
             lto_shield_modules: vec![],
             scx_available: vec![],
             scx_active_scheduler: None,
+            native_optimizations: true,
+            user_toggled_native_optimizations: false,
         };
 
         let mut state = OrchestrationState::new(hw, config);

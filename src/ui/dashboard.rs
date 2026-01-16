@@ -7,10 +7,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::ui::controller::AppController;
 use crate::system::health::{HealthManager, HealthStatus};
-use crate::system::scx::{SCXManager, SCXReadiness};
 
 /// Render the Dashboard tab content
-pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController>>) {
+pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController>>, ui_state: &mut super::app::UIState) {
     ui.heading("System Overview");
     
     ui.separator();
@@ -163,115 +162,12 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
     if !health_report.missing_official_packages.is_empty() || !health_report.missing_gpg_keys.is_empty() || !health_report.missing_optional_tools.is_empty() {
         ui.separator();
         if ui.button("🔧 Fix System Environment (pkexec)").clicked() {
-            let controller_clone = Arc::clone(controller);
             let fix_cmd = crate::system::health::HealthManager::generate_fix_command(&health_report);
-            
-            tokio::spawn(async move {
-                eprintln!("[DASHBOARD] [HEALTH] Starting system fix with command: {}", fix_cmd);
-                let controller_guard = controller_clone.read().await;
-                match controller_guard.system.batch_privileged_commands(vec![&fix_cmd]) {
-                    Ok(()) => {
-                        eprintln!("[DASHBOARD] [HEALTH] ✓ System environment fixed successfully");
-                        // CRITICAL FIX: Request a repaint after successful fix to refresh health state
-                        // This ensures the UI immediately reflects the updated health status
-                        if let Some(ctx) = controller_guard.get_ui_context() {
-                            ctx.request_repaint();
-                            eprintln!("[DASHBOARD] [HEALTH] ✓ Requested UI repaint to refresh health state");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[DASHBOARD] [HEALTH] ✗ Failed to fix system environment: {}", e);
-                    }
-                }
-            });
+            ui_state.show_fix_modal = true;
+            ui_state.pending_fix_command = fix_cmd;
         }
         ui.label("ℹ You will see a system authentication prompt (pkexec).");
         ui.label("ℹ This fixes official packages, optional tools, and GPG keys. AUR packages must be installed manually.");
-    }
-    
-    ui.separator();
-    
-    // SCX Readiness Status Section
-    ui.heading("SCX Scheduler Status");
-    
-    let scx_readiness = SCXManager::get_scx_readiness();
-    let scx_installed = !SCXManager::is_scx_installed().is_empty();
-    
-    let (scx_color, scx_status_text) = match scx_readiness {
-        SCXReadiness::Ready => (
-            egui::Color32::from_rgb(100, 200, 100),
-            "✓ Ready"
-        ),
-        SCXReadiness::KernelMissingSupport => (
-            egui::Color32::from_rgb(200, 100, 100),
-            "✗ Kernel Missing CONFIG_SCHED_CLASS_EXT"
-        ),
-        SCXReadiness::PackagesMissing => (
-            egui::Color32::from_rgb(200, 150, 100),
-            "⚠ Packages Not Installed"
-        ),
-        SCXReadiness::ServiceMissing => (
-            egui::Color32::from_rgb(200, 150, 100),
-            "⚠ Service Not Registered"
-        ),
-    };
-    
-    ui.horizontal(|ui| {
-        ui.label("Status:");
-        ui.colored_label(scx_color, scx_status_text);
-    });
-    
-    // Show specific guidance based on readiness state
-    match scx_readiness {
-        SCXReadiness::Ready => {
-            ui.label("✓ SCX environment is fully configured and ready to use.");
-        }
-        SCXReadiness::KernelMissingSupport => {
-            ui.colored_label(
-                egui::Color32::from_rgb(200, 100, 100),
-                "Your kernel does not support CONFIG_SCHED_CLASS_EXT. \
-                 A custom kernel build with SCX support is required."
-            );
-        }
-        SCXReadiness::PackagesMissing => {
-            ui.colored_label(
-                egui::Color32::from_rgb(200, 150, 100),
-                "SCX scheduler packages are not installed. \
-                 Install: sudo pacman -S scx-tools"
-            );
-        }
-        SCXReadiness::ServiceMissing => {
-            ui.colored_label(
-                egui::Color32::from_rgb(200, 150, 100),
-                "SCX package detected but Service not registered. \
-                 This can happen after fresh package installation due to systemd registry lag."
-            );
-            
-            // Only show the reload button if package is installed but service is missing
-            if scx_installed {
-                ui.separator();
-                if ui.button("🔄 Reload System Units (systemctl daemon-reload)").clicked() {
-                    let controller_clone = Arc::clone(controller);
-                    tokio::spawn(async move {
-                        eprintln!("[DASHBOARD] [SCX] Starting systemd daemon-reload...");
-                        let controller_guard = controller_clone.read().await;
-                        
-                        // Execute pkexec systemctl daemon-reload
-                        match controller_guard.system.batch_privileged_commands(vec!["systemctl daemon-reload"]) {
-                            Ok(()) => {
-                                eprintln!("[DASHBOARD] [SCX] ✓ Systemd units reloaded successfully");
-                                eprintln!("[DASHBOARD] [SCX] SCX service should now be visible. Try provisioning again.");
-                            }
-                            Err(e) => {
-                                eprintln!("[DASHBOARD] [SCX] ✗ Failed to reload systemd units: {}", e);
-                            }
-                        }
-                    });
-                }
-                ui.label("ℹ Reloads systemd unit files and refreshes service registry.");
-                ui.label("ℹ After reloading, you may need to retry provisioning SCX environment.");
-            }
-        }
     }
     
     ui.separator();
@@ -457,4 +353,77 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
             }
         });
     });
+    
+    // Modal for confirming system fix
+    if ui_state.show_fix_modal {
+        let mut window_open = true;
+        let pending_cmd = ui_state.pending_fix_command.clone();
+        
+        egui::Window::new("Confirm System Fix")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(500.0)
+            .open(&mut window_open)
+            .show(ui.ctx(), |ui| {
+                ui.heading("System Environment Fix");
+                
+                ui.separator();
+                
+                ui.label("📋 Action Summary");
+                ui.group(|ui| {
+                    ui.label("The following system fix will be applied with elevated privileges (pkexec):");
+                    ui.separator();
+                    ui.monospace(&pending_cmd);
+                    ui.separator();
+                    ui.label("This will:");
+                    ui.label("  • Install missing official packages");
+                    ui.label("  • Import required GPG keys");
+                    ui.label("  • Install optional system tools");
+                });
+                
+                ui.separator();
+                
+                ui.label("🔐 You will be prompted for your system password via pkexec");
+                ui.label("The command will execute with elevated privileges to modify system packages.");
+                
+                ui.separator();
+                
+                ui.horizontal(|ui| {
+                    if ui.button("✓ Confirm & Execute").clicked() {
+                        let controller_clone = Arc::clone(controller);
+                        let fix_cmd = pending_cmd.clone();
+                        
+                        tokio::spawn(async move {
+                            eprintln!("[DASHBOARD] [HEALTH] Starting system fix with command: {}", fix_cmd);
+                            let controller_guard = controller_clone.read().await;
+                            match controller_guard.system.batch_privileged_commands(vec![&fix_cmd]) {
+                                Ok(()) => {
+                                    eprintln!("[DASHBOARD] [HEALTH] ✓ System environment fixed successfully");
+                                    // CRITICAL FIX: Request a repaint after successful fix to refresh health state
+                                    // This ensures the UI immediately reflects the updated health status
+                                    if let Some(ctx) = controller_guard.get_ui_context() {
+                                        ctx.request_repaint();
+                                        eprintln!("[DASHBOARD] [HEALTH] ✓ Requested UI repaint to refresh health state");
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[DASHBOARD] [HEALTH] ✗ Failed to fix system environment: {}", e);
+                                }
+                            }
+                        });
+                    }
+                    
+                    if ui.button("✗ Cancel").clicked() {
+                        // Signal modal to close (will be handled below)
+                        ui_state.show_fix_modal = false;
+                    }
+                });
+            });
+        
+        // Update modal state based on window close button
+        if !window_open {
+            ui_state.show_fix_modal = false;
+            ui_state.pending_fix_command.clear();
+        }
+    }
 }

@@ -206,6 +206,8 @@ package() {
         lto_shield_modules: vec![],
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     println!("[TEST]   ✓ Kernel Config created:");
     println!("[TEST]       • Profile: {}", config.profile);
@@ -1278,6 +1280,8 @@ package() {
         lto_shield_modules: vec![],
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     println!("[TEST-GPU]   ✓ Configuration created (Gaming profile with Thin LTO)");
     
@@ -1503,6 +1507,8 @@ async fn test_failure_phase_1_missing_source() {
         lto_shield_modules: vec![],
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     
     // =========================================================================
@@ -1617,6 +1623,8 @@ async fn test_failure_phase_2_hardware_violation() {
         lto_shield_modules: vec![],
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     
     // =========================================================================
@@ -1823,6 +1831,8 @@ async fn test_failure_phase_3_patch_conflict() {
         user_toggled_lto: false,
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     
     // =========================================================================
@@ -1993,6 +2003,8 @@ package() {
         lto_shield_modules: vec![],
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     
     // =========================================================================
@@ -2201,6 +2213,8 @@ package() {
         user_toggled_lto: false,
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
    };
    
    println!("[TEST-9.2]   ✓ Kernel Config created with MANUAL OVERRIDES:");
@@ -2425,6 +2439,8 @@ async fn test_regress_missing_pkgbuild_reports_error_to_ui() {
         user_toggled_lto: false,
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     };
     println!("[REGRESS-PKGBUILD]   ✓ Kernel Config created");
     
@@ -2653,6 +2669,8 @@ async fn test_hardened_non_existent_absolute_path() {
         user_toggled_lto: false,
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
    };
    // =========================================================================
    // CRITICAL TEST: Attempt to create orchestrator with non-existent path
@@ -2826,6 +2844,8 @@ package() {
         user_toggled_lto: false,
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
    };
    // =========================================================================
    // RUN ORCHESTRATOR THROUGH PATCHING PHASE

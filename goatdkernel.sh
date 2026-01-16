@@ -299,6 +299,8 @@ check_and_install_arch_deps() {
         "clang"
         "lld"
         "polly"
+        "scx-tools"
+        "scx-scheds"
     )
     
     # STEP 2: Immediately attempt to install all required packages

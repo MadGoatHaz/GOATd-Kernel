@@ -189,6 +189,12 @@ pub struct UIState {
     /// Cached list of missing optional tools from the last health check
     /// Used to determine if UI features should be blocked due to missing dependencies (e.g., scx-tools)
     pub missing_optional_tools: Vec<String>,
+    
+    /// Whether to show the fix system health modal
+    pub show_fix_modal: bool,
+    
+    /// Pending privileged command to execute after user confirmation
+    pub pending_fix_command: String,
 }
 
 impl Default for Tab {
@@ -254,6 +260,8 @@ impl Default for UIState {
             cached_visuals: None,
             missing_aur_packages: Vec::new(),
             missing_optional_tools: Vec::new(),
+            show_fix_modal: false,
+            pending_fix_command: String::new(),
         }
     }
 }
@@ -495,7 +503,7 @@ impl AppUI {
             let controller = self.controller.clone();
             match self.ui_state.active_tab {
                 Tab::Dashboard => {
-                    super::dashboard::render_dashboard(ui, &controller);
+                    super::dashboard::render_dashboard(ui, &controller, &mut self.ui_state);
                 }
                 Tab::Build => {
                     super::build::render_build(ui, self, &controller);

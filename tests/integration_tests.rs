@@ -62,6 +62,8 @@ fn create_test_config() -> KernelConfig {
          lto_shield_modules: vec![],
          scx_available: Vec::new(),
          scx_active_scheduler: None,
+         native_optimizations: true,
+         user_toggled_native_optimizations: false,
     }
 }
 

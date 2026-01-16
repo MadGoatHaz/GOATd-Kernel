@@ -1,9 +1,9 @@
-//! SCX (Sched_ext) Infrastructure - Environment validation & persistent manager
+//! SCX (Sched-ext) Infrastructure - Environment validation & persistent manager
 //!
 //! This module provides utilities for:
 //! - Validating kernel support via /proc/config.gz
 //! - Detecting installed scheduler binaries
-//! - **Persistent SCX Management via systemd service** (Strategy 2)
+//! - **Persistent SCX Management via systemd service**
 //! - Polkit-elevated system-wide scheduler configuration
 //! - Self-healing environment provisioning
 
@@ -138,7 +138,7 @@ pub enum SCXReadiness {
     Ready,
     /// Kernel lacks CONFIG_SCHED_CLASS_EXT=y support
     KernelMissingSupport,
-    /// SCX packages (scx-utils, scx-scheds-git) are not installed
+    /// SCX packages (scx-tools, scx-scheds) are not installed
     PackagesMissing,
     /// SCX systemd service unit is not installed
     ServiceMissing,
@@ -440,13 +440,11 @@ impl SCXManager {
     /// Provision the SCX environment with packages and systemd service.
     ///
     /// Performs the following steps with elevated privileges (via pkexec):
-    /// 1. Checks for `scx-scheds` package via pacman -Qq (AUR package)
-    /// 2. If missing, instructs user to install via AUR instead of failing
-    /// 3. Initializes `/etc/scx_loader/config.toml` with default scheduler and mode
-    /// 4. Enables the correct SCX service (`scx_loader.service` or `scx.service`) to run on boot
+    /// 1. Checks for official `scx-scheds` package
+    /// 2. Initializes `/etc/scx_loader/config.toml` with default scheduler and mode
+    /// 3. Enables the correct SCX service (`scx_loader.service` or `scx.service`) to run on boot
     ///
     /// All steps execute with privilege escalation for seamless single-prompt UX.
-    /// If scx-scheds is missing, user receives clear AUR installation instructions.
     ///
     /// # Special Handling for Service Registry Lag
     /// If the service file is not found after package installation, instead of failing hard,
@@ -458,30 +456,12 @@ impl SCXManager {
     /// * `Err(String)` with root-cause diagnostic on failure
     ///
     /// # Note
-    /// - Uses Arch Linux `pacman` package manager for query only
-    /// - AUR packages must be installed manually by the user
+    /// - Requires official Arch Linux packages (scx-tools, scx-scheds)
     /// - Uses `pkexec` for privilege escalation (single prompt)
     /// - Config file is written to `/etc/scx_loader/config.toml` (TOML format)
     /// - Temp file path is properly shell-escaped to prevent injection
     pub fn provision_scx_environment() -> Result<(), String> {
         log_info!("[SCXManager] Starting SCX environment provisioning for scx_loader");
-
-        // Step 0: Check if scx-scheds is installed via pacman -Qq
-        let check_cmd = "pacman -Qq scx-scheds";
-        let check_output = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(check_cmd)
-            .output()
-            .map_err(|e| format!("Failed to check scx-scheds installation: {}", e))?;
-
-        if !check_output.status.success() {
-            let msg = "scx-scheds package not found. Please install it from the AUR using: \
-                       yay -S scx-scheds or paru -S scx-scheds, then retry provisioning.".to_string();
-            log_info!("[SCXManager] WARNING: {}", msg);
-            return Err(msg);
-        }
-
-        log_info!("[SCXManager] ✓ scx-scheds package verified");
 
         // Create default TOML configuration
         let default_config = ScxLoaderConfig::new("scx_bpfland", SchedulerMode::Auto);
@@ -565,16 +545,16 @@ impl SCXManager {
 
     /// Diagnose provisioning failures by analyzing stderr/stdout output
     ///
-    /// Attempts to identify which of the 4 provisioning steps failed:
-    /// 1. pacman -S (package installation)
-    /// 2. install (service file copy)
+    /// Attempts to identify which provisioning steps failed:
+    /// 1. Package detection
+    /// 2. Config file initialization
     /// 3. systemctl daemon-reload
     /// 4. systemctl enable
     ///
     /// # Returns
     /// Granular error message identifying the likely failure point
     fn diagnose_provisioning_failure(stderr: &str, stdout: &str) -> String {
-        // Check for network-related errors (pacman -S phase)
+        // Check for network-related errors
         if stderr.contains("Connection refused") ||
            stderr.contains("Name or service not known") ||
            stderr.contains("Connection timed out") ||
@@ -583,14 +563,14 @@ impl SCXManager {
             return "Network error: Cannot reach package repositories (no internet or DNS failure). Verify internet connectivity and try again.".to_string();
         }
 
-        // Check for missing packages (pacman -S phase)
+        // Check for missing packages
         if stderr.contains("not found") ||
            stderr.contains("not in any repo") ||
            stdout.contains("target not found") {
-            return "Package error: scx-utils or scx-scheds-git not found in repositories. Verify AUR is configured or packages exist.".to_string();
+            return "Package error: scx-tools or scx-scheds not found in official repositories. Verify packages are installed from Arch Linux official repos.".to_string();
         }
 
-        // Check for permission errors (install or systemctl phase)
+        // Check for permission errors
         if stderr.contains("Permission denied") {
             if stderr.contains("/etc/systemd") {
                 return "Permission error: Cannot write to /etc/systemd/system. Ensure polkit is properly configured.".to_string();
@@ -605,16 +585,16 @@ impl SCXManager {
         }
 
         if stderr.contains("enable") || (stdout.contains("enable") && stderr.contains("already")) {
-            return "Systemd error: Failed to enable SCX service. The service file may not exist or may be invalid. \
-                    Verify that scx-scheds is properly installed and provides either scx_loader.service or scx.service.".to_string();
+            return "Systemd error: Failed to enable SCX Scheduler service. The service file may not exist or may be invalid. \
+                    Verify that scx-scheds is properly installed and provides scx_loader.service.".to_string();
         }
 
         // Check for service not found (unit file doesn't exist)
         if stderr.contains("not find a unit") ||
            stderr.contains("No such file") ||
            stderr.contains("does not exist") {
-            return "Service file not found: Neither scx_loader.service nor scx.service exists. \
-                    This indicates an incomplete scx-scheds installation. Please reinstall scx-scheds or use a different package variant.".to_string();
+            return "Service file not found: scx_loader.service does not exist. \
+                    This indicates an incomplete scx-scheds installation. Please reinstall from official Arch Linux repositories.".to_string();
         }
 
         // Generic fallback with full output for debugging

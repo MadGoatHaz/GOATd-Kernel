@@ -107,6 +107,8 @@ fn create_base_config() -> KernelConfig {
         lto_shield_modules: Vec::new(),
         scx_available: Vec::new(),
         scx_active_scheduler: None,
+        native_optimizations: true,
+        user_toggled_native_optimizations: false,
     }
 }
 
@@ -724,8 +726,8 @@ fn test_server_profile_lto_full_kconfig_injection() {
     
     // Verify the profile is actually Server
     assert_eq!(
-        config.profile, "Server",
-        "Profile name must be 'Server' to ensure correct LTO injection"
+        config.profile, "server",
+        "Profile name must be 'server' to ensure correct LTO injection"
     );
 }
 

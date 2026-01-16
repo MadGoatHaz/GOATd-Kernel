@@ -128,7 +128,14 @@ impl HealthManager {
 
         // Check optional tools
         for tool in optional_tools {
-            if !Self::command_exists(tool) {
+            // For scx-tools and scx-scheds, check if packages are installed, not commands
+            let is_missing = if tool == "scx-tools" || tool == "scx-scheds" {
+                !Self::is_package_installed(tool)
+            } else {
+                !Self::command_exists(tool)
+            };
+
+            if is_missing {
                 // Categorize optional tools into AUR vs Official
                 if aur_pkgs.contains(tool) {
                     report.missing_aur_packages.push(tool.to_string());

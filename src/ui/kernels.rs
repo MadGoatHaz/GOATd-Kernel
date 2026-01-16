@@ -323,7 +323,7 @@ pub fn render_kernel_manager(
             
             // SCX Scheduler Section
             ui.group(|ui| {
-                ui.heading("⚙️ SCX Scheduler (sched-ext) Configuration");
+                ui.heading("⚙️ SCX Scheduler Configuration");
                 ui.separator();
                 
                 // Initialize available SCX schedulers on first render
