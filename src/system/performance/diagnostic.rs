@@ -8,6 +8,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::time::Instant;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use super::diagnostic_buffer::send_diagnostic;
 
 /// Detects if the CPU is Intel by reading vendor_id from /proc/cpuinfo
 fn is_intel_cpu() -> bool {
@@ -44,13 +45,13 @@ impl MsrReader {
 
         // Attempt to ensure MSR module is loaded
         if let Err(e) = crate::system::performance::tuner::ensure_msr_module_loaded() {
-            eprintln!("[MSR_HANDLE] WARNING: Failed to ensure MSR module is loaded: {}", e);
+            send_diagnostic(&format!("[MSR_HANDLE] WARNING: Failed to ensure MSR module is loaded: {}", e));
         }
 
         let path = format!("/dev/cpu/{}/msr", cpu_id);
         match fs::OpenOptions::new().read(true).open(&path) {
             Ok(file) => {
-                eprintln!("[MSR_HANDLE] Opened MSR file handle for cpu_id={}", cpu_id);
+                send_diagnostic(&format!("[MSR_HANDLE] Opened MSR file handle for cpu_id={}", cpu_id));
                 Ok(MsrReader {
                     cpu_id,
                     handle: Some(file),
@@ -58,12 +59,12 @@ impl MsrReader {
             },
             Err(e) => {
                 // Gracefully handle if MSR interface is not available
-                eprintln!("[MSR_HANDLE] WARNING: Cannot open {} ({})", path, e);
-                eprintln!("[MSR_HANDLE]   ⚠ To enable SMI detection, try one of the following:");
-                eprintln!("[MSR_HANDLE]   1. Run with root privileges (sudo or pkexec)");
-                eprintln!("[MSR_HANDLE]   2. Ensure the 'msr' kernel module is loaded: sudo modprobe msr");
-                eprintln!("[MSR_HANDLE]   3. Check MSR interface availability: ls -l /dev/cpu/0/msr");
-                eprintln!("[MSR_HANDLE] SMI detection will be disabled for this session.");
+                send_diagnostic(&format!("[MSR_HANDLE] WARNING: Cannot open {} ({})", path, e));
+                send_diagnostic("[MSR_HANDLE]   ⚠ To enable SMI detection, try one of the following:");
+                send_diagnostic("[MSR_HANDLE]   1. Run with root privileges (sudo or pkexec)");
+                send_diagnostic("[MSR_HANDLE]   2. Ensure the 'msr' kernel module is loaded: sudo modprobe msr");
+                send_diagnostic("[MSR_HANDLE]   3. Check MSR interface availability: ls -l /dev/cpu/0/msr");
+                send_diagnostic("[MSR_HANDLE] SMI detection will be disabled for this session.");
                 Ok(MsrReader {
                     cpu_id,
                     handle: None,
@@ -100,7 +101,7 @@ impl MsrReader {
 impl Drop for MsrReader {
     fn drop(&mut self) {
         if self.handle.is_some() {
-            eprintln!("[MSR_HANDLE] Closing MSR file handle for cpu_id={}", self.cpu_id);
+            send_diagnostic(&format!("[MSR_HANDLE] Closing MSR file handle for cpu_id={}", self.cpu_id));
         }
     }
 }
@@ -158,15 +159,15 @@ impl SmiCorrelation {
                 self.current_smi_count = count;
                 let has_incremented = count > self.baseline_smi_count;
                 if has_incremented {
-                    eprintln!("[SMI_DIAG] update_smi_count: baseline={}, current={}, incremented=true",
-                        self.baseline_smi_count, count);
+                    send_diagnostic(&format!("[SMI_DIAG] update_smi_count: baseline={}, current={}, incremented=true",
+                        self.baseline_smi_count, count));
                 }
                 return has_incremented;
             } else {
-                eprintln!("[SMI_DIAG] WARNING: Failed to read SMI count from MSR (cpu_id={})", self.cpu_id);
+                send_diagnostic(&format!("[SMI_DIAG] WARNING: Failed to read SMI count from MSR (cpu_id={})", self.cpu_id));
             }
         } else {
-            eprintln!("[SMI_DIAG] WARNING: MSR reader not available (cpu_id={})", self.cpu_id);
+            send_diagnostic(&format!("[SMI_DIAG] WARNING: MSR reader not available (cpu_id={})", self.cpu_id));
         }
         false
     }
@@ -180,36 +181,36 @@ impl SmiCorrelation {
         
         // Apply cooldown logic: only call update_smi_count if 100ms has passed
         if elapsed_nanos >= MIN_READ_INTERVAL_NS as u128 {
-            eprintln!("[SMI_COOLDOWN_DIAGNOSTIC] Cooldown satisfied: elapsed={}ns (min={}ns), attempting MSR read",
-                elapsed_nanos, MIN_READ_INTERVAL_NS);
+            send_diagnostic(&format!("[SMI_COOLDOWN_DIAGNOSTIC] Cooldown satisfied: elapsed={}ns (min={}ns), attempting MSR read",
+                elapsed_nanos, MIN_READ_INTERVAL_NS));
             
             self.last_read_time = now;
             let smi_detected = self.update_smi_count();
             
             if smi_detected {
-                eprintln!("[SMI] SMI detected: baseline={}, current={}",
-                    self.baseline_smi_count, self.current_smi_count);
+                send_diagnostic(&format!("[SMI] SMI detected: baseline={}, current={}",
+                    self.baseline_smi_count, self.current_smi_count));
                 
                 // Update authoritative atomics directly
                 if let Some(ref total_count) = self.total_smi_count {
                     let before = total_count.load(Ordering::Relaxed);
                     total_count.store(self.current_smi_count, Ordering::Release);
                     let after = total_count.load(Ordering::Relaxed);
-                    eprintln!("[SMI_ATOMIC] total_smi_count: before={}, stored={}, after={}",
-                        before, self.current_smi_count, after);
+                    send_diagnostic(&format!("[SMI_ATOMIC] total_smi_count: before={}, stored={}, after={}",
+                        before, self.current_smi_count, after));
                 }
                 if let Some(ref corr_spikes) = self.smi_correlated_spikes {
                     let before = corr_spikes.load(Ordering::Relaxed);
                     corr_spikes.fetch_add(1, Ordering::Release);
                     let after = corr_spikes.load(Ordering::Relaxed);
-                    eprintln!("[SMI_ATOMIC] smi_correlated_spikes: before={}, after={}",
-                        before, after);
+                    send_diagnostic(&format!("[SMI_ATOMIC] smi_correlated_spikes: before={}, after={}",
+                        before, after));
                 }
             }
             return smi_detected;
         } else {
-            eprintln!("[SMI_COOLDOWN_DIAGNOSTIC] Cooldown NOT satisfied: elapsed={}ns (min={}ns), skipping MSR read",
-                elapsed_nanos, MIN_READ_INTERVAL_NS);
+            send_diagnostic(&format!("[SMI_COOLDOWN_DIAGNOSTIC] Cooldown NOT satisfied: elapsed={}ns (min={}ns), skipping MSR read",
+                elapsed_nanos, MIN_READ_INTERVAL_NS));
         }
         false
     }

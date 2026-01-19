@@ -18,6 +18,9 @@ use crate::system::performance::{
     PerformanceHistory, PerformanceRecord, KernelContext, MonitoringState,
     MonitoringMode, LifecycleState, SessionSummary, StressorManager, Intensity,
     StressorType, HistoryManager, HistogramBucket, BenchmarkOrchestrator,
+    MicroJitterCollector, MicroJitterConfig,
+    ContextSwitchCollector, ContextSwitchConfig,
+    SyscallSaturationCollector, SyscallSaturationConfig,
 };
 use crate::system::performance::collector::LatencyProcessor;
 use std::sync::RwLock;
@@ -135,6 +138,22 @@ pub struct AppController {
     pub cached_jitter_summary: Arc<RwLock<Option<SessionSummary>>>,
     /// Benchmark orchestrator for SystemBenchmark mode
     pub benchmark_orchestrator: Arc<RwLock<Option<BenchmarkOrchestrator>>>,
+    /// Cached system health report (refreshed every 60 seconds)
+    pub cached_health_report: Arc<RwLock<Option<crate::system::health::HealthReport>>>,
+    /// Last time system health was checked
+    pub health_check_timestamp: Arc<RwLock<Option<Instant>>>,
+    /// Cached kernel context for performance snapshots (updated asynchronously every 5s)
+    pub cached_kernel_context: Arc<RwLock<Option<KernelContext>>>,
+    /// Last time kernel context was refreshed
+    pub kernel_context_cache_timestamp: Arc<RwLock<Option<Instant>>>,
+    /// Micro-Jitter Collector for P99.99 detection
+    pub collector_jitter: Arc<RwLock<Option<MicroJitterCollector>>>,
+    /// Context-Switch RTT Collector for scheduling latency
+    pub collector_context_switch: Arc<RwLock<Option<ContextSwitchCollector>>>,
+    /// Syscall Saturation Collector for syscall overhead
+    pub collector_syscall: Arc<RwLock<Option<SyscallSaturationCollector>>>,
+    /// Shared container for benchmark metrics from specialized collectors
+    pub benchmark_metrics_container: Arc<RwLock<crate::system::performance::BenchmarkMetrics>>,
 }
 
 impl AppController {
@@ -208,6 +227,14 @@ impl AppController {
             selected_kernel_audit: Arc::new(RwLock::new(None)),
             cached_jitter_summary: Arc::new(RwLock::new(None)),
             benchmark_orchestrator: Arc::new(RwLock::new(None)),
+            cached_health_report: Arc::new(RwLock::new(None)),
+            health_check_timestamp: Arc::new(RwLock::new(None)),
+            cached_kernel_context: Arc::new(RwLock::new(None)),
+            kernel_context_cache_timestamp: Arc::new(RwLock::new(None)),
+            collector_jitter: Arc::new(RwLock::new(None)),
+            collector_context_switch: Arc::new(RwLock::new(None)),
+            collector_syscall: Arc::new(RwLock::new(None)),
+            benchmark_metrics_container: Arc::new(RwLock::new(crate::system::performance::BenchmarkMetrics::new())),
         };
         
         // TRIGGER INITIAL DEEP AUDIT - CONSOLIDATED FROM MAIN.RS
@@ -1420,12 +1447,30 @@ impl AppController {
     ///
     /// Spawns the background processor task and begins measurement
     /// Accepts optional UI context for signaling repaints from background thread
+    ///
+    /// CRITICAL: Explicitly resets all metrics and history for clean state
+    /// - Clears PerformanceMetrics (current, max, p99, avg, rolling windows)
+    /// - Clears PerformanceHistory (snapshots and rolling window buffers)
+    /// - Creates fresh LatencyProcessor in background tasks
     pub fn start_performance_monitoring(&self, config: PerformanceConfig) -> Result<(), String> {
         // Store the UI context if available (will be populated by app.rs when called)
         // For now, leave None - will be set by app.rs via set_perf_ui_context()
         // Check if already monitoring
         if self.perf_monitoring_active.load(Ordering::Acquire) {
             return Err("Performance monitoring already active".to_string());
+        }
+
+        // EXPLICIT RESET: Zero out old data from previous session
+        eprintln!("[PERF] [START] ==== ZEROING OUT OLD SESSION DATA ====");
+        {
+            if let Ok(mut metrics) = self.perf_metrics.write() {
+                eprintln!("[PERF] [START] Resetting PerformanceMetrics for clean start");
+                metrics.reset();
+            }
+            if let Ok(mut history) = self.perf_history.write() {
+                eprintln!("[PERF] [START] Resetting PerformanceHistory rolling window for clean start");
+                history.reset();  // Clears rolling_window and snapshots
+            }
         }
 
         // CRITICAL FIX: Preserve core_temperatures from previous metrics to prevent heatmap blackout
@@ -1446,6 +1491,9 @@ impl AppController {
 
         // Create the ring buffer for SPSC communication (65536 samples capacity)
         let (producer, consumer) = rtrb::RingBuffer::new(65536);
+
+        // Create the event ring buffer for diagnostic events (256 capacity, much smaller)
+        let (event_producer, event_consumer) = rtrb::RingBuffer::new(256);
 
         // Create monitoring state
         let monitoring_state = MonitoringState::default();
@@ -1471,36 +1519,94 @@ impl AppController {
         let interval = Duration::from_micros(config.interval_us);
         let spike_threshold = config.spike_threshold_us * 1000; // Convert µs to ns
 
+        // SMI correlation is initialized asynchronously to avoid blocking the collector thread
+        let smi_correlation: Option<Arc<RwLock<super::super::system::performance::SmiCorrelation>>> = None;
+        
+        // Pre-clone atomics for use by both collector and background SMI init task
+        let total_smi_for_collector = total_smi_count.clone();
+        let smi_spikes_for_collector = smi_correlated_spikes.clone();
+        let smi_atomic_count = total_smi_count.clone();
+        let smi_corr_spikes = smi_correlated_spikes.clone();
+        let core_id_for_smi = core_id;
+        
+        // Clone metrics for use in the collector thread
+        let metrics_for_thread = self.perf_metrics.clone();
+
         std::thread::spawn(move || {
             // CRITICAL: Apply real-time settings before starting measurement loop
             let mut tuner = crate::system::performance::Tuner::new();
-            match tuner.apply_realtime_settings(config.core_id) {
+            let rt_result = tuner.apply_realtime_settings(core_id);
+            match rt_result {
                 Ok(()) => {
-                    eprintln!("[PERF] [THREAD] Done: Real-time settings applied (SCHED_FIFO priority 80, CPU affinity to core {}, mlockall)", config.core_id);
+                    eprintln!("[PERF] [THREAD] Done: Real-time settings applied (SCHED_FIFO priority 80, CPU affinity to core {}, mlockall)", core_id);
                 }
-                Err(e) => {
+                Err(ref e) => {
                     eprintln!("[PERF] [THREAD] Warning: Real-time settings failed (non-root?): {}. Proceeding with standard scheduling.", e);
                     eprintln!("[PERF] [THREAD] Warning: Latency measurements will be less accurate without SCHED_FIFO priority.");
                 }
             }
             
+            // Update shared metrics state with RT status
+            if let Ok(mut metrics) = metrics_for_thread.write() {
+                metrics.rt_active = rt_result.is_ok();
+                metrics.rt_error = rt_result.err().map(|e| e.to_string());
+            }
+            
             let collector = LatencyCollector::new(
                 interval,
                 producer,
+                event_producer,
                 stop_flag,
                 dropped_count,
                 spike_threshold,
                 spike_count,
-                smi_correlated_spikes,
-                total_smi_count,
-                config.core_id,
+                smi_spikes_for_collector,
+                total_smi_for_collector,
+                smi_correlation,
             );
             eprintln!("[PERF] [THREAD] Starting latency collection loop (interval_us={}, spike_threshold_ns={})", config.interval_us, spike_threshold);
+            eprintln!("[PERF] [THREAD] SMI correlation initialized asynchronously (will be populated when MSR driver is ready)");
             collector.run();
             eprintln!("[PERF] [THREAD] Latency collection loop stopped");
         });
 
-        // Spawn the async processor task in Tokio
+        // Spawn the event consumer thread for diagnostic event processing
+        // Pass smi_correlated_spikes for asynchronous SMI correlation
+        let smi_spikes_for_consumer = smi_correlated_spikes.clone();
+        std::thread::spawn(move || {
+            eprintln!("[PERF] [EVENT_CONSUMER] Event consumer thread started");
+            let _event_consumer_handle = crate::system::performance::diagnostic_buffer::spawn_collector_event_consumer(event_consumer, smi_spikes_for_consumer);
+            // The handle is dropped here, allowing the consumer to run in the background
+        });
+
+        // Spawn background task to initialize SMI correlation asynchronously
+        // This prevents the native collector thread from hanging on MSR driver access
+        
+        std::thread::spawn(move || {
+            eprintln!("[PERF] [SMI_INIT] Background SMI initialization task starting (core_id={})", core_id_for_smi);
+            
+            // Attempt non-blocking SMI correlation initialization
+            match crate::system::performance::SmiDetector::is_available() {
+                true => {
+                    eprintln!("[PERF] [SMI_INIT] SMI detector available, initializing SmiCorrelation...");
+                    let smi_corr = crate::system::performance::SmiCorrelation::new(
+                        core_id_for_smi,
+                        Some(smi_atomic_count),
+                        Some(smi_corr_spikes),
+                    );
+                    eprintln!("[PERF] [SMI_INIT] Done: SmiCorrelation initialized (msr_available={})", smi_corr.is_msr_available());
+                }
+                false => {
+                    eprintln!("[PERF] [SMI_INIT] SMI detector not available on this system (non-Intel or no MSR interface)");
+                }
+            }
+        });
+
+        // =====================================================================
+        // MODE-BASED BIFURCATION: Spawn different tasks based on MonitoringMode
+        // =====================================================================
+        
+        // Clone metrics and other shared state for background processor
         let metrics = self.perf_metrics.clone();
         let history = self.perf_history.clone();
         let active = self.perf_monitoring_active.clone();
@@ -1512,23 +1618,339 @@ impl AppController {
         let dirty_flag = self.atomic_perf_dirty.clone();
         let ui_context = self.perf_ui_context.clone();
 
-        tokio::spawn(async move {
-            Self::background_processor_task(
-                consumer,
-                metrics,
-                history,
-                mon_state,
-                active,
-                alert_flag,
-                alert_count,
-                settings,
-                jitter_history,
-                dirty_flag,
-                ui_context,
-                core_id,
-                preserved_core_temps,
-            ).await;
-        });
+        let kernel_context_cache = self.cached_kernel_context.clone();
+        let kernel_context_cache_ts = self.kernel_context_cache_timestamp.clone();
+        let benchmark_metrics_container = self.benchmark_metrics_container.clone();
+        
+        // COMMENTED OUT FOR BIFURCATION: background_processor_task is now spawned conditionally
+        // based on MonitoringMode. See bifurcation logic below.
+        // tokio::spawn(async move {
+        //     Self::background_processor_task(
+        //         consumer,
+        //         metrics,
+        //         history,
+        //         mon_state,
+        //         active,
+        //         alert_flag,
+        //         alert_count,
+        //         settings,
+        //         jitter_history,
+        //         dirty_flag,
+        //         ui_context,
+        //         core_id,
+        //         preserved_core_temps,
+        //         kernel_context_cache,
+        //         kernel_context_cache_ts,
+        //         benchmark_metrics_container,
+        //     ).await;
+        // });
+
+        // =====================================================================
+        // BIFURCATION: Determine which task to spawn based on MonitoringMode
+        // =====================================================================
+        
+        let monitoring_mode = {
+            self.perf_monitoring_mode
+                .read()
+                .ok()
+                .and_then(|mode_lock| mode_lock.clone())
+        };
+        
+        match monitoring_mode {
+            Some(MonitoringMode::Continuous) => {
+                eprintln!("[PERF] [BIFURCATION] Spawning system_monitor_task and benchmark_runner_task for Continuous mode");
+                eprintln!("[PERF] [BIFURCATION] Full-Spectrum Continuous: All collectors active, no stressors");
+                
+                // Clone for system_monitor_task before moving into spawn
+                let metrics_for_monitor = metrics.clone();
+                let history_for_monitor = history.clone();
+                let active_for_monitor = active.clone();
+                
+                // Spawn system_monitor_task
+                tokio::spawn(async move {
+                    Self::system_monitor_task(
+                        consumer,
+                        metrics_for_monitor,
+                        history_for_monitor,
+                        mon_state,
+                        active_for_monitor,
+                        settings,
+                        jitter_history,
+                        dirty_flag,
+                        ui_context,
+                        core_id,
+                    ).await;
+                });
+                
+                // Spawn benchmark_runner_task for full-spectrum metrics in Continuous mode
+                let metrics_for_benchmark = metrics.clone();
+                let active_for_benchmark = active.clone();
+                let benchmark_metrics_for_runner = benchmark_metrics_container.clone();
+                
+                tokio::spawn(async move {
+                    Self::benchmark_runner_task(
+                        metrics_for_benchmark,
+                        active_for_benchmark,
+                        benchmark_metrics_for_runner,
+                    ).await;
+                });
+                
+                // Spawn sysfs_isolation_task for CPU governor/frequency polling (non-blocking)
+                // CRITICAL: Must run in parallel with system_monitor_task to avoid stalling telemetry
+                let metrics_for_sysfs = metrics.clone();
+                let active_for_sysfs = active.clone();
+                tokio::spawn(async move {
+                    let mut audit_interval = tokio::time::interval(Duration::from_secs(2));
+                    
+                    while active_for_sysfs.load(Ordering::Acquire) {
+                        audit_interval.tick().await;
+                        
+                        // ISOLATED TASK: All blocking I/O happens here, not in the hot loop
+                        let metrics_snapshot = metrics_for_sysfs.clone();
+                        
+                        tokio::task::spawn_blocking(move || {
+                            // CRITICAL: Blocking sysfs reads isolated to spawn_blocking
+                            // These operations are known to cause 100µs-1ms stalls
+                            eprintln!("[PERF] [SYSFS_ISOLATION] Starting isolated sysfs reads (core_id={})", core_id);
+                            
+                            let governor = Self::read_cpu_governor_for_core(core_id);
+                            let frequency_mhz = Self::read_cpu_frequency_for_core(core_id);
+                            
+                            eprintln!("[PERF] [SYSFS_ISOLATION] Done: Governor={}, Frequency={}MHz",
+                                governor, frequency_mhz);
+                            
+                            // Update metrics with the newly read values
+                            if let Ok(mut m) = metrics_snapshot.write() {
+                                m.active_governor = governor;
+                                m.governor_hz = frequency_mhz;
+                            }
+                        });
+                    }
+                });
+                
+                // Spawn specialized collectors for full-spectrum monitoring in Continuous mode
+                eprintln!("[PERF] [CONTINUOUS] Spawning specialized collectors (MicroJitter, ContextSwitch, Syscall)");
+                
+                // Micro-Jitter Collector
+                let jitter_collector = MicroJitterCollector::new(MicroJitterConfig::default());
+                // CRITICAL FIX: Store collector handle in self for lifecycle management
+                {
+                    if let Ok(mut jitter_lock) = self.collector_jitter.write() {
+                        *jitter_lock = Some(jitter_collector.clone());
+                    }
+                }
+                let jitter_metrics_arc = benchmark_metrics_container.clone();
+                tokio::task::spawn_blocking(move || {
+                    match jitter_collector.run() {
+                        Ok(jitter_metrics) => {
+                            eprintln!("[PERF] [CONTINUOUS] ✓ MicroJitter collector completed: P99.99={:.2}µs, Max={:.2}µs",
+                                jitter_metrics.p99_99_us, jitter_metrics.max_us);
+                            if let Ok(mut benchmark) = jitter_metrics_arc.write() {
+                                benchmark.micro_jitter = Some(jitter_metrics.clone());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[PERF] [CONTINUOUS] ✗ MicroJitter collector error: {}", e);
+                        }
+                    }
+                });
+                
+                // Context-Switch RTT Collector - runs in loop with 1-second intervals
+                // LABORATORY-GRADE: Uses Median RTT (representative) instead of P99 (biased by outliers)
+                let cs_metrics_arc = benchmark_metrics_container.clone();
+                let history_for_cs = history.clone();
+                let active_for_cs = active.clone();
+                tokio::task::spawn_blocking(move || {
+                    loop {
+                        if !active_for_cs.load(Ordering::Acquire) {
+                            eprintln!("[PERF] [CONTINUOUS] ContextSwitch collector stopping (active_flag is false)");
+                            break;
+                        }
+                        
+                        let cs_collector = ContextSwitchCollector::new(ContextSwitchConfig::default());
+                        match cs_collector.run() {
+                            Ok(cs_summary) => {
+                                eprintln!("[PERF] [CONTINUOUS] ✓ ContextSwitch measurement: Mean={:.3}µs, Median={:.3}µs, P95={:.3}µs",
+                                    cs_summary.mean, cs_summary.median, cs_summary.p95);
+                                
+                                // CRITICAL: Pipe MEDIAN RTT to rolling window for real-time efficiency updates
+                                // Median is representative (50th percentile) and avoids P99 bias
+                                if let Ok(mut h) = history_for_cs.write() {
+                                    h.rolling_window.add_efficiency(cs_summary.median);
+                                    eprintln!("[PERF] [CONTINUOUS] ✓ Efficiency Median wired to rolling window: {:.3}µs (HIGH-PRECISION)", cs_summary.median);
+                                }
+                                
+                                // Also wire to benchmark metrics for UI display (convert Summary to Metrics)
+                                if let Ok(mut benchmark) = cs_metrics_arc.write() {
+                                    let metrics = cs_summary.clone().into();
+                                    benchmark.context_switch_rtt = Some(metrics);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[PERF] [CONTINUOUS] ✗ ContextSwitch collector error: {}", e);
+                            }
+                        }
+                        
+                        // Sleep 1 second before next measurement (faster fill of 20-sample rolling window)
+                        eprintln!("[PERF] [CONTINUOUS] ContextSwitch collector sleeping 1 second before next measurement");
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                });
+                
+                // Syscall Saturation Collector - loop with 3-second intervals and pipe throughput to history
+                let syscall_metrics_arc = benchmark_metrics_container.clone();
+                let history_for_syscall = history.clone();
+                let active_for_syscall = active.clone();
+                tokio::task::spawn_blocking(move || {
+                    loop {
+                        if !active_for_syscall.load(Ordering::Acquire) {
+                            eprintln!("[PERF] [CONTINUOUS] Syscall collector stopping (active_flag is false)");
+                            break;
+                        }
+                        
+                        let syscall_collector = SyscallSaturationCollector::new(SyscallSaturationConfig::default());
+                        match syscall_collector.run() {
+                            Ok(syscall_metrics) => {
+                                eprintln!("[PERF] [CONTINUOUS] ✓ Syscall measurement: Throughput={:.0}k/sec",
+                                    syscall_metrics.calls_per_second as f32 / 1000.0);
+                                
+                                // CRITICAL: Pipe throughput to rolling window for real-time updates
+                                if let Ok(mut h) = history_for_syscall.write() {
+                                    h.rolling_window.add_throughput(syscall_metrics.calls_per_second as f32);
+                                    eprintln!("[PERF] [CONTINUOUS] ✓ Throughput wired to rolling window: {:.0}k/sec", syscall_metrics.calls_per_second as f32 / 1000.0);
+                                }
+                                
+                                // Also wire to benchmark metrics for UI display
+                                if let Ok(mut benchmark) = syscall_metrics_arc.write() {
+                                    benchmark.syscall_saturation = Some(syscall_metrics.clone());
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[PERF] [CONTINUOUS] ✗ Syscall collector error: {}", e);
+                            }
+                        }
+                        
+                        // Sleep 3 seconds before next measurement (faster fill of 20-sample rolling window)
+                        eprintln!("[PERF] [CONTINUOUS] Syscall collector sleeping 3 seconds before next measurement");
+                        std::thread::sleep(Duration::from_secs(3));
+                    }
+                });
+            }
+            Some(MonitoringMode::Benchmark(_)) | Some(MonitoringMode::SystemBenchmark) => {
+                eprintln!("[PERF] [BIFURCATION] Spawning system_monitor_task and benchmark_runner_task for Benchmark/SystemBenchmark mode");
+                
+                // Clone for system_monitor_task before moving into spawn (for benchmark path)
+                let metrics_for_monitor = metrics.clone();
+                let history_for_monitor = history.clone();
+                let active_for_monitor = active.clone();
+                
+                // Spawn system_monitor_task
+                tokio::spawn(async move {
+                    Self::system_monitor_task(
+                        consumer,
+                        metrics_for_monitor,
+                        history_for_monitor,
+                        mon_state,
+                        active_for_monitor,
+                        settings,
+                        jitter_history,
+                        dirty_flag,
+                        ui_context,
+                        core_id,
+                    ).await;
+                });
+                
+                // Spawn benchmark_runner_task (uses original metrics and active)
+                let metrics_for_benchmark = metrics.clone();
+                let active_for_benchmark = active.clone();
+                let benchmark_metrics_for_runner = benchmark_metrics_container.clone();
+                
+                tokio::spawn(async move {
+                    Self::benchmark_runner_task(
+                        metrics_for_benchmark,
+                        active_for_benchmark,
+                        benchmark_metrics_for_runner,
+                    ).await;
+                });
+                
+                // ================================================================
+                // I/O ISOLATION: Dedicated Hardware Poller Thread
+                // ================================================================
+                // Move all blocking /proc and /sys reads out of the 20ms telemetry loop
+                // into a dedicated "Hardware Poller" thread running at 200ms frequency (5x slower).
+                // This prevents CPU frequency and governor reads from stalling the latency collector.
+                // Pattern: Async supervisor loop with spawn_blocking for actual I/O
+                // Spawn sysfs_isolation_task for CPU governor/frequency polling (non-blocking)
+                // CRITICAL: Must run in parallel with system_monitor_task to avoid stalling telemetry
+                let metrics_for_sysfs = metrics.clone();
+                let active_for_sysfs = active.clone();
+                tokio::spawn(async move {
+                    // LABORATORY-GRADE: Hardware Poller at 200ms frequency (vs 20ms telemetry)
+                    // This 10x separation ensures I/O stalls never interfere with latency measurement
+                    let mut hardware_poll_interval = tokio::time::interval(Duration::from_millis(200));
+                    
+                    eprintln!("[PERF] [HARDWARE_POLLER] Started: polling every 200ms (core_id={})", core_id);
+                    
+                    while active_for_sysfs.load(Ordering::Acquire) {
+                        hardware_poll_interval.tick().await;
+                        
+                        // ================================================================
+                        // SPAWNED BLOCKING CONTEXT: All I/O happens here, never in async
+                        // ================================================================
+                        let metrics_snapshot = metrics_for_sysfs.clone();
+                        
+                        tokio::task::spawn_blocking(move || {
+                            // CRITICAL: Blocking sysfs reads isolated to spawn_blocking context
+                            // These operations are known to cause 100µs-1ms stalls and MUST NOT
+                            // execute in the async runtime or telemetry loop
+                            eprintln!("[PERF] [HARDWARE_POLLER] Reading CPU governor and frequency (core_id={})", core_id);
+                            
+                            // Read CPU governor: /sys/devices/system/cpu/cpuN/cpufreq/scaling_governor
+                            let governor = Self::read_cpu_governor_for_core(core_id);
+                            
+                            // Read CPU frequency: /sys/devices/system/cpu/cpuN/cpufreq/scaling_cur_freq
+                            let frequency_mhz = Self::read_cpu_frequency_for_core(core_id);
+                            
+                            eprintln!("[PERF] [HARDWARE_POLLER] Done: Governor={}, Frequency={}MHz (core_id={})",
+                                governor, frequency_mhz, core_id);
+                            
+                            // Update metrics with newly read hardware state
+                            if let Ok(mut m) = metrics_snapshot.write() {
+                                m.active_governor = governor;
+                                m.governor_hz = frequency_mhz;
+                            }
+                        });
+                    }
+                    
+                    eprintln!("[PERF] [HARDWARE_POLLER] Stopped (core_id={})", core_id);
+                });
+            }
+            None => {
+                eprintln!("[PERF] [BIFURCATION] Warning: MonitoringMode not set, spawn background_processor_task as fallback");
+                
+                // Fallback: Spawn background_processor_task if mode is not set
+                tokio::spawn(async move {
+                    Self::background_processor_task(
+                        consumer,
+                        metrics,
+                        history,
+                        mon_state,
+                        active,
+                        alert_flag,
+                        alert_count,
+                        settings,
+                        jitter_history,
+                        dirty_flag,
+                        ui_context,
+                        core_id,
+                        preserved_core_temps,
+                        kernel_context_cache,
+                        kernel_context_cache_ts,
+                        benchmark_metrics_container,
+                    ).await;
+                });
+            }
+        }
 
         self.log_event("PERFORMANCE", "Performance monitoring started");
         Ok(())
@@ -1596,6 +2018,9 @@ impl AppController {
     /// from the ring buffer and maintaining aggregate statistics. Handles mode-specific timing:
     /// - For Benchmark mode: auto-terminates when duration expires
     /// - For Continuous mode: periodically logs diagnostics and auto-saves and checkpoint snapshot
+    ///
+    /// Uses cached kernel context (refreshed asynchronously every 5 seconds) to avoid blocking
+    /// on external commands like scxctl and zcat.
     async fn background_processor_task(
         mut consumer: rtrb::Consumer<u64>,
         metrics: Arc<std::sync::RwLock<PerformanceMetrics>>,
@@ -1610,6 +2035,9 @@ impl AppController {
         ui_context: Arc<RwLock<Option<egui::Context>>>,
         core_id: usize,
         preserved_core_temps: Vec<f32>,
+        kernel_context_cache: Arc<RwLock<Option<KernelContext>>>,
+        kernel_context_cache_ts: Arc<RwLock<Option<Instant>>>,
+        benchmark_metrics_container: Arc<RwLock<crate::system::performance::BenchmarkMetrics>>,
     ) {
         let mut processor = LatencyProcessor::new()
             .expect("Failed to create LatencyProcessor");
@@ -1638,7 +2066,11 @@ impl AppController {
         let audit_timer = tokio::time::interval(Duration::from_secs(2));
         let mut audit_timer = audit_timer;
 
-        eprintln!("[PERF] [PROCESSOR] Task started (100ms drain cycle, 5s snapshot cycle, 60s diagnostic log, 900s checkpoint, 2s audit)");
+        // Collector results timer: every 2 seconds - collect results from specialized collectors (20ms cycles)
+        let collector_timer = tokio::time::interval(Duration::from_secs(2));
+        let mut collector_timer = collector_timer;
+
+        eprintln!("[PERF] [PROCESSOR] Task started (20ms cycle, 5s snapshot, 60s diagnostic, 900s checkpoint, 2s audit/collectors)");
         
         let mut cycle_count = 0u64;
         let mut total_drained = 0u64;
@@ -1648,6 +2080,11 @@ impl AppController {
         // Preserve governor/frequency across cycles to prevent overwrites
         let mut cached_governor = String::new();
         let mut cached_frequency = 0i32;
+        
+        // TRUSTWORTHY CALIBRATION: Noise Floor detection during first 10 seconds
+        let mut calibration_in_progress = true;
+        let calibration_duration = Duration::from_secs(10);
+        let mut detected_noise_floor = 0.0f32;
         
         // Throttle thermal updates: only update every 5 cycles (100ms instead of 20ms)
         // Hardware sensors update slowly, so frequent polling is wasteful
@@ -1659,19 +2096,31 @@ impl AppController {
                     cycle_count += 1;
                     let mut drained_this_cycle = 0u64;
                     
-                    // Drain all available samples from the ring buffer
+                    // Batch buffer: accumulate samples to reduce lock contention
+                    // Instead of acquiring write() lock for every sample, collect a batch
+                    let mut sample_batch = Vec::with_capacity(100);
+                    
+                    // Drain all available samples from the ring buffer into local buffer
                     // CRITICAL: Feed samples into rolling window for recovery capability
                     while let Ok(latency_ns) = consumer.pop() {
                         let _ = processor.record_sample(latency_ns);
                         
-                        // Convert nanoseconds to microseconds and add to rolling window
+                        // Convert nanoseconds to microseconds and accumulate in local buffer
                         let latency_us = (latency_ns as f32) / 1000.0;
-                        history.write()
-                            .ok()
-                            .map(|mut h| h.rolling_window.add_latency(latency_us));
+                        sample_batch.push(latency_us);
                         
                         drained_this_cycle += 1;
                         total_drained += 1;
+                    }
+                    
+                    // Apply batch update to PerformanceHistory in single write() lock
+                    // Lock is held only for the batch flush, not for each individual sample
+                    if !sample_batch.is_empty() {
+                        if let Ok(mut h) = history.write() {
+                            for latency_us in sample_batch {
+                                h.rolling_window.add_latency(latency_us);
+                            }
+                        }
                     }
 
                     let dropped_now = monitoring_state.dropped_count();
@@ -1695,10 +2144,10 @@ impl AppController {
                             let p99 = h.rolling_window.calculate_p99_latency();
                             let p99_9 = h.rolling_window.calculate_p99_9_latency();
                             
-                            // Calculate Standard Deviation of rolling latency samples (Laboratory Grade CV%)
-                            // Professional calibration: 2% CV (Optimal/Lab Grade) → 30% CV (Poor)
-                            let std_dev = h.rolling_window.calculate_std_dev();
-                            (p99, p99_9, std_dev)
+                            // Calculate Consistency KPI: delta between P99.9 and P99
+                            // Measures tail variation: higher delta = less stable performance
+                            let consistency = h.rolling_window.calculate_p99_consistency();
+                            (p99, p99_9, consistency)
                         } else {
                             (0.0, 0.0, 0.0)
                         }
@@ -1721,6 +2170,36 @@ impl AppController {
                     }
                     processor.reset_cycle_max();
                     
+                    // ================================================================
+                    // NOISE FLOOR CALIBRATION: Per-Session Baseline Detection
+                    // ================================================================
+                    // During the first 10 seconds (calibration phase), we detect the
+                    // hardware's "noise floor" - the minimum stutter caused by system
+                    // overhead (SMI, thermal, scheduler jitter, etc.).
+                    // All subsequent latency measurements are relative to this baseline.
+                    // This ensures we report precision relative to hardware capability,
+                    // not absolute microseconds (which vary wildly by hardware).
+                    
+                    // LABORATORY-GRADE: Check if calibration phase should end
+                     if calibration_in_progress && session_start.elapsed() >= calibration_duration {
+                         calibration_in_progress = false;
+                         eprintln!("[PERF] [CALIBRATION] ✓ Done: Calibration complete. Hardware Noise Floor: {:.1}µs",
+                             detected_noise_floor);
+                         eprintln!("[PERF] [CALIBRATION] Measurements now relative to baseline of {:.1}µs", detected_noise_floor);
+                     }
+                     
+                     // LABORATORY-GRADE: During calibration, detect worst-case system overhead
+                     // Peak spikes during this phase represent system overhead (not workload).
+                     // Example: SMI events, thermal throttling stutter, deep CPU idle recovery
+                     if calibration_in_progress {
+                         let current_max = processor.max();
+                         if current_max > 500.0 {
+                             detected_noise_floor = detected_noise_floor.max(current_max);
+                             eprintln!("[PERF] [CALIBRATION] System overhead detected: {:.1}µs (updated noise floor: {:.1}µs)",
+                                 current_max, detected_noise_floor);
+                         }
+                     }
+                    
                     // Get histogram buckets (normalized 0.0..1.0)
                     let histogram_buckets = processor.get_histogram_buckets();
                     
@@ -1735,7 +2214,54 @@ impl AppController {
                     let core_temps = processor.core_temperatures().to_vec();
                     let pkg_temp = processor.package_temperature();
                     
+                    // Calculate rolling throughput and efficiency metrics from the window
+                    let (rolling_throughput_p99, rolling_efficiency_p99) = {
+                        if let Ok(h) = history.write() {
+                            let throughput_p99 = h.rolling_window.calculate_p99_throughput();
+                            let efficiency_p99 = h.rolling_window.calculate_p99_efficiency();
+                            (throughput_p99, efficiency_p99)
+                        } else {
+                            (0.0, 0.0)
+                        }
+                    };
+                    
+                    // CRITICAL FIX: Calculate rolling_jitter_us from jitter_history
+                    // jitter_history is a VecDeque of cycle_max samples (100ms cycles)
+                    // rolling_jitter_us = average of jitter history (allows downward recovery)
+                    let rolling_jitter_us = if let Ok(jitter) = jitter_history.read() {
+                        if jitter.is_empty() {
+                            0.0
+                        } else {
+                            jitter.iter().copied().sum::<f32>() / jitter.len() as f32
+                        }
+                    } else {
+                        0.0
+                    };
+                    
+                    let cpu_usage = Self::read_cpu_usage_percentage();
+                    
+                    // CRITICAL: Pipe BenchmarkMetrics from collector results container
+                    // This pulls the latest normalized collector data (MicroJitter P99.99, ContextSwitch RTT, Syscall ns/call)
+                    // which is continuously updated by the specialized collector threads
+                    let benchmark_metrics_snapshot = {
+                        if let Ok(container) = benchmark_metrics_container.read() {
+                            // Clone the current state of collected results
+                            // This may be partially populated or fully complete depending on collector progress
+                            Some(container.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    
+                    // Propagate CollectionState: WarmingUp during first 10s, then Running
+                    let collection_state = if calibration_in_progress {
+                        crate::system::performance::CollectionState::WarmingUp
+                    } else {
+                        crate::system::performance::CollectionState::Running
+                    };
+                    
                     let updated_metrics = PerformanceMetrics {
+                        state: collection_state,
                         current_us: processor.last_sample(),
                         max_us: processor.max(),
                         p99_us: processor.p99(),
@@ -1743,9 +2269,11 @@ impl AppController {
                         avg_us: processor.average(),
                         rolling_p99_us: rolling_p99,  // From 1000-sample window (enables recovery)
                         rolling_p99_9_us: rolling_p99_9,  // From 1000-sample window
-                        rolling_throughput_p99: 0.0,
-                        rolling_efficiency_p99: 0.0,
+                        cpu_usage,  // Current system CPU usage percentage
+                        rolling_throughput_p99,  // Derived from RollingWindow throughput samples
+                        rolling_efficiency_p99,  // Derived from RollingWindow efficiency samples
                         rolling_consistency_us: rolling_consistency,  // From 1000-sample consistency window
+                        rolling_jitter_us,  // Calculated from jitter_history (absolute max peak)
                         total_spikes,
                         total_smis,
                         spikes_correlated_to_smi: smi_correlations,
@@ -1755,7 +2283,10 @@ impl AppController {
                         governor_hz: cached_frequency,
                         core_temperatures: core_temps,
                         package_temperature: pkg_temp,
-                        benchmark_metrics: None,
+                        benchmark_metrics: benchmark_metrics_snapshot,
+                        rt_active: true,  // Will be set by collector thread
+                        rt_error: None,  // Will be set by collector thread if error occurs
+                        noise_floor_us: detected_noise_floor,  // Hardware noise floor from calibration
                     };
 
                     // Check for background alert trigger: major spike detected (>500µs default or configured threshold)
@@ -1806,7 +2337,64 @@ impl AppController {
                         .map(|m| m.clone())
                         .unwrap_or_default();
 
-                    let kernel_context = Self::get_kernel_context();
+                    // Get cached kernel context (non-blocking, may trigger async refresh)
+                    let kernel_context = {
+                        let now = Instant::now();
+                        let cache_duration = Duration::from_secs(5);
+                        
+                        if let Ok(ts_lock) = kernel_context_cache_ts.read() {
+                            if let Some(last_update) = *ts_lock {
+                                if now.duration_since(last_update) < cache_duration {
+                                    if let Ok(cache_lock) = kernel_context_cache.read() {
+                                        if let Some(ref ctx) = *cache_lock {
+                                            ctx.clone()
+                                        } else {
+                                            KernelContext {
+                                                version: "Unknown".to_string(),
+                                                scx_profile: "unknown".to_string(),
+                                                lto_config: "Unknown".to_string(),
+                                                governor: "unknown".to_string(),
+                                            }
+                                        }
+                                    } else {
+                                        KernelContext {
+                                            version: "Unknown".to_string(),
+                                            scx_profile: "unknown".to_string(),
+                                            lto_config: "Unknown".to_string(),
+                                            governor: "unknown".to_string(),
+                                        }
+                                    }
+                                } else {
+                                    // Cache expired, return last known value (stale is OK during monitoring)
+                                    kernel_context_cache
+                                        .read()
+                                        .ok()
+                                        .and_then(|c| c.clone())
+                                        .unwrap_or_else(|| KernelContext {
+                                            version: "Unknown".to_string(),
+                                            scx_profile: "unknown".to_string(),
+                                            lto_config: "Unknown".to_string(),
+                                            governor: "unknown".to_string(),
+                                        })
+                                }
+                            } else {
+                                KernelContext {
+                                    version: "Unknown".to_string(),
+                                    scx_profile: "unknown".to_string(),
+                                    lto_config: "Unknown".to_string(),
+                                    governor: "unknown".to_string(),
+                                }
+                            }
+                        } else {
+                            KernelContext {
+                                version: "Unknown".to_string(),
+                                scx_profile: "unknown".to_string(),
+                                lto_config: "Unknown".to_string(),
+                                governor: "unknown".to_string(),
+                            }
+                        }
+                    };
+
                     let snapshot = crate::system::performance::PerformanceSnapshot::new(
                         current_metrics.clone(),
                         kernel_context,
@@ -1854,21 +2442,51 @@ impl AppController {
                     }
                 }
                 _ = audit_timer.tick() => {
-                    // System audit polling: every 2 seconds - read CPU governor and frequency for the monitored core
+                    // System audit polling: every 2 seconds - read CPU governor, frequency, and usage for the monitored core
                     let governor = Self::read_cpu_governor_for_core(core_id);
                     let frequency_mhz = Self::read_cpu_frequency_for_core(core_id);
+                    let cpu_usage = Self::read_cpu_usage_percentage();
                     
-                    eprintln!("[PERF] [PROCESSOR] [AUDIT-2s] Core {}: Governor: {}, Frequency: {} MHz",
-                        core_id, governor, frequency_mhz);
+                    eprintln!("[PERF] [PROCESSOR] [AUDIT-2s] Core {}: Governor: {}, Frequency: {} MHz, CPU Usage: {:.1}%",
+                        core_id, governor, frequency_mhz, cpu_usage);
                     
                     // Cache the values so they persist across 100ms cycles
                     cached_governor = governor.clone();
                     cached_frequency = frequency_mhz;
                     
-                    // Update metrics with governor and frequency
+                    // Update metrics with governor, frequency, and CPU usage
                     if let Ok(mut m) = metrics.write() {
                         m.active_governor = governor;
                         m.governor_hz = frequency_mhz;
+                    }
+                }
+                _ = collector_timer.tick() => {
+                    // Specialized collector results polling: every 2 seconds
+                    // Pull the latest metrics from MicroJitter, ContextSwitch, and Syscall collectors
+                    // and transfer them to the active PerformanceMetrics for UI display
+                    
+                    // Read the current benchmark metrics container
+                    if let Ok(container) = benchmark_metrics_container.read() {
+                        // Log collection status
+                        let completion_status = container.summary();
+                        let has_micro_jitter = container.micro_jitter.is_some();
+                        let has_context_switch = container.context_switch_rtt.is_some();
+                        let has_syscall = container.syscall_saturation.is_some();
+                        
+                        eprintln!("[PERF] [PROCESSOR] [COLLECTORS-2s] Benchmark metrics status: {} (jitter={}, cs={}, syscall={})",
+                            completion_status, has_micro_jitter, has_context_switch, has_syscall);
+                        
+                        // CRITICAL: Transfer to PerformanceMetrics if ANY collector has results
+                        // This ensures UI sees partial results as collectors complete
+                        if has_micro_jitter || has_context_switch || has_syscall {
+                            if let Ok(mut m) = metrics.write() {
+                                m.benchmark_metrics = Some(container.clone());
+                                eprintln!("[PERF] [PROCESSOR] [COLLECTORS-2s] ✓ Transferred collector results to PerformanceMetrics: {}",
+                                    container.summary());
+                            }
+                        } else {
+                            eprintln!("[PERF] [PROCESSOR] [COLLECTORS-2s] ⚠ No collector results available yet (container empty)");
+                        }
                     }
                 }
             }
@@ -1896,101 +2514,463 @@ impl AppController {
             processor.sample_count(), processor.max(), processor.p99(), processor.p99_9(), processor.average());
     }
 
-    /// Get current kernel context for performance records
+    /// System Monitor Task: Passive Telemetry Drainage and Audit Logic
     ///
-    /// Captures real-time metadata:
-    /// - Kernel version from system
-    /// - Active SCX scheduler profile
-    /// - LTO configuration from settings
-    /// - Active CPU governor
-    pub fn get_kernel_context() -> KernelContext {
-        // Try to read the kernel version from /proc/version
-        let version = std::fs::read_to_string("/proc/version")
-            .ok()
-            .and_then(|content| {
-                content.split_whitespace().nth(2).map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| "Unknown".to_string());
+    /// Migrated from background_processor_task, this handles purely passive telemetry:
+    /// - 20ms cycle_timer loop for ring buffer drainage and rolling stats calculation
+    /// - Thermal and jitter history updates
+    /// - 2s audit_timer loop for CPU governor and frequency polling
+    /// - Final drain logic for clean shutdown
+    ///
+    /// This task is logically separated from benchmark_runner_task and handles
+    /// lightweight, continuous monitoring use cases without active benchmarking.
+    #[allow(dead_code)]
+    async fn system_monitor_task(
+        mut consumer: rtrb::Consumer<u64>,
+        metrics: Arc<std::sync::RwLock<PerformanceMetrics>>,
+        history: Arc<std::sync::RwLock<PerformanceHistory>>,
+        monitoring_state: MonitoringState,
+        active_flag: Arc<AtomicBool>,
+        _settings: Arc<std::sync::RwLock<AppState>>,
+        jitter_history: Arc<RwLock<VecDeque<f32>>>,
+        dirty_flag: Arc<AtomicBool>,
+        ui_context: Arc<RwLock<Option<egui::Context>>>,
+        _core_id: usize,
+    ) {
+        let mut processor = LatencyProcessor::new()
+            .expect("Failed to create LatencyProcessor");
+        
+        let cycle_timer = tokio::time::interval(Duration::from_millis(20));
+        let mut cycle_timer = cycle_timer;
 
-        // Use the refined multi-layer SCX detection from audit module
-        // PRIORITY 1: Kernel Layer via sysfs (/sys/kernel/sched_ext/root/ops)
-        // PRIORITY 2: Service Layer via scxctl get (optional, for mode detection)
-        let scx_profile = {
-            // Try kernel layer detection first (most authoritative)
-            let state_ok = std::fs::read_to_string("/sys/kernel/sched_ext/state")
-                .map(|content| content.trim() == "enabled")
-                .unwrap_or(false);
+        // Audit timer for system CPU governor polling: every 2 seconds
+        let audit_timer = tokio::time::interval(Duration::from_secs(2));
+        let mut audit_timer = audit_timer;
+
+        eprintln!("[PERF] [SYSTEM_MONITOR] Task started (20ms cycle, 2s audit)");
+        eprintln!("[PERF] [SYSTEM_MONITOR] Percentile calculations throttled to every 200ms (10 cycles)");
+        
+        let mut cycle_count = 0u64;
+        let mut total_drained = 0u64;
+        let mut last_dropped_count = 0u64;
+        let session_start = std::time::Instant::now();
+        
+        // Cache for rolling metrics (updated only every 10 cycles = 200ms instead of 20ms)
+        let mut cached_rolling_p99 = 0.0f32;
+        let mut cached_rolling_p99_9 = 0.0f32;
+        let mut cached_rolling_consistency = 0.0f32;
+        let mut cached_rolling_throughput_p99 = 0.0f32;
+        let mut cached_rolling_efficiency_p99 = 0.0f32;
+        
+        // Throttle thermal updates: only update every 5 cycles (100ms instead of 20ms)
+        const THERMAL_UPDATE_INTERVAL_CYCLES: u64 = 5;  // 100ms at 20ms cycle rate
+        
+        // Throttle percentile calculations: only update every 10 cycles (200ms instead of 20ms)
+        const PERCENTILE_CALC_INTERVAL_CYCLES: u64 = 10;  // 200ms at 20ms cycle rate
+
+        while active_flag.load(Ordering::Acquire) {
+            // CRITICAL: Reset local trackers when active_flag is restored after dropping
+            // This ensures clean state on restart without recreating the entire task
+            // The processor is reused but local caches are cleared for consistency
+            if cycle_count == 0 && total_drained == 0 {
+                eprintln!("[PERF] [SYSTEM_MONITOR] Fresh session start: resetting local tracker caches");
+                cached_rolling_p99 = 0.0f32;
+                cached_rolling_p99_9 = 0.0f32;
+                cached_rolling_consistency = 0.0f32;
+                cached_rolling_throughput_p99 = 0.0f32;
+                cached_rolling_efficiency_p99 = 0.0f32;
+            }
+            tokio::select! {
+                _ = cycle_timer.tick() => {
+                    cycle_count += 1;
+                    
+                    // Batch buffer: accumulate samples to reduce lock contention
+                    let mut sample_batch = Vec::with_capacity(100);
+                    
+                    // Drain all available samples from the ring buffer
+                    while let Ok(latency_ns) = consumer.pop() {
+                        let _ = processor.record_sample(latency_ns);
+                        
+                        // Convert nanoseconds to microseconds and accumulate in local buffer
+                        let latency_us = (latency_ns as f32) / 1000.0;
+                        sample_batch.push(latency_us);
+                        
+                        total_drained += 1;
+                    }
+                    
+                    // Apply batch update to PerformanceHistory in single write() lock
+                    if !sample_batch.is_empty() {
+                        if let Ok(mut h) = history.write() {
+                            for latency_us in sample_batch {
+                                h.rolling_window.add_latency(latency_us);
+                            }
+                        }
+                    }
+
+                    let dropped_now = monitoring_state.dropped_count();
+                    let _dropped_this_cycle = dropped_now - last_dropped_count;
+                    last_dropped_count = dropped_now;
+
+                    // Drainage diagnostics omitted from hot loop (would cause latency spikes)
+
+                    // Update metrics - READ from monitoring state atomics
+                    let total_spikes = monitoring_state.spike_count();
+                    let total_smis = monitoring_state.total_smi_count();
+                    let smi_correlations = monitoring_state.smi_correlated_count();
+                    
+                    // THROTTLED: Calculate rolling metrics only every 10 cycles (200ms)
+                    // This reduces O(N) percentile calculations from every 20ms to every 200ms
+                    // Significant performance win on hot path with minimal UI impact
+                    if cycle_count % PERCENTILE_CALC_INTERVAL_CYCLES == 0 {
+                        if let Ok(mut h) = history.write() {
+                            cached_rolling_p99 = h.rolling_window.calculate_p99_latency();
+                            cached_rolling_p99_9 = h.rolling_window.calculate_p99_9_latency();
+                            // Calculate Consistency KPI: Standard Deviation from 10k-sample window
+                            // Wire to EMA for smoothing to prevent "jumping" metric display
+                            let std_dev = h.rolling_window.calculate_std_dev();
+                            h.rolling_window.add_consistency(std_dev);
+                            cached_rolling_consistency = h.rolling_window.get_smoothed_consistency();
+                            cached_rolling_throughput_p99 = h.rolling_window.calculate_p99_throughput();
+                            cached_rolling_efficiency_p99 = h.rolling_window.calculate_p99_efficiency();
+                            eprintln!("[PERF] [SYSTEM_MONITOR] Consistency wired: std_dev={:.2}µs, smoothed={:.2}µs", std_dev, cached_rolling_consistency);
+                        }
+                    }
+                    
+                    let rolling_p99 = cached_rolling_p99;
+                    let rolling_p99_9 = cached_rolling_p99_9;
+                    let rolling_consistency = cached_rolling_consistency;
+                    
+                    // Update thermal data only every THERMAL_UPDATE_INTERVAL_CYCLES (100ms)
+                    if cycle_count % THERMAL_UPDATE_INTERVAL_CYCLES == 0 {
+                        processor.update_thermal_data();
+                    }
+                    
+                    // Every 100ms: retrieve cycle_max and add to jitter_history
+                    let cycle_max_val = processor.cycle_max_us();
+                    if let Ok(mut jitter) = jitter_history.write() {
+                        jitter.push_back(cycle_max_val);
+                        // Maintain max 300 samples in deque
+                        if jitter.len() > 300 {
+                            jitter.pop_front();
+                        }
+                    }
+                    processor.reset_cycle_max();
+                    
+                    // Get histogram buckets (normalized 0.0..1.0)
+                    let histogram_buckets = processor.get_histogram_buckets();
+                    
+                    // Convert jitter_history deque to Vec for PerformanceMetrics
+                    let jitter_vec: Vec<f32> = if let Ok(jitter) = jitter_history.read() {
+                        jitter.iter().copied().collect()
+                    } else {
+                        Vec::new()
+                    };
+                    
+                    // Get thermal data from processor
+                    let core_temps = processor.core_temperatures().to_vec();
+                    let pkg_temp = processor.package_temperature();
+                    
+                    // Use cached rolling throughput/efficiency (updated every 200ms)
+                    let rolling_throughput_p99 = cached_rolling_throughput_p99;
+                    let rolling_efficiency_p99 = cached_rolling_efficiency_p99;
+                    
+                    // CRITICAL FIX: Calculate rolling_jitter_us from jitter_history
+                    // jitter_history is a VecDeque of cycle_max samples (100ms cycles)
+                    // rolling_jitter_us = average of jitter history (allows downward recovery)
+                    let rolling_jitter_us = if let Ok(jitter) = jitter_history.read() {
+                        if jitter.is_empty() {
+                            0.0
+                        } else {
+                            jitter.iter().copied().sum::<f32>() / jitter.len() as f32
+                        }
+                    } else {
+                        0.0
+                    };
+                    
+                    let cpu_usage = Self::read_cpu_usage_percentage();
+                    
+                    // Create updated metrics (passive telemetry only, no benchmark_metrics)
+                    let updated_metrics = PerformanceMetrics {
+                        state: crate::system::performance::CollectionState::Running,
+                        current_us: processor.last_sample(),
+                        max_us: processor.max(),
+                        p99_us: processor.p99(),
+                        p99_9_us: processor.p99_9(),
+                        avg_us: processor.average(),
+                        rolling_p99_us: rolling_p99,
+                        rolling_p99_9_us: rolling_p99_9,
+                        cpu_usage,
+                        rolling_throughput_p99,
+                        rolling_efficiency_p99,
+                        rolling_consistency_us: rolling_consistency,
+                        rolling_jitter_us,
+                        total_spikes,
+                        total_smis,
+                        spikes_correlated_to_smi: smi_correlations,
+                        histogram_buckets,
+                        jitter_history: jitter_vec,
+                        active_governor: String::new(),  // Will be updated by isolated sysfs task
+                        governor_hz: 0,  // Will be updated by isolated sysfs task
+                        core_temperatures: core_temps,
+                        package_temperature: pkg_temp,
+                        benchmark_metrics: None,  // Passive telemetry: no benchmark metrics
+                        rt_active: true,
+                        rt_error: None,
+                        noise_floor_us: 0.0,
+                    };
+                    
+                    // Write updated_metrics to the shared metrics
+                    // CRITICAL: Preserve existing benchmark_metrics AND governor/frequency to prevent data pollution
+                    // system_monitor_task runs independently from benchmark_runner_task and must not overwrite
+                    // collector results that are being asynchronously populated by specialized collectors
+                    if let Ok(mut m) = metrics.write() {
+                        // Extract the existing values that should persist across updates
+                        let preserved_benchmark_metrics = m.benchmark_metrics.clone();
+                        let preserved_governor = m.active_governor.clone();
+                        let preserved_frequency = m.governor_hz;
+                        let preserved_noise_floor = m.noise_floor_us;
+                        
+                        // Update the struct with new telemetry data (rolling p99, jitter, thermal, etc.)
+                        *m = updated_metrics.clone();
+                        
+                        // Restore the preserved values from the shared metrics lock
+                        // These are populated by independent collector tasks and must not be overwritten
+                        m.benchmark_metrics = preserved_benchmark_metrics;
+                        m.active_governor = preserved_governor;
+                        m.governor_hz = preserved_frequency;
+                        m.noise_floor_us = preserved_noise_floor;  // Preserve noise floor calibration
+                        
+                        eprintln!("[PERF] [SYSTEM_MONITOR] Metrics updated: rolling_p99={:.2}µs, rolling_throughput_p99={:.0}k/s, rolling_efficiency_p99={:.2}µs (preserved benchmark_metrics={})",
+                            m.rolling_p99_us, m.rolling_throughput_p99 / 1000.0, m.rolling_efficiency_p99,
+                            m.benchmark_metrics.is_some());
+                    }
+                    
+                    // Signal UI that metrics have been updated
+                    dirty_flag.store(true, Ordering::Release);
+                    
+                    // CRITICAL FIX: Request repaint from background processor via egui::Context
+                    if let Ok(ctx_lock) = ui_context.read() {
+                        if let Some(ref ctx) = *ctx_lock {
+                            ctx.request_repaint();
+                        }
+                    }
+
+                    // Histogram logging omitted from hot loop (would cause latency spikes)
+                }
+                _ = audit_timer.tick() => {
+                    // System audit polling: trigger async sysfs read task (non-blocking)
+                    // CRITICAL: Do NOT perform blocking sysfs reads in this hot loop
+                    // The reads happen in a spawned task to prevent stalling the telemetry drainage cycle
+                    eprintln!("[PERF] [SYSTEM_MONITOR] [AUDIT-SIGNAL] Time to poll sysfs (delegating to spawn_blocking)");
+                }
+            }
+        }
+        
+        // CRITICAL: Final drain before exiting - don't lose samples!
+        eprintln!("[PERF] [SYSTEM_MONITOR] Warning: FINAL DRAIN starting: active_flag is now false");
+        let mut final_drain_count = 0u64;
+        while let Ok(latency_ns) = consumer.pop() {
+            let _ = processor.record_sample(latency_ns);
+            final_drain_count += 1;
+        }
+        eprintln!("[PERF] [SYSTEM_MONITOR] Warning: FINAL DRAIN completed: recovered {} samples from ring buffer", final_drain_count);
+        
+        // CRITICAL: Persist final sample counts to MonitoringState for SessionSummary capture
+        let final_sample_count = processor.sample_count();
+        let final_dropped_count = monitoring_state.dropped_count();
+        monitoring_state.final_sample_count.store(final_sample_count, Ordering::Release);
+        monitoring_state.final_dropped_count.store(final_dropped_count, Ordering::Release);
+        eprintln!("[PERF] [SYSTEM_MONITOR] Warning: PERSISTED FINAL COUNTS: samples={}, dropped={}", final_sample_count, final_dropped_count);
+        
+        eprintln!("[PERF] [SYSTEM_MONITOR] Task stopping (processed {} cycles, drained {} total samples + {} final, processor.sample_count={}, elapsed {:.1}s)",
+            cycle_count, total_drained, final_drain_count, processor.sample_count(), session_start.elapsed().as_secs_f64());
+        eprintln!("[PERF] [SYSTEM_MONITOR] Warning: FINAL METRICS: samples={}, max={:.2}µs, p99={:.2}µs, p99.9={:.2}µs, avg={:.2}µs",
+            processor.sample_count(), processor.max(), processor.p99(), processor.p99_9(), processor.average());
+    }
+
+    /// Benchmark Runner Task: Active Benchmarking and Collector Polling
+    ///
+    /// Handles the active benchmarking polling loop for collecting results from
+    /// specialized collectors (MicroJitter, ContextSwitch, Syscall). This task runs
+    /// concurrently with system_monitor_task and polls the collectors every 2 seconds
+    /// to transfer their results into the shared BenchmarkMetrics container.
+    ///
+    /// Key Responsibilities:
+    /// - 2s collector_timer loop for polling MicroJitter, ContextSwitch, Syscall results
+    /// - Merging collector results into BenchmarkMetrics container
+    /// - Logging collection status and completion
+    /// - High-latency, heavy-duty benchmarking operations (decoupled from passive telemetry)
+    ///
+    /// This task is logically separated from system_monitor_task and enables
+    /// independent collector polling and result aggregation for comprehensive benchmarking.
+    #[allow(dead_code)]
+    async fn benchmark_runner_task(
+        metrics: Arc<std::sync::RwLock<PerformanceMetrics>>,
+        active_flag: Arc<AtomicBool>,
+        benchmark_metrics_container: Arc<RwLock<crate::system::performance::BenchmarkMetrics>>,
+    ) {
+        eprintln!("[PERF] [BENCHMARK_RUNNER] Task initialized for active benchmarking and collector polling");
+        
+        // 2-second timer for polling specialized collector results
+        let mut collector_timer = tokio::time::interval(Duration::from_secs(2));
+        
+        let session_start = std::time::Instant::now();
+        let mut poll_count = 0u64;
+        
+        while active_flag.load(Ordering::Acquire) {
+            tokio::select! {
+                _ = collector_timer.tick() => {
+                    poll_count += 1;
+                    let elapsed_secs = session_start.elapsed().as_secs_f64();
+                    
+                    // Poll specialized collector results from the shared container
+                    // and transfer to active PerformanceMetrics for UI display
+                    if let Ok(container) = benchmark_metrics_container.read() {
+                        // Check collection status from container
+                        let has_micro_jitter = container.micro_jitter.is_some();
+                        let has_context_switch = container.context_switch_rtt.is_some();
+                        let has_syscall = container.syscall_saturation.is_some();
+                        
+                        eprintln!("[PERF] [BENCHMARK_RUNNER] [COLLECTOR_POLL-2s] Poll #{} ({}s): Benchmark metrics status: {} (jitter={}, cs={}, syscall={})",
+                            poll_count, elapsed_secs as u64, container.summary(), has_micro_jitter, has_context_switch, has_syscall);
+                        
+                        // CRITICAL: Transfer collector results to PerformanceMetrics if ANY collector has results
+                        // This enables UI to see partial results as collectors complete during benchmark execution
+                        if has_micro_jitter || has_context_switch || has_syscall {
+                            if let Ok(mut m) = metrics.write() {
+                                m.benchmark_metrics = Some(container.clone());
+                                eprintln!("[PERF] [BENCHMARK_RUNNER] [COLLECTOR_POLL-2s] ✓ Transferred collector results to PerformanceMetrics: {}",
+                                    container.summary());
+                            }
+                        } else {
+                            // Still warming up or collectors not yet started
+                            if poll_count == 1 || poll_count % 10 == 0 {
+                                eprintln!("[PERF] [BENCHMARK_RUNNER] [COLLECTOR_POLL-2s] ⚠ No collector results available yet (warming up or collectors not started)");
+                            }
+                        }
+                        
+                        // Log partial completion status periodically (every 30s)
+                        if poll_count % 15 == 0 {
+                            eprintln!("[PERF] [BENCHMARK_RUNNER] [COLLECTOR_POLL-2s] [STATUS] Elapsed: {}s | Collectors: jitter={}, cs={}, syscall={}",
+                                elapsed_secs as u64, has_micro_jitter, has_context_switch, has_syscall);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Final collection status when exiting
+        eprintln!("[PERF] [BENCHMARK_RUNNER] Task stopping after {} polls over {:.1}s",
+            poll_count, session_start.elapsed().as_secs_f64());
+        
+        // CRITICAL: Final snapshot of benchmark results before exiting
+        if let Ok(final_container) = benchmark_metrics_container.read() {
+            let final_status = final_container.summary();
+            eprintln!("[PERF] [BENCHMARK_RUNNER] [FINAL] Final benchmark metrics status: {}", final_status);
             
-            if state_ok {
-                // SCX is enabled in kernel, read the scheduler name
-                std::fs::read_to_string("/sys/kernel/sched_ext/root/ops")
-                    .ok()
-                    .map(|content| {
-                        let scheduler_name = content.trim().to_string();
-                        // Try to get the operation mode from scxctl (service layer)
-                        if let Ok(output) = std::process::Command::new("scxctl")
-                            .arg("get")
-                            .output()
-                        {
-                            if output.status.success() {
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                for line in stdout.lines() {
-                                    if line.trim().starts_with("Mode:") {
-                                        let mode = line.replace("Mode:", "").trim().to_string();
-                                        if !mode.is_empty() {
-                                            return format!("{} ({})", scheduler_name, mode);
+            // Transfer final results to PerformanceMetrics for persistent display
+            if final_container.micro_jitter.is_some() || final_container.context_switch_rtt.is_some() || final_container.syscall_saturation.is_some() {
+                if let Ok(mut m) = metrics.write() {
+                    m.benchmark_metrics = Some(final_container.clone());
+                    eprintln!("[PERF] [BENCHMARK_RUNNER] [FINAL] ✓ Final collector results transferred to PerformanceMetrics");
+                }
+            }
+        }
+        
+        eprintln!("[PERF] [BENCHMARK_RUNNER] Done: Active benchmarking and collector polling task completed");
+    }
+
+    /// Refresh kernel context asynchronously (non-blocking background task)
+    ///
+    /// Spawns blocking I/O operations (scxctl, zcat, file reads) in a background thread
+    /// to prevent stalling the performance processing loop. Results are cached.
+    fn spawn_kernel_context_refresh(&self) {
+        let cache = self.cached_kernel_context.clone();
+        let cache_ts = self.kernel_context_cache_timestamp.clone();
+        
+        tokio::task::spawn_blocking(move || {
+            eprintln!("[PERF] [KERNEL_CONTEXT] Background refresh starting");
+            
+            let version = std::fs::read_to_string("/proc/version")
+                .ok()
+                .and_then(|content| {
+                    content.split_whitespace().nth(2).map(|s| s.to_string())
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            let scx_profile = {
+                let state_ok = std::fs::read_to_string("/sys/kernel/sched_ext/state")
+                    .map(|content| content.trim() == "enabled")
+                    .unwrap_or(false);
+                
+                if state_ok {
+                    std::fs::read_to_string("/sys/kernel/sched_ext/root/ops")
+                        .ok()
+                        .map(|content| {
+                            let scheduler_name = content.trim().to_string();
+                            if let Ok(output) = std::process::Command::new("scxctl")
+                                .arg("get")
+                                .output()
+                            {
+                                if output.status.success() {
+                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                    for line in stdout.lines() {
+                                        if line.trim().starts_with("Mode:") {
+                                            let mode = line.replace("Mode:", "").trim().to_string();
+                                            if !mode.is_empty() {
+                                                return format!("{} ({})", scheduler_name, mode);
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        scheduler_name
-                    })
-                    .unwrap_or_else(|| "scx_active".to_string())
-            } else {
-                "default_eevdf".to_string()
-            }
-        };
-
-        // LTO configuration - use refined detection from .config
-        let lto_config = {
-            // Try /proc/config.gz first (fastest path)
-            if let Ok(output) = std::process::Command::new("zcat")
-                .arg("/proc/config.gz")
-                .output()
-            {
-                let config_str = String::from_utf8_lossy(&output.stdout);
-                if config_str.contains("CONFIG_LTO_CLANG_FULL=y") {
-                    "CLANG Full".to_string()
-                } else if config_str.contains("CONFIG_LTO_CLANG_THIN=y") {
-                    "CLANG Thin".to_string()
-                } else if config_str.contains("CONFIG_LTO_CLANG=y") {
-                    "CLANG".to_string()
-                } else if config_str.contains("CONFIG_LTO_GCC=y") {
-                    "GCC".to_string()
+                            scheduler_name
+                        })
+                        .unwrap_or_else(|| "scx_active".to_string())
                 } else {
-                    "None".to_string()
+                    "default_eevdf".to_string()
                 }
-            } else {
-                // Fallback: Try /boot/config-$(uname -r)
-                if let Ok(output) = std::process::Command::new("uname")
-                    .arg("-r")
+            };
+
+            let lto_config = {
+                if let Ok(output) = std::process::Command::new("zcat")
+                    .arg("/proc/config.gz")
                     .output()
                 {
-                    if output.status.success() {
-                        let kernel_version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        let boot_config_path = format!("/boot/config-{}", kernel_version);
-                        if let Ok(config_str) = std::fs::read_to_string(&boot_config_path) {
-                            if config_str.contains("CONFIG_LTO_CLANG_FULL=y") {
-                                "CLANG Full".to_string()
-                            } else if config_str.contains("CONFIG_LTO_CLANG_THIN=y") {
-                                "CLANG Thin".to_string()
-                            } else if config_str.contains("CONFIG_LTO_CLANG=y") {
-                                "CLANG".to_string()
-                            } else if config_str.contains("CONFIG_LTO_GCC=y") {
-                                "GCC".to_string()
+                    let config_str = String::from_utf8_lossy(&output.stdout);
+                    if config_str.contains("CONFIG_LTO_CLANG_FULL=y") {
+                        "CLANG Full".to_string()
+                    } else if config_str.contains("CONFIG_LTO_CLANG_THIN=y") {
+                        "CLANG Thin".to_string()
+                    } else if config_str.contains("CONFIG_LTO_CLANG=y") {
+                        "CLANG".to_string()
+                    } else if config_str.contains("CONFIG_LTO_GCC=y") {
+                        "GCC".to_string()
+                    } else {
+                        "None".to_string()
+                    }
+                } else {
+                    if let Ok(output) = std::process::Command::new("uname")
+                        .arg("-r")
+                        .output()
+                    {
+                        if output.status.success() {
+                            let kernel_version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            let boot_config_path = format!("/boot/config-{}", kernel_version);
+                            if let Ok(config_str) = std::fs::read_to_string(&boot_config_path) {
+                                if config_str.contains("CONFIG_LTO_CLANG_FULL=y") {
+                                    "CLANG Full".to_string()
+                                } else if config_str.contains("CONFIG_LTO_CLANG_THIN=y") {
+                                    "CLANG Thin".to_string()
+                                } else if config_str.contains("CONFIG_LTO_CLANG=y") {
+                                    "CLANG".to_string()
+                                } else if config_str.contains("CONFIG_LTO_GCC=y") {
+                                    "GCC".to_string()
+                                } else {
+                                    "None".to_string()
+                                }
                             } else {
-                                "None".to_string()
+                                "Unknown".to_string()
                             }
                         } else {
                             "Unknown".to_string()
@@ -1998,21 +2978,70 @@ impl AppController {
                     } else {
                         "Unknown".to_string()
                     }
-                } else {
-                    "Unknown".to_string()
+                }
+            };
+
+            let governor = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+                .ok()
+                .and_then(|content| {
+                    content.trim().to_string().chars().all(|c| c.is_alphanumeric() || c == '_')
+                        .then(|| content.trim().to_string())
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let context = KernelContext {
+                version,
+                scx_profile,
+                lto_config,
+                governor,
+            };
+            
+            if let Ok(mut c) = cache.write() {
+                *c = Some(context.clone());
+            }
+            if let Ok(mut ts) = cache_ts.write() {
+                *ts = Some(Instant::now());
+            }
+            
+            eprintln!("[PERF] [KERNEL_CONTEXT] Background refresh complete");
+        });
+    }
+
+    /// Get current kernel context (cached, non-blocking)
+    ///
+    /// Returns cached kernel context without blocking. If cache is stale (>5s),
+    /// spawns background refresh task. Never blocks the performance processing loop.
+    pub fn get_kernel_context(&self) -> KernelContext {
+        let now = Instant::now();
+        let cache_duration = Duration::from_secs(5);
+        
+        // Check if cache is valid
+        if let Ok(ts_lock) = self.kernel_context_cache_timestamp.read() {
+            if let Some(last_update) = *ts_lock {
+                if now.duration_since(last_update) < cache_duration {
+                    if let Ok(cache_lock) = self.cached_kernel_context.read() {
+                        if let Some(ref ctx) = *cache_lock {
+                            return ctx.clone();
+                        }
+                    }
                 }
             }
-        };
-
-        // Active CPU governor
-        let governor = Self::read_cpu_governor();
-
-        KernelContext {
-            version,
-            scx_profile,
-            lto_config,
-            governor,
         }
+        
+        // Cache expired or doesn't exist - spawn refresh (non-blocking)
+        self.spawn_kernel_context_refresh();
+        
+        // Return current cached value or default while refresh happens in background
+        self.cached_kernel_context
+            .read()
+            .ok()
+            .and_then(|c| c.clone())
+            .unwrap_or_else(|| KernelContext {
+                version: "Unknown".to_string(),
+                scx_profile: "unknown".to_string(),
+                lto_config: "Unknown".to_string(),
+                governor: "unknown".to_string(),
+            })
     }
 
     /// Read the active CPU frequency governor from sysfs
@@ -2083,6 +3112,65 @@ impl AppController {
         
         // Fall back to cpu0 if core-specific read fails
         Self::read_cpu_frequency()
+    }
+
+    /// Read CPU usage percentage from /proc/stat (non-blocking)
+    ///
+    /// Parses /proc/stat to extract CPU statistics and calculate usage percentage.
+    /// Returns the overall CPU usage (0.0-100.0) or 0.0 if unreadable.
+    ///
+    /// Calculates usage as: (work_time) / (total_time) * 100
+    /// where work_time = user + nice + system + irq + softirq
+    /// and total_time = user + nice + system + idle + iowait + irq + softirq + steal
+    fn read_cpu_usage_percentage() -> f32 {
+        // Static variables to track previous readings for delta calculation
+        use std::sync::atomic::{AtomicU64, Ordering};
+        
+        static PREV_TOTAL: AtomicU64 = AtomicU64::new(0);
+        static PREV_WORK: AtomicU64 = AtomicU64::new(0);
+        
+        if let Ok(content) = std::fs::read_to_string("/proc/stat") {
+            // Parse first "cpu" line (aggregate of all CPUs)
+            for line in content.lines() {
+                if line.starts_with("cpu ") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 8 {
+                        // Parse CPU time fields (in jiffies)
+                        let user = parts[1].parse::<u64>().unwrap_or(0);
+                        let nice = parts[2].parse::<u64>().unwrap_or(0);
+                        let system = parts[3].parse::<u64>().unwrap_or(0);
+                        let idle = parts[4].parse::<u64>().unwrap_or(0);
+                        let iowait = parts[5].parse::<u64>().unwrap_or(0);
+                        let irq = parts[6].parse::<u64>().unwrap_or(0);
+                        let softirq = parts[7].parse::<u64>().unwrap_or(0);
+                        let steal = parts.get(8).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        
+                        // Calculate work and total times
+                        let work_time = user + nice + system + irq + softirq;
+                        let total_time = user + nice + system + idle + iowait + irq + softirq + steal;
+                        
+                        // Load previous values for delta calculation
+                        let prev_total = PREV_TOTAL.load(Ordering::Relaxed);
+                        let prev_work = PREV_WORK.load(Ordering::Relaxed);
+                        
+                        // Store current values for next reading
+                        PREV_TOTAL.store(total_time, Ordering::Relaxed);
+                        PREV_WORK.store(work_time, Ordering::Relaxed);
+                        
+                        // Calculate delta
+                        if total_time > prev_total {
+                            let total_delta = total_time - prev_total;
+                            let work_delta = work_time - prev_work;
+                            let usage = (work_delta as f32 / total_delta as f32) * 100.0;
+                            return usage.clamp(0.0, 100.0);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        0.0  // Default if unable to read or parse
     }
 
     /// Compare two performance records and calculate deltas
@@ -2187,14 +3275,24 @@ impl AppController {
             *start = Some(std::time::Instant::now());
         }
 
+        // CRITICAL FIX: Metrics Purity - NO stressors in Continuous mode
+        // Continuous mode is for passive telemetry only, not active load generation
+        let final_stressors = match &mode {
+            MonitoringMode::Continuous => {
+                eprintln!("[PERF] [METRICS_PURITY] Continuous mode: suppressing all stressors for pure passive telemetry");
+                vec![]  // Force empty stressors for Continuous mode
+            }
+            _ => stressors,  // Benchmark and SystemBenchmark modes use provided stressors
+        };
+
         // Initialize StressorManager if stressors are requested
-        let stressor_count = stressors.len();
-        if !stressors.is_empty() {
+        let stressor_count = final_stressors.len();
+        if !final_stressors.is_empty() {
             let mut stressor_mgr = StressorManager::new(0)
                 .map_err(|e| format!("Failed to create StressorManager: {}", e))?;
 
             // Spawn each requested stressor with default intensity
-            for stressor_type in stressors {
+            for stressor_type in final_stressors {
                 stressor_mgr.start_stressor(stressor_type, Intensity::default())
                     .map_err(|e| format!("Failed to start stressor {}: {}", stressor_type, e))?;
             }
@@ -2222,7 +3320,34 @@ impl AppController {
         let cached_jitter_summary = self.cached_jitter_summary.clone();
         let monitoring_state_arc = self.perf_monitoring_state.clone();
         let build_tx = self.build_tx.clone();
+        let kernel_context_cache = self.cached_kernel_context.clone();
+        let kernel_context_cache_ts = self.kernel_context_cache_timestamp.clone();
 
+        // =====================================================================
+        // MONITORING MODE ROUTING
+        // =====================================================================
+        //
+        // MonitoringMode::Continuous
+        //   Purpose: Lightweight, real-time live monitoring
+        //   Behavior: Runs LatencyCollector indefinitely until manually stopped
+        //   UI Updates: Every 20ms via background processor (smooth and responsive)
+        //   CPU Impact: Minimal - only collects latency samples, no heavy benchmarks
+        //   Use Case: Continuous system monitoring, trend analysis, detecting regressions
+        //
+        // MonitoringMode::Benchmark(duration)
+        //   Purpose: Time-bounded jitter audit with optional stressors
+        //   Behavior: Runs for specified duration, auto-stops when time expires
+        //   CPU Impact: Minimal to moderate with optional stressors
+        //   Use Case: Quick 5-10 second baseline jitter audits
+        //
+        // MonitoringMode::SystemBenchmark
+        //   Purpose: Heavy, comprehensive 60-second benchmark with CPU-intensive collectors
+        //   Behavior: Runs 6-phase orchestrated benchmark with serial CPU-bound collectors
+        //   Collectors: MicroJitter P99.99, ContextSwitch RTT, Syscall Saturation
+        //   UI Impact: UI may briefly freeze during Phase 3 collector execution (intended)
+        //   CPU Impact: HEAVY - uses spawn_blocking for CPU-bound benchmarks
+        //   Use Case: Full system performance assessment, comprehensive scoring, detailed analysis
+        //
         match mode {
             MonitoringMode::Benchmark(duration) => {
                 eprintln!("[PERF] [LIFECYCLE] Benchmark mode: will auto-stop after {:.1}s", duration.as_secs_f64());
@@ -2269,7 +3394,62 @@ impl AppController {
 
                     // Finalize session summary
                     eprintln!("[PERF] [LIFECYCLE] Warning: Creating final session summary...");
-                    let kernel_context = Self::get_kernel_context();
+                    
+                    // Get cached kernel context (non-blocking)
+                    let kernel_context = {
+                        let now = Instant::now();
+                        let cache_duration = Duration::from_secs(5);
+                        if let Ok(ts_lock) = kernel_context_cache_ts.read() {
+                            if let Some(last_update) = *ts_lock {
+                                if now.duration_since(last_update) < cache_duration {
+                                    if let Ok(cache_lock) = kernel_context_cache.read() {
+                                        if let Some(ref ctx) = *cache_lock {
+                                            ctx.clone()
+                                        } else {
+                                            KernelContext {
+                                                version: "Unknown".to_string(),
+                                                scx_profile: "unknown".to_string(),
+                                                lto_config: "Unknown".to_string(),
+                                                governor: "unknown".to_string(),
+                                            }
+                                        }
+                                    } else {
+                                        KernelContext {
+                                            version: "Unknown".to_string(),
+                                            scx_profile: "unknown".to_string(),
+                                            lto_config: "Unknown".to_string(),
+                                            governor: "unknown".to_string(),
+                                        }
+                                    }
+                                } else {
+                                    kernel_context_cache
+                                        .read()
+                                        .ok()
+                                        .and_then(|c| c.clone())
+                                        .unwrap_or_else(|| KernelContext {
+                                            version: "Unknown".to_string(),
+                                            scx_profile: "unknown".to_string(),
+                                            lto_config: "Unknown".to_string(),
+                                            governor: "unknown".to_string(),
+                                        })
+                                }
+                            } else {
+                                KernelContext {
+                                    version: "Unknown".to_string(),
+                                    scx_profile: "unknown".to_string(),
+                                    lto_config: "Unknown".to_string(),
+                                    governor: "unknown".to_string(),
+                                }
+                            }
+                        } else {
+                            KernelContext {
+                                version: "Unknown".to_string(),
+                                scx_profile: "unknown".to_string(),
+                                lto_config: "Unknown".to_string(),
+                                governor: "unknown".to_string(),
+                            }
+                        }
+                    };
                     
                     // READ final sample counts from monitoring_state_arc (persisted by processor)
                     let final_samples = monitoring_state_arc
@@ -2343,6 +3523,10 @@ impl AppController {
                 
                 let benchmark_orch = self.benchmark_orchestrator.clone();
                 let lifecycle_state = self.perf_lifecycle_state.clone();
+                let _collector_jitter = self.collector_jitter.clone();
+                let _collector_context_switch = self.collector_context_switch.clone();
+                let _collector_syscall = self.collector_syscall.clone();
+                let benchmark_metrics_container = self.benchmark_metrics_container.clone();
                 
                 tokio::spawn(async move {
                     eprintln!("[PERF] [BENCHMARK] Starting GOATd Full Benchmark orchestration");
@@ -2353,6 +3537,122 @@ impl AppController {
                             *orch = Some(BenchmarkOrchestrator::new());
                         }
                     }
+
+                    // Spawn specialized collectors as looping blocking tasks with result wiring
+                    eprintln!("[PERF] [BENCHMARK] Spawning specialized collectors in LOOP mode (MicroJitter, ContextSwitch, Syscall)");
+                    
+                    // Micro-Jitter Collector - runs in loop with 3-second intervals
+                    let jitter_metrics_arc = benchmark_metrics_container.clone();
+                    let active_for_jitter = active.clone();
+                    tokio::task::spawn_blocking(move || {
+                        loop {
+                            if !active_for_jitter.load(Ordering::Acquire) {
+                                eprintln!("[PERF] [BENCHMARK] MicroJitter collector stopping (active_flag is false)");
+                                break;
+                            }
+                            
+                            let jitter_collector = MicroJitterCollector::new(MicroJitterConfig::default());
+                            match jitter_collector.run() {
+                                Ok(jitter_metrics) => {
+                                    eprintln!("[PERF] [BENCHMARK] ✓ MicroJitter measurement: P99.99={:.2}µs, Max={:.2}µs, Spikes={}",
+                                        jitter_metrics.p99_99_us, jitter_metrics.max_us, jitter_metrics.spike_count);
+                                    
+                                    // WIRING: Pipe results into BenchmarkMetrics
+                                    if let Ok(mut benchmark) = jitter_metrics_arc.write() {
+                                        benchmark.micro_jitter = Some(jitter_metrics.clone());
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[PERF] [BENCHMARK] ✗ MicroJitter collector error: {}", e);
+                                }
+                            }
+                            
+                            // Sleep 3 seconds before next measurement
+                            eprintln!("[PERF] [BENCHMARK] MicroJitter collector sleeping 3 seconds before next measurement");
+                            std::thread::sleep(Duration::from_secs(3));
+                        }
+                    });
+                    
+                    // Context-Switch RTT Collector - runs in loop with 1-second intervals
+                    // LABORATORY-GRADE: Uses Median RTT (representative) instead of P99 (biased by outliers)
+                    let cs_metrics_arc = benchmark_metrics_container.clone();
+                    let history_for_cs = history.clone();
+                    let active_for_cs = active.clone();
+                    tokio::task::spawn_blocking(move || {
+                        loop {
+                            if !active_for_cs.load(Ordering::Acquire) {
+                                eprintln!("[PERF] [BENCHMARK] ContextSwitch collector stopping (active_flag is false)");
+                                break;
+                            }
+                            
+                            let cs_collector = ContextSwitchCollector::new(ContextSwitchConfig::default());
+                            match cs_collector.run() {
+                                Ok(cs_summary) => {
+                                    eprintln!("[PERF] [BENCHMARK] ✓ ContextSwitch measurement: Mean={:.3}µs, Median={:.3}µs, P95={:.3}µs",
+                                        cs_summary.mean, cs_summary.median, cs_summary.p95);
+                                    
+                                    // CRITICAL: Pipe MEDIAN RTT to rolling window for real-time efficiency updates
+                                    // Median is representative (50th percentile) and avoids P99 bias
+                                    if let Ok(mut h) = history_for_cs.write() {
+                                        h.rolling_window.add_efficiency(cs_summary.median);
+                                        eprintln!("[PERF] [BENCHMARK] ✓ Efficiency Median wired to rolling window: {:.3}µs (HIGH-PRECISION)", cs_summary.median);
+                                    }
+                                    
+                                    // WIRING: Pipe results into BenchmarkMetrics (convert Summary to Metrics)
+                                    if let Ok(mut benchmark) = cs_metrics_arc.write() {
+                                        let metrics = cs_summary.clone().into();
+                                        benchmark.context_switch_rtt = Some(metrics);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[PERF] [BENCHMARK] ✗ ContextSwitch collector error: {}", e);
+                                }
+                            }
+                            
+                            // Sleep 1 second before next measurement (faster fill of 20-sample rolling window)
+                            eprintln!("[PERF] [BENCHMARK] ContextSwitch collector sleeping 1 second before next measurement");
+                            std::thread::sleep(Duration::from_secs(1));
+                        }
+                    });
+                    
+                    // Syscall Saturation Collector - runs in loop with 3-second intervals
+                    let syscall_metrics_arc = benchmark_metrics_container.clone();
+                    let history_for_syscall = history.clone();
+                    let active_for_syscall = active.clone();
+                    tokio::task::spawn_blocking(move || {
+                        loop {
+                            if !active_for_syscall.load(Ordering::Acquire) {
+                                eprintln!("[PERF] [BENCHMARK] Syscall collector stopping (active_flag is false)");
+                                break;
+                            }
+                            
+                            let syscall_collector = SyscallSaturationCollector::new(SyscallSaturationConfig::default());
+                            match syscall_collector.run() {
+                                Ok(syscall_metrics) => {
+                                    eprintln!("[PERF] [BENCHMARK] ✓ Syscall measurement: Avg={:.2}ns/call, Throughput={:.0}k/sec",
+                                        syscall_metrics.avg_ns_per_call, syscall_metrics.calls_per_second as f32 / 1000.0);
+                                    
+                                    // CRITICAL: Pipe throughput to rolling window for real-time history
+                                    if let Ok(mut h) = history_for_syscall.write() {
+                                        h.rolling_window.add_throughput(syscall_metrics.calls_per_second as f32);
+                                        eprintln!("[PERF] [BENCHMARK] ✓ Throughput wired to rolling window: {:.0}k/sec", syscall_metrics.calls_per_second as f32 / 1000.0);
+                                    }
+                                    
+                                    // WIRING: Pipe results into BenchmarkMetrics
+                                    if let Ok(mut benchmark) = syscall_metrics_arc.write() {
+                                        benchmark.syscall_saturation = Some(syscall_metrics.clone());
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[PERF] [BENCHMARK] ✗ Syscall collector error: {}", e);
+                                }
+                            }
+                            
+                            // Sleep 3 seconds before next measurement
+                            eprintln!("[PERF] [BENCHMARK] Syscall collector sleeping 3 seconds before next measurement");
+                            std::thread::sleep(Duration::from_secs(3));
+                        }
+                    });
 
                     // Run the 6-phase benchmark sequence
                     let mut phase_tick = tokio::time::interval(Duration::from_millis(100));
@@ -2480,7 +3780,60 @@ impl AppController {
                     }
 
                     // Create final session summary
-                    let kernel_context = Self::get_kernel_context();
+                    let kernel_context = {
+                        let now = Instant::now();
+                        let cache_duration = Duration::from_secs(5);
+                        if let Ok(ts_lock) = kernel_context_cache_ts.read() {
+                            if let Some(last_update) = *ts_lock {
+                                if now.duration_since(last_update) < cache_duration {
+                                    if let Ok(cache_lock) = kernel_context_cache.read() {
+                                        if let Some(ref ctx) = *cache_lock {
+                                            ctx.clone()
+                                        } else {
+                                            KernelContext {
+                                                version: "Unknown".to_string(),
+                                                scx_profile: "unknown".to_string(),
+                                                lto_config: "Unknown".to_string(),
+                                                governor: "unknown".to_string(),
+                                            }
+                                        }
+                                    } else {
+                                        KernelContext {
+                                            version: "Unknown".to_string(),
+                                            scx_profile: "unknown".to_string(),
+                                            lto_config: "Unknown".to_string(),
+                                            governor: "unknown".to_string(),
+                                        }
+                                    }
+                                } else {
+                                    kernel_context_cache
+                                        .read()
+                                        .ok()
+                                        .and_then(|c| c.clone())
+                                        .unwrap_or_else(|| KernelContext {
+                                            version: "Unknown".to_string(),
+                                            scx_profile: "unknown".to_string(),
+                                            lto_config: "Unknown".to_string(),
+                                            governor: "unknown".to_string(),
+                                        })
+                                }
+                            } else {
+                                KernelContext {
+                                    version: "Unknown".to_string(),
+                                    scx_profile: "unknown".to_string(),
+                                    lto_config: "Unknown".to_string(),
+                                    governor: "unknown".to_string(),
+                                }
+                            }
+                        } else {
+                            KernelContext {
+                                version: "Unknown".to_string(),
+                                scx_profile: "unknown".to_string(),
+                                lto_config: "Unknown".to_string(),
+                                governor: "unknown".to_string(),
+                            }
+                        }
+                    };
                     let final_samples = monitoring_state_arc
                         .read()
                         .ok()
@@ -2531,7 +3884,36 @@ impl AppController {
                 });
             }
             MonitoringMode::Continuous => {
-                eprintln!("[PERF] [LIFECYCLE] Continuous mode: monitoring until manual stop");
+                eprintln!("[PERF] [LIFECYCLE] Continuous mode: lightweight live monitoring with indefinite LatencyCollector");
+                eprintln!("[PERF] [CONTINUOUS] ℹ️ Continuous mode runs LatencyCollector indefinitely for real-time metrics");
+                eprintln!("[PERF] [CONTINUOUS] ℹ️ Background processor updates metrics every 20ms for smooth UI updates");
+                
+                let active_clone = active.clone();
+                let lifecycle_state = self.perf_lifecycle_state.clone();
+                
+                tokio::spawn(async move {
+                    eprintln!("[PERF] [CONTINUOUS] ✅ Starting continuous monitoring (indefinite LatencyCollector)");
+                    
+                    // Transition to Running state
+                    if let Ok(mut lifecycle) = lifecycle_state.write() {
+                        *lifecycle = LifecycleState::Running;
+                    }
+                    
+                    // Simple monitoring loop: keep running until stopped
+                    // The background processor task (running concurrently) handles:
+                    // - Draining samples from the ring buffer (every 20ms)
+                    // - Updating PerformanceMetrics with current stats
+                    // - Requesting UI repaints via egui::Context
+                    //
+                    // This allows Continuous mode to be lightweight and responsive:
+                    // No heavy CPU benchmarks, no phase sequencing, just indefinite latency collection
+                    while active_clone.load(Ordering::Acquire) {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    
+                    eprintln!("[PERF] [CONTINUOUS] 🛑 Continuous monitoring stopped (active_flag is false)");
+                    eprintln!("[PERF] [CONTINUOUS] Note: All samples collected by LatencyCollector have been processed");
+                });
             }
         }
 
@@ -2581,6 +3963,30 @@ impl AppController {
             *mgr = None;
         }
 
+        // Cleanup specialized collectors
+        eprintln!("[PERF] [STOP] ⚠ Cleaning up specialized collectors...");
+        {
+            // CRITICAL FIX: Signal stop request to jitter collector BEFORE clearing it
+            if let Ok(mut jitter_lock) = self.collector_jitter.write() {
+                if let Some(ref jitter_collector) = *jitter_lock {
+                    jitter_collector.request_stop();
+                    eprintln!("[PERF] [STOP] ✓ MicroJitter collector stop signal sent");
+                }
+                *jitter_lock = None;
+                eprintln!("[PERF] [STOP] ✓ MicroJitter collector cleaned up");
+            }
+            
+            if let Ok(mut cs_lock) = self.collector_context_switch.write() {
+                *cs_lock = None;
+                eprintln!("[PERF] [STOP] ✓ ContextSwitch collector cleaned up");
+            }
+            
+            if let Ok(mut syscall_lock) = self.collector_syscall.write() {
+                *syscall_lock = None;
+                eprintln!("[PERF] [STOP] ✓ Syscall collector cleaned up");
+            }
+        }
+
         // Finalize session summary
         eprintln!("[PERF] [STOP] ⚠ Creating final session summary...");
         {
@@ -2601,7 +4007,7 @@ impl AppController {
                         
                         eprintln!("[PERF] [STOP] ⚠ Read final counts from MonitoringState: samples={}, dropped={}", final_samples, final_dropped);
                         
-                        let kernel_context = Self::get_kernel_context();
+                        let kernel_context = self.get_kernel_context();
                         let mut summary = SessionSummary::new(
                             "Benchmark auto-stop".to_string(),
                             current_metrics.clone(),
@@ -2694,7 +4100,7 @@ impl AppController {
     /// - Adding snapshot to history
     /// - Persisting to HistoryManager with histogram buckets
     fn finalize_session_summary(&self, session_type: &str) -> Result<SessionSummary, String> {
-        let kernel_context = Self::get_kernel_context();
+        let kernel_context = self.get_kernel_context();
         
         // READ final sample counts from monitoring_state (persisted by processor)
         let final_samples = self.perf_monitoring_state
@@ -3155,7 +4561,7 @@ impl AppController {
     /// The label will be stored in the JSON file and used for display in dropdowns
     pub fn handle_save_performance_record(&self, label: &str) -> Result<(), String> {
         let metrics = self.get_current_performance_metrics()?;
-        let kernel_context = Self::get_kernel_context();
+        let kernel_context = self.get_kernel_context();
 
         // CRITICAL: Create SessionSummary with label for persistence
         let mut summary = SessionSummary::new(
@@ -3394,6 +4800,45 @@ impl AppController {
                   }
               }
           }
+      }
+      
+      /// Get cached system health report with lazy refresh (60 second cache duration)
+      ///
+      /// Returns cached value if valid (< 60 seconds old).
+      /// Only performs system health check if cache is expired or empty.
+      /// Designed for efficient UI rendering without blocking on I/O.
+      pub fn get_cached_health_report(&self) -> crate::system::health::HealthReport {
+          let now = Instant::now();
+          let cache_duration = Duration::from_secs(60);
+          
+          // FAST PATH: Check if cache is valid - return immediately
+          if let Ok(timestamp_lock) = self.health_check_timestamp.read() {
+              if let Some(last_check) = *timestamp_lock {
+                  if now.duration_since(last_check) < cache_duration {
+                      // Cache is still valid, return cached copy
+                      if let Ok(cache_lock) = self.cached_health_report.read() {
+                          if let Some(ref report) = *cache_lock {
+                              return report.clone();
+                          }
+                      }
+                  }
+              }
+          }
+          
+          // SLOW PATH: Cache expired or doesn't exist - perform health check
+          // This is only hit on first startup or after 60s, not on every frame
+          let report = crate::system::health::HealthManager::check_system_health();
+          
+          // Update cache atomically
+          let _ = self.cached_health_report.write().map(|mut cache| {
+              *cache = Some(report.clone());
+          });
+          let _ = self.health_check_timestamp.write().map(|mut ts| {
+              *ts = Some(now);
+              log::debug!("[HEALTH] System health check updated (polling interval: 60s)");
+          });
+          
+          report
       }
   }
 

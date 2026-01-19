@@ -372,7 +372,8 @@ pub fn render_build(
         });
         
         // Display truncation notice if log is capped
-        if app.ui_state.build_log.lines().count() > 10000 {
+        const MAX_LOG_LINES: usize = 5000;
+        if app.ui_state.build_log.len() >= MAX_LOG_LINES {
             ui.colored_label(
                 egui::Color32::from_rgb(255, 150, 0),
                 "⚠️ Displaying last ~5000 lines. Full build log is preserved on disk."
@@ -385,11 +386,16 @@ pub fn render_build(
             .auto_shrink([false; 2])
             .stick_to_bottom(true)  // Auto-scroll to bottom on new content
             .show(ui, |ui| {
-                ui.monospace(if app.ui_state.build_log.is_empty() {
-                    "Awaiting build output..."
+                // Render VecDeque as newline-separated text (O(N) but only in render, not on every log event)
+                let log_text = if app.ui_state.build_log.is_empty() {
+                    "Awaiting build output...".to_string()
                 } else {
-                    &app.ui_state.build_log
-                });
+                    app.ui_state.build_log.iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                ui.monospace(log_text);
                 ui.add_space(8.0);  // Add bottom padding to prevent clipping
             });
     });
@@ -471,7 +477,7 @@ pub fn render_build_controls(
                 ui.separator();
                 
                 if ui.button("🔄 Clear Log").clicked() {
-                    app.ui_state.build_log.clear();
+                    app.ui_state.build_log.clear();  // VecDeque::clear() is O(n) but user-initiated, not per-frame
                 }
                 
                 // Add some spacing at the end

@@ -323,7 +323,84 @@ pub fn render_kernel_manager(
             
             // SCX Scheduler Section
             ui.group(|ui| {
-                ui.heading("⚙️ SCX Scheduler Configuration");
+                // ========== HEADER WITH STATUS BADGE (Horizontal) ==========
+                // Combines title and status badge in a single row for better space efficiency
+                ui.horizontal(|ui| {
+                    // Left: Title
+                    ui.heading("⚙️ SCX Scheduler Configuration");
+                    
+                    // Right: Status badge with dynamic color and styling
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Determine badge color, icon, and text based on SCX state
+                        let (badge_color, badge_icon, badge_text) = if app.ui_state.scx_activating {
+                            (egui::Color32::from_rgb(255, 200, 0), "⟳", "Activating...")
+                        } else if app.ui_state.scx_enabled {
+                            (egui::Color32::from_rgb(100, 200, 100), "✓", "Enabled")
+                        } else {
+                            (egui::Color32::from_rgb(180, 100, 100), "✗", "Disabled")
+                        };
+                        
+                        let badge_text_colored = egui::RichText::new(format!("{} {}", badge_icon, badge_text))
+                            .strong()
+                            .color(egui::Color32::WHITE);
+                        
+                        // Render badge as a frame with background color
+                        egui::Frame::none()
+                            .fill(badge_color)
+                            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                            .rounding(egui::Rounding::same(4.0))
+                            .show(ui, |ui| {
+                                ui.label(badge_text_colored);
+                            });
+                    });
+                });
+                
+                ui.separator();
+                
+                // ========== BINARY PATH ROW (Horizontal) ==========
+                // Shows active SCX binary with truncation, tooltip, and copy button
+                ui.horizontal(|ui| {
+                    // Left: Label
+                    ui.label(egui::RichText::new("Active Binary:").small().color(egui::Color32::from_rgb(120, 120, 120)));
+                    
+                    // Middle: Path (truncated)
+                    if app.ui_state.active_scx_binary.is_empty() {
+                        ui.monospace(egui::RichText::new("(EEVDF kernel scheduler - built-in)")
+                            .small()
+                            .color(egui::Color32::from_rgb(120, 120, 120)));
+                    } else {
+                        // Truncate path to fit display while preserving extension and architecture
+                        let truncated = truncate_path(&app.ui_state.active_scx_binary, 60);
+                        let path_response = ui.monospace(&truncated);
+                        
+                        // Add full path tooltip on hover
+                        path_response.on_hover_text(&app.ui_state.active_scx_binary);
+                        
+                        // Right: Copy button with feedback
+                        // Check if we should show "Copied!" feedback (expires after 2 seconds)
+                        let mut show_copy_feedback = false;
+                        if let Some((_, time)) = &app.ui_state.copy_to_clipboard_feedback {
+                            if time.elapsed().as_secs_f32() < 2.0 {
+                                show_copy_feedback = true;
+                            } else {
+                                // Feedback expired, clear it
+                                app.ui_state.copy_to_clipboard_feedback = None;
+                            }
+                        }
+                        
+                        let copy_button_text = if show_copy_feedback { "✓ Copied!" } else { "📋" };
+                        if ui.button(copy_button_text).clicked() {
+                            // Copy full path to clipboard using egui's clipboard mechanism
+                            ui.output_mut(|o| o.copied_text = app.ui_state.active_scx_binary.clone());
+                            // Set feedback state with current timestamp
+                            app.ui_state.copy_to_clipboard_feedback = Some((
+                                "Copied to clipboard!".to_string(),
+                                std::time::Instant::now()
+                            ));
+                        }
+                    }
+                });
+                
                 ui.separator();
                 
                 // Initialize available SCX schedulers on first render
@@ -346,70 +423,49 @@ pub fn render_kernel_manager(
                     eprintln!("[UI] [SCX] Scheduler list initialized with EEVDF (Stock) prepended: {:?}", app.ui_state.available_scx_schedulers);
                 }
                 
-                // SCX Status - dynamic based on UI state with visual emphasis
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Current Status:").strong());
-                        let (status_color, status_icon) = if app.ui_state.scx_enabled {
-                            (egui::Color32::from_rgb(100, 200, 100), "✓ Enabled")
-                        } else {
-                            (egui::Color32::from_rgb(180, 100, 100), "✗ Disabled")
-                        };
-                        
-                        ui.colored_label(status_color, status_icon);
-                        
-                        // Show if activation is in progress with animation-like indicator
-                        if app.ui_state.scx_activating {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(255, 200, 0),
-                                "⟳ Activating..."
-                            );
-                        }
-                    });
-                    
-                    // SCX Binary with better formatting
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Active Binary:").strong());
-                        if app.ui_state.active_scx_binary.is_empty() {
-                            ui.monospace(egui::RichText::new("(EEVDF kernel scheduler - built-in)").color(egui::Color32::from_rgb(120, 120, 120)));
-                        } else {
-                            ui.monospace(format!("{} (via scx_loader.service)", app.ui_state.active_scx_binary));
-                        }
-                    });
-                });
-                
-                ui.separator();
-                
                 // ========== GRANULAR SCX CONTROL ==========
                 // Check if BOTH scx-tools and scx-scheds are available
                 let scx_tools_missing = app.ui_state.missing_optional_tools.contains(&"scx-tools".to_string());
                 let scx_scheds_missing = app.ui_state.missing_optional_tools.contains(&"scx-scheds".to_string());
                 let scx_packages_missing = scx_tools_missing || scx_scheds_missing;
                 
-                ui.group(|ui| {
-                    ui.label(egui::RichText::new("🎛️ Permanent Scheduler Configuration").strong());
-                    ui.label(egui::RichText::new("Configured via scx_loader.service with /etc/scx_loader/config.toml (persists across reboots)").small().italics());
+                // Title and description (removed outer group wrapper)
+                ui.label(egui::RichText::new("🎛️ Permanent Scheduler Configuration").strong());
+                ui.label(egui::RichText::new("Configured via scx_loader.service with /etc/scx_loader/config.toml (persists across reboots)").small().italics());
+                ui.separator();
+                
+                // Show block message if scx-tools or scx-scheds is missing
+                if scx_packages_missing {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(200, 150, 100),
+                        "⚠ SCX Scheduler Feature Unavailable"
+                    );
+                    ui.label("Required SCX packages are not installed on your system:");
+                    ui.label(format!("  • scx-tools: {}", if scx_tools_missing { "missing" } else { "installed" }));
+                    ui.label(format!("  • scx-scheds: {}", if scx_scheds_missing { "missing" } else { "installed" }));
+                    ui.label("Advanced SCX scheduler selection is disabled.");
                     ui.separator();
-                    
-                    // Show block message if scx-tools or scx-scheds is missing
-                    if scx_packages_missing {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(200, 150, 100),
-                            "⚠ SCX Scheduler Feature Unavailable"
-                        );
-                        ui.label("Required SCX packages are not installed on your system:");
-                        ui.label(format!("  • scx-tools: {}", if scx_tools_missing { "missing" } else { "installed" }));
-                        ui.label(format!("  • scx-scheds: {}", if scx_scheds_missing { "missing" } else { "installed" }));
-                        ui.label("Advanced SCX scheduler selection is disabled.");
-                        ui.separator();
-                        ui.label(egui::RichText::new("To enable this feature:").strong());
-                        ui.label("Use the 'Fix System Environment' button on the Dashboard tab to auto-install both packages.");
-                        ui.label("After installation, restart the application.");
-                    } else {
-                        // Scheduler Type Dropdown with description
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("Scheduler Type").strong());
-                            ui.label(egui::RichText::new("Choose the SCX scheduler that best fits your workload").small().italics());
+                    ui.label(egui::RichText::new("To enable this feature:").strong());
+                    ui.label("Use the 'Fix System Environment' button on the Dashboard tab to auto-install both packages.");
+                    ui.label("After installation, restart the application.");
+                } else {
+                    // NEW: 2-Column Horizontal Layout for Scheduler Type and Mode
+                    ui.columns(2, |columns| {
+                        // Column 0: Scheduler Type
+                        columns[0].vertical(|ui| {
+                            // Label with info icon tooltip
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Scheduler Type").strong());
+                                if ui.small_button("ⓘ")
+                                    .on_hover_text(
+                                        "Choose the SCX scheduler that best fits your workload. \
+                                        Each scheduler optimizes for different system characteristics."
+                                    )
+                                    .clicked()
+                                {
+                                    // Optional: log info button click
+                                }
+                            });
                             
                             if app.ui_state.available_scx_schedulers.is_empty() {
                                 ui.monospace("[No SCX schedulers available]");
@@ -422,7 +478,6 @@ pub fn render_kernel_manager(
                                 
                                 egui::ComboBox::from_id_source("scx_scheduler_type_combo")
                                     .selected_text(&sched_text)
-                                    .width(340.0)
                                     .show_ui(ui, |ui| {
                                         for (i, sched) in app.ui_state.available_scx_schedulers.iter().enumerate() {
                                             if ui.selectable_value(&mut selected_sched_idx, i, sched).changed() {
@@ -442,72 +497,83 @@ pub fn render_kernel_manager(
                                         }
                                     });
                             }
+                        });
+                        
+                        // Column 1: Scheduler Mode
+                        columns[1].vertical(|ui| {
+                            // Label with info icon tooltip
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Scheduler Mode").strong());
+                                if ui.small_button("ⓘ")
+                                    .on_hover_text(
+                                        "Configure optimization profile for your specific workload type:\n\
+                                        • Auto: Adaptive scheduling (recommended)\n\
+                                        • Gaming: Low latency & responsiveness\n\
+                                        • LowLatency: Ultra-low latency for real-time\n\
+                                        • PowerSave: Power-efficient scheduling\n\
+                                        • Server: Throughput optimization"
+                                    )
+                                    .clicked()
+                                {
+                                    // Optional: log info button click
+                                }
                             });
                             
-                            ui.separator();
+                            let modes = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"];
+                            let mode_descriptions = vec![
+                                "Automatic adaptive scheduling - scheduler detects workload & adjusts in real-time",
+                                "Optimized for frame delivery and interactive responsiveness - gaming & responsive apps",
+                                "Minimized latency for precision timing - audio, video, real-time apps",
+                                "Power-efficient scheduling - laptops, battery-powered devices, low power systems",
+                                "Throughput-optimized for server and batch workloads - microservices, batch jobs",
+                            ];
+                            let mut selected_mode_idx = app.ui_state.selected_scx_mode_idx.unwrap_or(0);
+                            let mode_text = modes.get(selected_mode_idx).copied().unwrap_or("Auto");
                             
-                            // Mode Dropdown with description
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new("Scheduler Mode").strong());
-                                ui.label(egui::RichText::new("Configure optimization profile for your specific workload type").small().italics());
-                                
-                                let modes = vec!["Auto", "Gaming", "LowLatency", "PowerSave", "Server"];
-                                let mode_descriptions = vec![
-                                    "Automatic adaptive scheduling - scheduler detects workload & adjusts in real-time",
-                                    "Optimized for frame delivery and interactive responsiveness - gaming & responsive apps",
-                                    "Minimized latency for precision timing - audio, video, real-time apps",
-                                    "Power-efficient scheduling - laptops, battery-powered devices, low power systems",
-                                    "Throughput-optimized for server and batch workloads - microservices, batch jobs",
-                                ];
-                                let mut selected_mode_idx = app.ui_state.selected_scx_mode_idx.unwrap_or(0);
-                                let mode_text = modes.get(selected_mode_idx).copied().unwrap_or("Auto");
-                                
-                                egui::ComboBox::from_id_source("scx_mode_combo")
-                                    .selected_text(mode_text)
-                                    .width(340.0)
-                                    .show_ui(ui, |ui| {
-                                        for (i, mode) in modes.iter().enumerate() {
-                                            let desc = mode_descriptions.get(i).copied().unwrap_or("");
-                                            let display_text = format!("{} - {}", mode, desc);
-                                            if ui.selectable_value(&mut selected_mode_idx, i, display_text).changed() {
-                                                app.ui_state.selected_scx_mode_idx = Some(selected_mode_idx);
-                                                eprintln!("[UI] [SCX] Selected mode: {} (index {})", mode, selected_mode_idx);
-                                                // Trigger metadata update when mode changes
-                                                if let Some(sched_idx) = app.ui_state.selected_scx_type_idx {
-                                                    if let Some(sched) = app.ui_state.available_scx_schedulers.get(sched_idx) {
-                                                        app.ui_state.active_scx_metadata = Some(
-                                                            crate::system::scx::get_scx_metadata(sched, *mode)
-                                                        );
-                                                    }
+                            egui::ComboBox::from_id_source("scx_mode_combo")
+                                .selected_text(mode_text)
+                                .show_ui(ui, |ui| {
+                                    for (i, mode) in modes.iter().enumerate() {
+                                        let desc = mode_descriptions.get(i).copied().unwrap_or("");
+                                        let display_text = format!("{} - {}", mode, desc);
+                                        if ui.selectable_value(&mut selected_mode_idx, i, display_text).changed() {
+                                            app.ui_state.selected_scx_mode_idx = Some(selected_mode_idx);
+                                            eprintln!("[UI] [SCX] Selected mode: {} (index {})", mode, selected_mode_idx);
+                                            // Trigger metadata update when mode changes
+                                            if let Some(sched_idx) = app.ui_state.selected_scx_type_idx {
+                                                if let Some(sched) = app.ui_state.available_scx_schedulers.get(sched_idx) {
+                                                    app.ui_state.active_scx_metadata = Some(
+                                                        crate::system::scx::get_scx_metadata(sched, *mode)
+                                                    );
                                                 }
                                             }
                                         }
-                                    });
-                            });
-                        }
+                                    }
+                                });
+                        });
                     });
+                }
                 
-                ui.separator();
-                
-                // Activate Permanent Change Button with enhanced UI (only if both packages are available)
+                // Activate Permanent Change Button (Full Width, no group wrapper)
                 if !scx_packages_missing {
-                    ui.group(|ui| {
-                        ui.label(egui::RichText::new("🚀 Apply Configuration").strong());
-                        ui.label(egui::RichText::new("Activate the selected scheduler and mode permanently via scx_loader").small().italics());
-                        ui.separator();
-                        
-                        let can_activate = !app.ui_state.available_scx_schedulers.is_empty()
-                            && app.ui_state.selected_scx_type_idx.is_some()
-                            && app.ui_state.selected_scx_mode_idx.is_some()
-                            && !app.ui_state.scx_activating;
-                        
-                        let button_text = if app.ui_state.scx_activating {
-                            "⟳ Activating... (Authorization Required)"
-                        } else {
-                            "✓ Activate Permanent Change"
-                        };
-                        
-                        if ui.add_enabled(can_activate, egui::Button::new(button_text).min_size([340.0, 40.0].into())).clicked() {
+                    ui.separator();
+                    
+                    let can_activate = !app.ui_state.available_scx_schedulers.is_empty()
+                        && app.ui_state.selected_scx_type_idx.is_some()
+                        && app.ui_state.selected_scx_mode_idx.is_some()
+                        && !app.ui_state.scx_activating;
+                    
+                    let button_text = if app.ui_state.scx_activating {
+                        "⟳ Activating... (Authorization Required)"
+                    } else {
+                        "✓ Activate Permanent Change"
+                    };
+                    
+                    // Button expands to fill available width
+                    if ui.add_enabled(can_activate,
+                        egui::Button::new(button_text)
+                            .min_size([ui.available_width(), 40.0].into())
+                    ).clicked() {
                         if let (Some(sched_idx), Some(mode_idx)) = (app.ui_state.selected_scx_type_idx, app.ui_state.selected_scx_mode_idx) {
                             if let (Some(scheduler), Some(mode_text)) = (
                                 app.ui_state.available_scx_schedulers.get(sched_idx),
@@ -552,13 +618,15 @@ pub fn render_kernel_manager(
                                 });
                             }
                         }
-                        } else if app.ui_state.scx_activating {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(255, 200, 0),
-                                "⟳ Activation in progress... Check system authorization dialog"
-                            );
-                        }
-                    });
+                    }
+                    
+                    // Show status message inline if activating
+                    if app.ui_state.scx_activating {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 200, 0),
+                            "⟳ Activation in progress... Check system authorization dialog"
+                        );
+                    }
                 }
                 
                 ui.separator();
@@ -566,81 +634,218 @@ pub fn render_kernel_manager(
                 // ========== RICH SCX METADATA PANEL ==========
                 // Display dynamic metadata for selected scheduler/mode pairing
                 // Panel is always visible; shows loading state if metadata is not yet loaded
-                ui.group(|ui| {
-                    ui.heading("📋 Scheduler Configuration Details");
-                    ui.separator();
-                    
-                    if let Some(ref metadata) = app.ui_state.active_scx_metadata {
-                        // Recommendation level with color coding and icon
-                        let (rec_color, rec_icon) = match metadata.recommendation {
-                            crate::system::scx::RecommendationLevel::Recommended => {
-                                (egui::Color32::from_rgb(100, 200, 100), "✓")
-                            }
-                            crate::system::scx::RecommendationLevel::NotRecommended => {
-                                (egui::Color32::from_rgb(255, 165, 0), "⚠")
-                            }
-                        };
-                        
-                        let rec_label = format!("{} {}", rec_icon, metadata.recommendation.as_str());
-                        ui.colored_label(rec_color, rec_label);
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(30, 30, 35))
+                    .inner_margin(egui::Margin::same(12.0))
+                    .rounding(egui::Rounding::same(6.0))
+                    .show(ui, |ui| {
+                        ui.heading("📋 Scheduler Configuration Details");
                         ui.separator();
                         
-                        // Description with visual emphasis
-                        ui.label(egui::RichText::new("📖 Description:").strong());
-                        ui.label(egui::RichText::new(&metadata.description).italics().color(egui::Color32::from_rgb(180, 180, 180)));
-                        
-                        ui.separator();
-                        
-                        // Best Utilized For
-                        ui.label(egui::RichText::new("🎯 Best Utilized For:").strong());
-                        let best_for_lines: Vec<&str> = metadata.best_for.split(',').collect();
-                        for line in best_for_lines {
-                            ui.label(format!("  • {}", line.trim()));
-                        }
-                        
-                        ui.separator();
-                        
-                        // CLI Flags with copy-friendly formatting
-                        ui.label(egui::RichText::new("⚙️ Command Flags:").strong());
-                        if metadata.cli_flags.is_empty() {
-                            ui.monospace(egui::RichText::new("[Default flags - no additions]").color(egui::Color32::from_rgb(120, 120, 120)));
-                        } else {
-                            // Show flags in a selectable monospace format for easy copying
-                            let flags_text = format!("-k {}", metadata.cli_flags);
-                            ui.monospace(egui::RichText::new(&flags_text).color(egui::Color32::from_rgb(150, 255, 150)));
+                        if let Some(ref metadata) = app.ui_state.active_scx_metadata {
+                            // Recommendation level with color coding and icon
+                            let (rec_color, rec_icon) = match metadata.recommendation {
+                                crate::system::scx::RecommendationLevel::Recommended => {
+                                    (egui::Color32::from_rgb(100, 200, 100), "✓")
+                                }
+                                crate::system::scx::RecommendationLevel::NotRecommended => {
+                                    (egui::Color32::from_rgb(255, 165, 0), "⚠")
+                                }
+                            };
                             
-                            // Helper text
-                            ui.label(egui::RichText::new("(Flags shown for reference; automatically applied during activation)").small().italics());
-                        }
-                        
-                        ui.separator();
-                        
-                        // Performance Tier Indicator
-                        let perf_tier = if metadata.best_for.contains("latency") || metadata.best_for.contains("Real-time") {
-                            "⚡ Ultra-Low Latency"
-                        } else if metadata.best_for.contains("power") || metadata.best_for.contains("battery") {
-                            "🔋 Power Optimized"
-                        } else if metadata.best_for.contains("Gaming") || metadata.best_for.contains("audio") {
-                            "🎮 Responsiveness Optimized"
-                        } else if metadata.best_for.contains("Server") || metadata.best_for.contains("throughput") {
-                            "⚙️ Throughput Optimized"
+                            let rec_label = format!("{} {}", rec_icon, metadata.recommendation.as_str());
+                            ui.colored_label(rec_color, rec_label);
+                            ui.separator();
+                            
+                            // Description with visual emphasis
+                            ui.label(egui::RichText::new("📖 Description:").strong());
+                            ui.label(egui::RichText::new(&metadata.description).italics().color(egui::Color32::from_rgb(180, 180, 180)));
+                            
+                            ui.separator();
+                            
+                            // Best Utilized For - Consolidated to comma-separated inline text
+                            ui.label(egui::RichText::new("🎯 Best Utilized For:").strong());
+                            let best_for_items: Vec<&str> = metadata.best_for
+                                .split(',')
+                                .map(|s| s.trim())
+                                .collect();
+                            let comma_separated = best_for_items.join(", ");
+                            ui.label(egui::RichText::new(comma_separated)
+                                .color(egui::Color32::from_rgb(150, 200, 150))
+                                .italics());
+                            
+                            ui.separator();
+                            
+                            // ========== TECHNICAL DETAILS FOOTER BAR ==========
+                            egui::Frame::none()
+                                .fill(egui::Color32::from_rgb(20, 20, 25))
+                                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                                .rounding(egui::Rounding::same(4.0))
+                                .show(ui, |ui| {
+                                    ui.columns(2, |columns| {
+                                        // Column 0: Command Flags (left-aligned)
+                                        columns[0].vertical(|ui| {
+                                            ui.label(egui::RichText::new("⚡ Command Flags")
+                                                .small()
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(200, 200, 200)));
+                                            
+                                            if metadata.cli_flags.is_empty() {
+                                                ui.monospace(egui::RichText::new("[Default]")
+                                                    .small()
+                                                    .color(egui::Color32::from_rgb(100, 100, 100)));
+                                            } else {
+                                                let flags_text = format!("-k {}", metadata.cli_flags);
+                                                ui.monospace(egui::RichText::new(&flags_text)
+                                                    .small()
+                                                    .color(egui::Color32::from_rgb(150, 255, 150)));
+                                            }
+                                        });
+                                        
+                                        // Column 1: Optimization Profile (right-aligned)
+                                        columns[1].with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let perf_tier = determine_perf_tier(&metadata.best_for);
+                                            
+                                            ui.label(egui::RichText::new("📊 Profile")
+                                                .small()
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(200, 200, 200)));
+                                            
+                                            ui.label(egui::RichText::new(perf_tier)
+                                                .small()
+                                                .color(egui::Color32::from_rgb(255, 200, 100)));
+                                        });
+                                    });
+                                });
+                            
                         } else {
-                            "⚖️ Balanced"
-                        };
-                        
-                        ui.label(egui::RichText::new(format!("Optimization Profile: {}", perf_tier)).small());
-                        
-                    } else {
-                        // Placeholder when metadata is not available
-                        ui.colored_label(
-                            egui::Color32::from_rgb(100, 100, 100),
-                            "ℹ️ Select a scheduler and mode to view detailed configuration"
-                        );
-                    }
-                });
+                            // Placeholder when metadata is not available
+                            ui.colored_label(
+                                egui::Color32::from_rgb(100, 100, 100),
+                                "ℹ️ Select a scheduler and mode to view detailed configuration"
+                            );
+                        }
+                    });
                 
             });
         });
         });
     });
+}
+
+/// Truncate a file path to fit within a maximum length while preserving important parts
+///
+/// Preserves the directory prefix and file suffix (e.g., architecture info like -x86_64-linux_gnu)
+/// Truncates the middle with "..." ellipsis.
+///
+/// # Arguments
+/// * `full_path` - The complete file path to truncate
+/// * `max_len` - Maximum display length in characters
+///
+/// # Returns
+/// Truncated path string, or original path if it fits within max_len
+pub fn truncate_path(full_path: &str, max_len: usize) -> String {
+   // If already short enough, return as-is
+   if full_path.len() <= max_len {
+       return full_path.to_string();
+   }
+   
+   // Split into directory and filename
+   let (dir, filename) = if let Some((dir_part, file_part)) = full_path.rsplit_once('/') {
+       (dir_part, file_part)
+   } else {
+       ("", full_path)
+   };
+   
+   // Extract file suffix (e.g., "-x86_64-linux_gnu")
+   let suffix_len = find_architecture_suffix_length(filename);
+   let suffix = if suffix_len > 0 {
+       &filename[filename.len().saturating_sub(suffix_len)..]
+   } else {
+       ""
+   };
+   
+   // Calculate available space for middle content
+   let prefix_display = if dir.is_empty() { "" } else { "/" };
+   let ellipsis_len = 3; // "..."
+   let available = max_len.saturating_sub(prefix_display.len() + suffix_len + ellipsis_len);
+   
+   if available <= 0 {
+       // Extreme case: just show ellipsis and suffix
+       return format!("...{}", suffix);
+   }
+   
+   // Take start of filename
+   let filename_without_suffix = &filename[0..available.min(filename.len().saturating_sub(suffix_len))];
+   
+   if suffix_len > 0 {
+       format!("{}{}{}...{}", dir, prefix_display, filename_without_suffix, suffix)
+   } else {
+       format!("{}{}{}", dir, prefix_display, filename_without_suffix)
+   }
+}
+
+/// Find the length of architecture suffix in a filename
+///
+/// Looks for patterns like "-x86_64-linux_gnu" or "-aarch64-unknown-linux-gnu"
+/// Returns the length from first dash that looks like architecture pattern.
+///
+/// # Arguments
+/// * `filename` - The filename to analyze
+///
+/// # Returns
+/// Length of the architecture suffix, or 0 if no pattern found
+pub fn find_architecture_suffix_length(filename: &str) -> usize {
+   for (idx, _) in filename.rmatch_indices('-') {
+       let potential_suffix = &filename[idx..];
+       if is_architecture_pattern(potential_suffix) {
+           return filename.len() - idx;
+       }
+   }
+   0
+}
+
+/// Check if a string matches a known architecture pattern
+///
+/// Detects common architecture-related keywords like x86, aarch, linux, gnu, etc.
+///
+/// # Arguments
+/// * `s` - The string to check
+///
+/// # Returns
+/// True if the string contains architecture-related keywords
+pub fn is_architecture_pattern(s: &str) -> bool {
+    let s_lower = s.to_lowercase();
+    s_lower.contains("x86")
+        || s_lower.contains("aarch")
+        || s_lower.contains("linux")
+        || s_lower.contains("gnu")
+        || s_lower.contains("musl")
+        || s_lower.contains("arm")
+}
+
+/// Determine the performance tier indicator based on scheduler best-for description
+///
+/// Analyzes the "best_for" metadata field to classify the scheduler into performance tiers.
+/// Returns an emoji-prefixed tier name for visual identification.
+///
+/// # Arguments
+/// * `best_for` - The "best_for" field from SCX scheduler metadata
+///
+/// # Returns
+/// A string indicating the performance tier (e.g., "⚡ Ultra-Low Latency")
+fn determine_perf_tier(best_for: &str) -> String {
+    let best_for_lower = best_for.to_lowercase();
+    
+    if best_for_lower.contains("latency") || best_for_lower.contains("real-time") {
+        "⚡ Ultra-Low Latency".to_string()
+    } else if best_for_lower.contains("power") || best_for_lower.contains("battery") {
+        "🔋 Power Optimized".to_string()
+    } else if best_for_lower.contains("gaming") || best_for_lower.contains("audio") {
+        "🎮 Responsiveness Optimized".to_string()
+    } else if best_for_lower.contains("server") || best_for_lower.contains("throughput") {
+        "⚙️ Throughput Optimized".to_string()
+    } else {
+        "⚖️ Balanced".to_string()
+    }
 }

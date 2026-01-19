@@ -126,7 +126,7 @@ impl Default for ReferenceBenchmarks {
         ReferenceBenchmarks {
             p99_latency_us: 50.0,           // 50µs P99 baseline (very responsive)
             p99_9_latency_us: 100.0,        // 100µs P99.9 baseline
-            micro_jitter_p99_99_us: 200.0,  // 200µs P99.99 baseline (ultra-precise)
+            micro_jitter_p99_99_us: 1000.0, // 1000µs (1ms) jitter baseline (Excellent threshold, aligned with 0-10ms gauge range)
             context_switch_rtt_us: 150.0,   // 150µs context-switch baseline
             syscall_throughput_per_sec: 1_000_000.0, // 1M syscalls/sec baseline
             task_wakeup_latency_us: 100.0,  // 100µs task wakeup baseline
@@ -152,6 +152,9 @@ impl PerformanceScorer {
     }
 
     /// Score a PerformanceMetrics instance (Phase 2 collector output)
+    ///
+    /// TRUSTWORTHY CALIBRATION: Applies noise floor fairness offset
+    /// If raw latency is below detected hardware noise floor, prevents critical penalization
     pub fn score_metrics(&self, metrics: &PerformanceMetrics) -> ScoringResult {
         // Build synthetic BenchmarkMetrics if missing
         let benchmark_metrics = metrics.benchmark_metrics.clone().unwrap_or_default();
@@ -159,13 +162,20 @@ impl PerformanceScorer {
     }
 
     /// Score BenchmarkMetrics directly using 7-metric Performance Spectrum
+    ///
+    /// TRUSTWORTHY CALIBRATION: Applies noise floor fairness to latency scoring
+    /// If latency is detected to be within hardware noise floor, applies fairness offset
     pub fn score_benchmark_metrics(
         &self,
         benchmark: &BenchmarkMetrics,
         raw_metrics: &PerformanceMetrics,
     ) -> ScoringResult {
         // Normalize 7 metrics to 0-100 scale
-        let latency_score = self.normalize_responsiveness(raw_metrics.p99_us);
+        // FAIRNESS: Apply noise floor offset if latency is below detected hardware noise
+        let latency_score = self.normalize_responsiveness_with_fairness(
+            raw_metrics.p99_us,
+            raw_metrics.noise_floor_us,
+        );
         let consistency_score = self.normalize_consistency_cv(
             raw_metrics.p99_us,
             raw_metrics.rolling_consistency_us,
@@ -186,29 +196,30 @@ impl PerformanceScorer {
         );
 
         // Calculate GOAT Score using 7-metric weights
-        // Latency (27%), Consistency (18%), Jitter (15%), Throughput (10%),
-        // Efficiency (10%), Thermal (10%), SMI Res (10%)
-        let weighted_score =
-            (latency_score * 0.27) +
-            (consistency_score * 0.18) +
-            (jitter_score * 0.15) +
-            (throughput_score * 0.10) +
-            (efficiency_score * 0.10) +
-            (thermal_score * 0.10) +
-            (smi_score * 0.10);
-        
-        let goat_score = ((weighted_score * 1000.0).min(1000.0)) as u16;
+         // Latency (27%), Consistency (18%), Jitter (15%), Throughput (10%),
+         // Efficiency (10%), Thermal (10%), SMI Res (10%)
+         let weighted_score =
+             (latency_score * 0.27) +
+             (consistency_score * 0.18) +
+             (jitter_score * 0.15) +
+             (throughput_score * 0.10) +
+             (efficiency_score * 0.10) +
+             (thermal_score * 0.10) +
+             (smi_score * 0.10);
+         
+         // weighted_score is already on 0-100 scale, multiply by 10.0 to get 0-1000
+         let goat_score = ((weighted_score * 10.0).min(1000.0)) as u16;
 
-        // Determine personality based on dominant metrics
-        let metrics_vec = vec![
-            ("Latency", latency_score),
-            ("Consistency", consistency_score),
-            ("Jitter", jitter_score),
-            ("Throughput", throughput_score),
-            ("Efficiency", efficiency_score),
-            ("Thermal", thermal_score),
-            ("SMI-Res", smi_score),
-        ];
+         // Determine personality based on dominant metrics
+         let metrics_vec = vec![
+             ("Latency", latency_score),
+             ("Consistency", consistency_score),
+             ("Jitter", jitter_score),
+             ("Throughput", throughput_score),
+             ("Efficiency", efficiency_score),
+             ("Thermal", thermal_score),
+             ("SMI-Resilience", smi_score),
+         ];
         
         let (primary_name, primary_score) = metrics_vec.iter()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
@@ -231,8 +242,9 @@ impl PerformanceScorer {
         let improvement_area = format!("{}: {:.1}/100", improvement_name, improvement_score);
 
         // Determine personality type
+        // weighted_score is already on 0-100 scale (weighted average of normalized metrics)
         let avg_score = weighted_score;
-        let is_balanced = (primary_score - avg_score / 10.0).abs() < 10.0;
+        let is_balanced = (primary_score - avg_score).abs() < 10.0;
         let personality = if is_balanced {
             PersonalityType::Balanced
         } else {
@@ -243,8 +255,8 @@ impl PerformanceScorer {
         let brief = self.generate_brief_from_metrics(&personality, primary_name, goat_score);
 
         // Calculate specialization index
-        let deviation = (primary_score - avg_score / 10.0).max(0.0);
-        let specialization_index = (deviation / (avg_score / 10.0) * 100.0).clamp(0.0, 100.0);
+        let deviation = (primary_score - avg_score).max(0.0);
+        let specialization_index = (deviation / avg_score * 100.0).clamp(0.0, 100.0);
 
         ScoringResult {
             goat_score,
@@ -258,9 +270,53 @@ impl PerformanceScorer {
         }
     }
 
+    /// Normalize P99 latency with Trustworthy Calibration fairness offset
+    ///
+    /// TRUSTWORTHY CALIBRATION: If raw latency is below detected hardware noise floor,
+    /// prevents critical red-zone penalization. Hardware noise (SMIs) should not impact score.
+    ///
+    /// **Fairness Logic**:
+    /// - If latency <= noise_floor_us: Apply fairness by boosting to neutral (50.0)
+    /// - If latency > noise_floor_us: Use standard responsiveness normalization
+    ///
+    /// This ensures hardware noise doesn't unfairly penalize kernel performance.
+    pub fn normalize_responsiveness_with_fairness(&self, p99_us: f32, noise_floor_us: f32) -> f32 {
+        // FAIRNESS: If detected latency is within hardware noise floor, apply fairness offset
+        if noise_floor_us > 0.0 && p99_us <= noise_floor_us {
+            eprintln!("[SCORING] [FAIRNESS] Latency {:.1}µs <= noise_floor {:.1}µs: Applying fairness offset (neutral 50.0 instead of critical red)",
+                p99_us, noise_floor_us);
+            return 50.0; // Return neutral score instead of critical red
+        }
+        
+        // Otherwise, use standard normalization
+        self.normalize_responsiveness(p99_us)
+    }
+
     /// Normalize P99 latency to 0-100 responsiveness score
+    ///
+    /// **3-Segment Piecewise Linear Normalization (0-10,000µs range)**:
+    /// - 0-100µs: 100.0 down to 60.0 (sub-microsecond precision region)
+    /// - 100-1000µs: 60.0 down to 40.0 (microsecond region)
+    /// - 1000-10000µs: 40.0 down to 0.0 (millisecond region)
+    ///
+    /// This multi-scale approach preserves sub-microsecond visibility while
+    /// accommodating the full 0-10ms range without clamping.
+    /// Values above 10000µs (10ms) are clamped to 0.0.
     pub fn normalize_responsiveness(&self, p99_us: f32) -> f32 {
-        self.normalize_lower_is_better(p99_us, self.reference_benchmarks.p99_latency_us, 500.0)
+        let clamped = p99_us.max(0.0).min(10000.0);
+        
+        if clamped <= 100.0 {
+            // 0-100µs: 100.0 down to 60.0 (high-precision sub-µs region)
+            100.0 - ((clamped / 100.0) * 40.0)
+        } else if clamped <= 1000.0 {
+            // 100-1000µs: 60.0 down to 40.0 (microsecond region)
+            let progress = (clamped - 100.0) / 900.0;
+            60.0 - (progress * 20.0)
+        } else {
+            // 1000-10000µs: 40.0 down to 0.0 (millisecond region)
+            let progress = (clamped - 1000.0) / 9000.0;
+            40.0 - (progress * 40.0)
+        }.max(0.0)
     }
 
     /// Normalize Consistency using Coefficient of Variation (CV)
@@ -296,21 +352,74 @@ impl PerformanceScorer {
         self.normalize_lower_is_better(p99_9_us, self.reference_benchmarks.p99_9_latency_us, 1000.0)
     }
 
-    /// Normalize P99.99 micro-jitter to 0-100 micro-precision score
+    /// Normalize absolute peak jitter to 0-100 micro-precision score
+    ///
+    /// **Aligned Jitter Normalization (0-10,000µs range)**:
+    /// - Green: 0-1,000µs (100 score) - Excellent scheduling
+    /// - Yellow: 1,000-5,000µs (50 score) - Good scheduling
+    /// - Red: 5,000-10,000µs (0 score) - Poor scheduling
+    ///
+    /// Piecewise linear: Converts 0-10,000µs range to 100-0 score
     fn normalize_micro_precision(&self, p99_99_us: Option<f32>) -> f32 {
         match p99_99_us {
             Some(val) => {
-                self.normalize_lower_is_better(val, self.reference_benchmarks.micro_jitter_p99_99_us, 1000.0)
+                // Align with 0-10,000µs gauge range
+                let clamped = val.min(10000.0);
+                if clamped <= 1000.0 {
+                    // 0-1000µs: 100-60 score (excellent region)
+                    100.0 - ((clamped / 1000.0) * 40.0)
+                } else if clamped <= 5000.0 {
+                    // 1000-5000µs: 60-20 score (good region)
+                    60.0 - (((clamped - 1000.0) / 4000.0) * 40.0)
+                } else {
+                    // 5000-10000µs: 20-0 score (poor region)
+                    20.0 - (((clamped - 5000.0) / 5000.0) * 20.0)
+                }
             }
             None => 50.0, // Default if not measured
         }
     }
 
     /// Normalize context-switch RTT to 0-100 context efficiency score
+    ///
+    /// **RECALIBRATED LABORATORY-GRADE NORMALIZATION (0.5µs - 50µs range)**:
+    /// Expanded range reflects real-world hardware diversity and typical performance:
+    /// - 0.5µs: 100 pts (Perfect - ultra-low kernel overhead)
+    /// - 5.0µs: 80 pts (Excellent - typical high-performance tuned kernel)
+    /// - 15.0µs: 50 pts (Good/Baseline - reasonable production kernel, typical real-world)
+    /// - 30.0µs: 20 pts (Acceptable - marginal but workable overhead)
+    /// - 50.0µs: 0 pts (Floor - unacceptable overhead)
+    /// At 8.0µs: score ≈ 70pts (Good) - consistent with real-world clean systems
+    ///
+    /// Piecewise linear: Representative of real-world cross-core RTT measurements
+    /// Uses Median (not P99) for statistically representative scoring
     fn normalize_context_efficiency(&self, rtt_us: Option<f32>) -> f32 {
         match rtt_us {
             Some(val) => {
-                self.normalize_lower_is_better(val, self.reference_benchmarks.context_switch_rtt_us, 500.0)
+                // EXPANDED RANGE: 0.5µs (Perfect) to 50µs (Floor)
+                let clamped = val.max(0.5).min(50.0);
+                
+                if clamped <= 0.5 {
+                    // Perfect ultra-low overhead: 0.5µs = 100 score
+                    100.0
+                } else if clamped <= 5.0 {
+                    // Excellent region: 0.5-5µs maps to 100-80 score
+                    let progress = (clamped - 0.5) / 4.5;
+                    100.0 - (progress * 20.0)
+                } else if clamped <= 15.0 {
+                    // Good/Baseline region: 5-15µs maps to 80-50 score
+                    // At 8.0µs: progress = (8.0-5.0)/10.0 = 0.3, score = 80 - (0.3*30) = 71pts
+                    let progress = (clamped - 5.0) / 10.0;
+                    80.0 - (progress * 30.0)
+                } else if clamped <= 30.0 {
+                    // Acceptable region: 15-30µs maps to 50-20 score
+                    let progress = (clamped - 15.0) / 15.0;
+                    50.0 - (progress * 30.0)
+                } else {
+                    // Poor region: 30-50µs maps to 20-0 score
+                    let progress = (clamped - 30.0) / 20.0;
+                    20.0 - (progress * 20.0)
+                }
             }
             None => 50.0,
         }
@@ -342,6 +451,13 @@ impl PerformanceScorer {
     }
 
     /// Normalize thermal data to 0-100 thermal efficiency score
+    ///
+    /// **Tiered Thermal Normalization (0-85°C+ range)**:
+    /// - 0.0-60.0°C: 100.0 score (Green Zone - optimal)
+    /// - 60.0-85.0°C: Linear drop 100.0 -> 50.0 (Yellow Zone - acceptable)
+    /// - Above 85.0°C: Rapid drop 50.0 -> 0.0 (Red Zone - critical)
+    ///
+    /// Piecewise linear: Generous green zone until 60°C, then accelerating penalty above 85°C
     pub fn normalize_thermal_efficiency(&self, core_temps: &[f32]) -> f32 {
         if core_temps.is_empty() {
             return 50.0; // Default if no temperature data
@@ -350,14 +466,16 @@ impl PerformanceScorer {
         let max_temp = core_temps.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
 
         // Score based on max temperature (lower is better)
-        if max_temp <= self.reference_benchmarks.cold_temp_c {
-            100.0 // Cold, very efficient
-        } else if max_temp >= self.reference_benchmarks.max_core_temp_c {
-            10.0 // Thermal throttling risk
+        // Tiered piecewise linear normalization
+        if max_temp <= 60.0 {
+            100.0 // Green zone: 0-60°C (optimal operating range)
+        } else if max_temp <= 85.0 {
+            // Yellow zone: 60-85°C maps to 100-50 score (linear drop)
+            100.0 - (((max_temp - 60.0) / 25.0) * 50.0)
         } else {
-            let range = self.reference_benchmarks.max_core_temp_c - self.reference_benchmarks.cold_temp_c;
-            let position = max_temp - self.reference_benchmarks.cold_temp_c;
-            100.0 - ((position / range) * 90.0)
+            // Red zone: Above 85°C maps to 50-0 score (rapid drop)
+            let progress = ((max_temp - 85.0) / 15.0).min(1.0);
+            50.0 - (progress * 50.0)
         }
     }
 
@@ -489,13 +607,40 @@ mod tests {
     fn test_normalize_responsiveness() {
         let scorer = PerformanceScorer::new();
         
-        // At reference: 100 points
-        let score = scorer.normalize_responsiveness(50.0);
+        // Segment 1: 0-100µs
+        // At 0µs (best case): 100 points
+        let score = scorer.normalize_responsiveness(0.0);
         assert_eq!(score, 100.0);
         
-        // Worse than reference but better than worst case
-        let score = scorer.normalize_responsiveness(200.0);
-        assert!(score > 0.0 && score < 100.0);
+        // At 50µs (mid-segment 1): 80 points
+        let score = scorer.normalize_responsiveness(50.0);
+        assert_eq!(score, 80.0);
+        
+        // At 100µs (boundary): 60 points
+        let score = scorer.normalize_responsiveness(100.0);
+        assert_eq!(score, 60.0);
+        
+        // Segment 2: 100-1000µs
+        // At 550µs (mid-segment 2): 50 points (60 - (450/900)*20 = 60 - 10 = 50)
+        let score = scorer.normalize_responsiveness(550.0);
+        assert!(score > 49.0 && score < 51.0); // Allow small floating point error
+        
+        // At 1000µs (boundary): 40 points
+        let score = scorer.normalize_responsiveness(1000.0);
+        assert_eq!(score, 40.0);
+        
+        // Segment 3: 1000-10000µs
+        // At 5500µs (mid-segment 3): 20 points (40 - (4500/9000)*40 = 40 - 20 = 20)
+        let score = scorer.normalize_responsiveness(5500.0);
+        assert_eq!(score, 20.0);
+        
+        // At 10000µs (worst case): 0 points
+        let score = scorer.normalize_responsiveness(10000.0);
+        assert_eq!(score, 0.0);
+        
+        // Above ceiling: 0 points
+        let score = scorer.normalize_responsiveness(15000.0);
+        assert_eq!(score, 0.0);
     }
 
     #[test]

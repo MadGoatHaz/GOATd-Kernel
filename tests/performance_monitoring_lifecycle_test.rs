@@ -142,6 +142,12 @@ fn test_session_summary_initialization() {
         p99_us: 45.0,
         p99_9_us: 48.0,
         avg_us: 20.0,
+        rolling_p99_us: 45.0,
+        rolling_p99_9_us: 48.0,
+        cpu_usage: 25.0,
+        rolling_throughput_p99: 500000.0,
+        rolling_efficiency_p99: 5.0,
+        rolling_consistency_us: 3.0,
         total_spikes: 5,
         total_smis: 2,
         spikes_correlated_to_smi: 1,
@@ -151,6 +157,8 @@ fn test_session_summary_initialization() {
         governor_hz: 2400,
         core_temperatures: vec![40.0],
         package_temperature: 45.0,
+        benchmark_metrics: None,
+        ..Default::default()
     };
     
     let kernel_context = KernelContext {
@@ -232,6 +240,12 @@ fn test_performance_metrics_clone() {
         p99_us: 90.0,
         p99_9_us: 98.0,
         avg_us: 25.0,
+        rolling_p99_us: 90.0,
+        rolling_p99_9_us: 98.0,
+        cpu_usage: 30.0,
+        rolling_throughput_p99: 600000.0,
+        rolling_efficiency_p99: 8.0,
+        rolling_consistency_us: 5.0,
         total_spikes: 10,
         total_smis: 3,
         spikes_correlated_to_smi: 2,
@@ -241,6 +255,8 @@ fn test_performance_metrics_clone() {
         governor_hz: 2400,
         core_temperatures: vec![40.0],
         package_temperature: 45.0,
+        benchmark_metrics: None,
+        ..Default::default()
     };
     
     let metrics2 = metrics1.clone();

@@ -1,18 +1,38 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg width="256" height="256" viewBox="0 0 256 256" version="1.1" xmlns="http://www.w3.org/2000/svg">
-  <!-- Icon placeholder for GOATd Kernel Builder -->
-  <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1e90ff;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#00bfff;stop-opacity:1" />
-    </linearGradient>
-  </defs>
-  <!-- Background circle -->
-  <circle cx="128" cy="128" r="120" fill="url(#grad1)"/>
-  <!-- Kernel symbol: concentric circles -->
-  <circle cx="128" cy="128" r="80" fill="none" stroke="white" stroke-width="8"/>
-  <circle cx="128" cy="128" r="55" fill="none" stroke="white" stroke-width="6"/>
-  <circle cx="128" cy="128" r="30" fill="white"/>
-  <!-- Text label -->
-  <text x="128" y="220" font-size="18" font-weight="bold" text-anchor="middle" fill="white">GOATd</text>
-</svg>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="#6c7f8f"/>
+
+  <!-- Goat Group -->
+  <g transform="translate(60, 60) scale(0.8)">
+    <!-- Main Shape -->
+    <path fill="#ffffff" stroke="#000000" stroke-width="12" stroke-linejoin="round" stroke-linecap="round" d="
+          M 160 400
+          C 150 430, 180 440, 200 460
+          C 210 420, 225 380, 230 350
+          L 250 365
+          L 280 345
+          L 280 300
+          L 330 330
+          C 360 320, 370 300, 350 280
+          C 390 290, 420 280, 440 260
+          C 420 230, 390 230, 350 240
+          C 360 210, 380 150, 430 120
+          C 410 90, 340 120, 310 160
+          C 280 140, 220 160, 200 190
+          C 180 200, 150 210, 130 200
+          C 110 220, 110 250, 130 270
+          C 130 290, 135 310, 150 320
+          C 140 350, 150 380, 160 400
+          Z
+          "/>
+
+    <!-- Eye Hole -->
+    <path fill="#6c7f8f" stroke="#000000" stroke-width="8" d="
+          M 300 220
+          C 325 220, 335 240, 325 260
+          C 300 275, 275 250, 280 230
+          C 280 220, 290 220, 300 220
+          Z
+          "/>
+    </g>
+  </svg>

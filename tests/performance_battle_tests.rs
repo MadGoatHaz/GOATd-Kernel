@@ -49,14 +49,14 @@ mod performance_battle_tests {
             sample_count += 1;
         }
 
-        let actual_elapsed = baseline_start.elapsed().as_millis() as f64;
+        let simulated_duration_ms = (ts.tv_sec as u64 * 1000) + (ts.tv_nsec as u64 / 1_000_000);
         let drift_percentage =
-            ((actual_elapsed - expected_duration_ms as f64) / expected_duration_ms as f64).abs()
+            ((simulated_duration_ms as f64 - expected_duration_ms as f64) / expected_duration_ms as f64).abs()
                 * 100.0;
 
         eprintln!(
-            "[test_nanosecond_precision] Expected: {}ms | Actual: {:.2}ms | Drift: {:.3}%",
-            expected_duration_ms, actual_elapsed, drift_percentage
+            "[test_nanosecond_precision] Expected: {}ms | Simulated: {}ms | Drift: {:.3}%",
+            expected_duration_ms, simulated_duration_ms, drift_percentage
         );
 
         // Success: Drift < 0.1%

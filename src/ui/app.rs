@@ -6,7 +6,7 @@
 
 use eframe::egui;
 use std::sync::Arc;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use tokio::sync::RwLock;
 use crate::ui::controller::AppController;
@@ -26,11 +26,18 @@ pub enum Tab {
 /// Note: Default impl is manual (see below) to initialize cached_scx_readiness
 #[derive(Clone)]
 pub struct UIState {
+    /// Dirty flag: set when data changes, cleared after render
+    /// Used for adaptive repainting instead of fixed-frequency repaints
+    pub needs_repaint: bool,
+    
+    /// Last repaint time (for idle-based fallback repaints)
+    pub last_repaint_time: Instant,
+    
     /// Currently active tab
     pub active_tab: Tab,
     
-    /// Build log buffer (accumulated during builds)
-    pub build_log: String,
+    /// Build log buffer (fixed-size VecDeque of last N lines for O(1) appends)
+    pub build_log: VecDeque<String>,
     
     /// Current build progress (0-100)
     pub build_progress: i32,
@@ -195,6 +202,10 @@ pub struct UIState {
     
     /// Pending privileged command to execute after user confirmation
     pub pending_fix_command: String,
+    
+    /// Copy-to-clipboard feedback state: (message, timestamp)
+    /// Used to show temporary "✓ Copied!" feedback for 2 seconds
+    pub copy_to_clipboard_feedback: Option<(String, std::time::Instant)>,
 }
 
 impl Default for Tab {
@@ -207,8 +218,10 @@ impl Default for UIState {
     fn default() -> Self {
         use crate::system::scx::SCXReadiness;
         Self {
+            needs_repaint: true,
+            last_repaint_time: Instant::now(),
             active_tab: Tab::default(),
-            build_log: String::new(),
+            build_log: VecDeque::with_capacity(5000),
             build_progress: 0,
             build_status: String::new(),
             current_build_phase: String::new(),
@@ -262,6 +275,7 @@ impl Default for UIState {
             missing_optional_tools: Vec::new(),
             show_fix_modal: false,
             pending_fix_command: String::new(),
+            copy_to_clipboard_feedback: None,
         }
     }
 }
@@ -296,19 +310,18 @@ impl AppUI {
     }
     
     /// Process all pending build events from the channel
+    /// Sets dirty flag when data changes (adaptive repaint trigger)
     fn process_build_events(&mut self) {
         if let Some(ref mut rx) = self.build_rx {
-            let mut should_repaint = false;
-            
             while let Ok(event) = rx.try_recv() {
                 match event {
                     crate::ui::controller::BuildEvent::Progress(progress) => {
                         self.ui_state.build_progress = (progress * 100.0) as i32;
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::StatusUpdate(status) => {
                         self.ui_state.build_status = status.clone();
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::Status(status) => {
                         self.ui_state.build_status = status.clone();
@@ -327,25 +340,29 @@ impl AppUI {
                                 }
                             }
                         }
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::Log(msg) => {
-                        self.ui_state.build_log.push_str(&msg);
-                        self.ui_state.build_log.push('\n');
-                        // Cap log to prevent memory bloat
-                        if self.ui_state.build_log.lines().count() > 10000 {
-                            let lines: Vec<&str> = self.ui_state.build_log.lines().collect();
-                            self.ui_state.build_log = lines[lines.len() - 5000..]
-                                .join("\n");
+                        self.ui_state.build_log.push_back(msg);
+                        // Cap log to fixed 5000 lines max (O(1) on overflow)
+                        // VecDeque automatically maintains capacity in amortized O(1)
+                        const MAX_LOG_LINES: usize = 5000;
+                        while self.ui_state.build_log.len() > MAX_LOG_LINES {
+                            self.ui_state.build_log.pop_front();
                         }
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::PhaseChanged(phase) => {
                         // Track phase change in dedicated field AND log it
                         self.ui_state.current_build_phase = phase.clone();
-                        self.ui_state.build_log.push_str(&format!("[PHASE] {}\n", phase));
+                        self.ui_state.build_log.push_back(format!("[PHASE] {}", phase));
+                        // Cap log to prevent overflow
+                        const MAX_LOG_LINES: usize = 5000;
+                        while self.ui_state.build_log.len() > MAX_LOG_LINES {
+                            self.ui_state.build_log.pop_front();
+                        }
                         log::debug!("[UI] Build phase changed: {}", phase);
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::Finished(success) => {
                         self.ui_state.is_building = false;
@@ -357,20 +374,25 @@ impl AppUI {
                             self.ui_state.error_message =
                                 Some("Build failed. Check the log for details.".to_string());
                         }
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::TimerUpdate(seconds) => {
                         self.ui_state.build_elapsed_seconds = seconds;
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::Error(msg) => {
                         self.ui_state.is_building = false;
                         // Track errors in dedicated vec AND generate transient error message
                         self.ui_state.build_errors.push(msg.clone());
                         self.ui_state.error_message = Some(format!("Build error: {}", msg));
-                        self.ui_state.build_log.push_str(&format!("[ERROR] {}\n", msg));
+                        self.ui_state.build_log.push_back(format!("[ERROR] {}", msg));
+                        // Cap log to prevent overflow
+                        const MAX_LOG_LINES: usize = 5000;
+                        while self.ui_state.build_log.len() > MAX_LOG_LINES {
+                            self.ui_state.build_log.pop_front();
+                        }
                         log::debug!("[UI] Build error: {}", msg);
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::InstallationComplete(success) => {
                         if success {
@@ -381,20 +403,22 @@ impl AppUI {
                             self.ui_state.error_message =
                                 Some("Kernel installation failed. Check the log for details.".to_string());
                         }
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::KernelUninstalled => {
                         self.ui_state.ui_state_initialized = false;
                         self.ui_state.success_message =
                             Some("Kernel uninstalled successfully!".to_string());
                         log::debug!("[UI] Kernel uninstalled event received, refreshing Installed Kernels list");
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::LatestVersionUpdate(variant, version) => {
                         // Update the latest version for this variant and remove from polling set
                         self.ui_state.latest_versions.insert(variant.clone(), version);
                         self.ui_state.version_poll_active.remove(&variant);
                         log::debug!("[UI] Version update received for {}", variant);
+                        // Version update affects UI display, so mark dirty
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::JitterAuditComplete(summary) => {
                         // Update UI state with the completed jitter audit summary
@@ -403,21 +427,14 @@ impl AppUI {
                         log::debug!("[UI] Jitter audit completed: samples={}, duration={:.2}s",
                             summary.total_samples,
                             summary.duration_secs.unwrap_or(0.0));
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
                     crate::ui::controller::BuildEvent::ArtifactDeleted => {
                         // Artifact was successfully deleted, trigger refresh of Kernels Ready for Installation list
                         self.ui_state.ui_state_initialized = false;
                         log::debug!("[UI] Artifact deleted event received, refreshing Kernels Ready for Installation list");
-                        should_repaint = true;
+                        self.ui_state.needs_repaint = true;
                     }
-                }
-            }
-            
-            // Request a single repaint if any updates occurred (CRITICAL FIX for UI stalling)
-            if should_repaint {
-                if let Some(ref ctx) = self.ctx_handle {
-                    ctx.request_repaint();
                 }
             }
         }
@@ -627,24 +644,39 @@ impl eframe::App for AppUI {
         // This ensures theme changes are persistent and apply to all UI elements
         self.apply_theme_from_state(ctx);
         
-        // Process all pending async events
+        // Process all pending async events (sets needs_repaint flag on data changes)
         self.process_build_events();
         
-        // Request periodic repaints while a build is active (10 times per second)
-        // This ensures the UI refreshes smoothly without requiring user interaction
-        if self.ui_state.is_building {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        // ADAPTIVE REPAINTING: Only repaint if data has changed or on idle timeout
+        // This replaces fixed-frequency repaints and significantly reduces CPU usage
+        const IDLE_REPAINT_INTERVAL_MS: u64 = 500;  // Fallback repaint every 500ms if no data changes
+        let elapsed_since_last_repaint = self.ui_state.last_repaint_time.elapsed();
+        
+        // Check if performance data has been updated (set by background processor)
+        let perf_data_dirty = if let Ok(controller) = self.controller.try_read() {
+            controller.atomic_perf_dirty.load(std::sync::atomic::Ordering::Acquire)
+        } else {
+            false
+        };
+        
+        if self.ui_state.needs_repaint || perf_data_dirty {
+            // Data changed: request immediate repaint
+            ctx.request_repaint();
+            self.ui_state.needs_repaint = false;
+            self.ui_state.last_repaint_time = Instant::now();
+        } else if elapsed_since_last_repaint.as_millis() > IDLE_REPAINT_INTERVAL_MS as u128 {
+            // Idle timeout: request fallback repaint to catch slow updates
+            ctx.request_repaint_after(std::time::Duration::from_millis(IDLE_REPAINT_INTERVAL_MS));
+            self.ui_state.last_repaint_time = Instant::now();
         }
         
-        // CRITICAL FIX: Request periodic repaints for Dashboard tab (5 times per second)
-        // This ensures audit results update without requiring mouse movement (low-frequency: 200ms)
+        // Tab-specific polling repaints (for periodic non-event-driven updates)
+        // Dashboard: poll audit status every 200ms
         if self.ui_state.active_tab == Tab::Dashboard {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
         
-        // CRITICAL FIX: Request periodic repaints while Performance monitoring is active
-        // The background processor sets the dirty_flag, but also request repaints here as fallback
-        // This ensures the heatmap and graphs update continuously every 100ms without mouse movement
+        // Performance: poll monitoring status every 100ms (background processor signals via dirty flag)
         if self.ui_state.active_tab == Tab::Performance {
             if let Ok(controller) = self.controller.try_read() {
                 let (is_monitoring, _) = controller.get_monitoring_status();
@@ -654,8 +686,7 @@ impl eframe::App for AppUI {
             }
         }
         
-        // CRITICAL FIX: Request periodic repaints for Kernel Manager tab (5 times per second)
-        // This ensures kernel list updates without requiring mouse movement (low-frequency: 200ms)
+        // Kernel Manager: poll kernel list every 200ms
         if self.ui_state.active_tab == Tab::KernelManager {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
@@ -667,17 +698,22 @@ impl eframe::App for AppUI {
         use crate::system::scx::SCXManager;
         self.ui_state.cached_scx_readiness = SCXManager::get_scx_readiness();
         
-        // CACHE MISSING AUR PACKAGES for UI blocking
+        // CACHE MISSING AUR PACKAGES for UI blocking (from cached health report)
         // This allows UI elements tied to missing dependencies to be disabled/greyed out
-        let health_report = crate::system::health::HealthManager::check_system_health();
-        self.ui_state.missing_aur_packages = health_report.missing_aur_packages.clone();
-        self.ui_state.missing_optional_tools = health_report.missing_optional_tools.clone();
+        // Uses 60-second cached health check instead of blocking on I/O every frame
+        if let Ok(controller) = self.controller.try_read() {
+            let health_report = controller.get_cached_health_report();
+            self.ui_state.missing_aur_packages = health_report.missing_aur_packages.clone();
+            self.ui_state.missing_optional_tools = health_report.missing_optional_tools.clone();
+        }
         
         // SYNC SCX STATUS: Update UIState with current kernel SCX status
         // This ensures the Kernel Manager tab always shows accurate SCX state
-        let kernel_context = AppController::get_kernel_context();
-        self.ui_state.scx_enabled = kernel_context.scx_profile != "default_eevdf";
-        self.ui_state.active_scx_binary = kernel_context.scx_profile.clone();
+        if let Ok(controller) = self.controller.try_read() {
+            let kernel_context = controller.get_kernel_context();
+            self.ui_state.scx_enabled = kernel_context.scx_profile != "default_eevdf";
+            self.ui_state.active_scx_binary = kernel_context.scx_profile.clone();
+        }
         
         // INITIAL SCX SYNC: One-time synchronization of active scheduler to UI selections
         // This mirrors the current system scheduler state into the UI dropdown selections
@@ -820,8 +856,8 @@ impl AppUI {
                 // Apply font size globally if configured (based on selected point size: 12.0, 14.0, 16.0, etc.)
                 if state.ui_font_size > 0.0 {
                     // Point sizes map directly to pixels_per_point scale
-                    // e.g., 12pt → 0.75, 14pt → 0.875, 16pt → 1.0
-                    let pixels_per_point = (state.ui_font_size as f32) / 16.0;
+                    // e.g., 12pt → 1.15, 14pt → 1.35, 16pt → 1.54 (baseline: 10.4pt)
+                    let pixels_per_point = (state.ui_font_size as f32) / 10.4;
                     ctx.set_pixels_per_point(pixels_per_point);
                 }
             }

@@ -47,6 +47,7 @@ pub struct MicroJitterMetrics {
 
 /// The Micro-Jitter Collector performs high-frequency latency measurement
 /// to detect fine-grained kernel jitter patterns
+#[derive(Clone)]
 pub struct MicroJitterCollector {
     config: MicroJitterConfig,
     stop_flag: Arc<AtomicBool>,
@@ -126,10 +127,10 @@ impl MicroJitterCollector {
                 break;
             }
 
-            // Log status periodically
-            if sample_count % 200 == 0 {
-                eprintln!("[JITTER] Progress: {} samples, {} spikes", sample_count, spike_count);
-            }
+            // Log status periodically (SILENCED to prevent spam)
+            // if sample_count % 200 == 0 {
+            //     log::debug!("[JITTER] Progress: {} samples, {} spikes", sample_count, spike_count);
+            // }
         }
 
         let metrics = MicroJitterMetrics {

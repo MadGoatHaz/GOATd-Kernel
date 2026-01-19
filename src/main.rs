@@ -6,6 +6,7 @@ use goatd_kernel::ui::controller::{AppController, BuildEvent};
 use goatd_kernel::ui::app::AppUI;
 use goatd_kernel::{LogCollector, LogLine};
 use goatd_kernel::log_collector::{get_global_logs_path, ensure_logs_dir_exists};
+use goatd_kernel::system::performance::diagnostic_buffer::init_global_buffer;
 
 #[tokio::main]
 async fn main() -> goatd_kernel::Result<()> {
@@ -16,6 +17,14 @@ async fn main() -> goatd_kernel::Result<()> {
     // This is the single source of truth for log file creation and rotation
     goatd_kernel::system::initialize_logging();
     eprintln!("[Main] ✓ Unified logging system initialized via system::initialize_logging()");
+    
+    // =========================================================================
+    // DIAGNOSTIC BUFFER INITIALIZATION - BEFORE MONITORING THREADS
+    // =========================================================================
+    // Initialize the global diagnostic buffer with capacity for 4096 messages
+    // This must be initialized early to prevent panics in collector threads
+    let _ = init_global_buffer(4096);
+    eprintln!("[Main] ✓ Diagnostic buffer initialized (capacity=4096, non-blocking)");
     
     // =========================================================================
     // ROBUST LOG COLLECTOR - DECOUPLED FROM UI

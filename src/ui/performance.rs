@@ -43,7 +43,7 @@ impl SpectrumStrip {
             history: Vec::new(),
             moving_avg: 0.0,
             normalized_score: 0.0,
-            raw_value_display: String::new(),
+            raw_value_display: "Ready".to_string(),
         }
     }
 
@@ -124,6 +124,8 @@ pub struct PerformanceUIState {
     benchmark_countdown: RefCell<Option<f64>>,
     /// Live monitoring mode flag (diagnostic mode)
     live_monitoring_active: RefCell<bool>,
+    /// Benchmark session flag (true only during active benchmark, not during live monitoring)
+    is_benchmark_session: RefCell<bool>,
     /// Comparison UI state
     comparison_test_a_selected: RefCell<Option<String>>,
     comparison_test_b_selected: RefCell<Option<String>>,
@@ -149,12 +151,14 @@ pub struct PerformanceUIState {
     spectrum_strips: RefCell<Vec<SpectrumStrip>>,
     /// Cached GOAT Score (0-1000)
     goat_score: RefCell<u16>,
+    /// Track when monitoring started for calibration indicator
+    monitoring_start_time: RefCell<Option<Instant>>,
 }
 
 impl PerformanceUIState {
     pub fn new() -> Self {
         let spectrum_strips = vec![
-            SpectrumStrip::new("Latency", 100.0, egui::Color32::from_rgb(0x51, 0xaf, 0xef)), // Cyan
+            SpectrumStrip::new("Latency", 100.0, egui::Color32::from_rgb(0x51, 0xaf, 0xef)), // Cyan (100 <- normalized score scaling)
             SpectrumStrip::new("Throughput", 100.0, egui::Color32::from_rgb(0xff, 0xaa, 0x00)), // Orange
             SpectrumStrip::new("Jitter", 100.0, egui::Color32::from_rgb(0xff, 0xff, 0x00)), // Yellow
             SpectrumStrip::new("Efficiency", 100.0, egui::Color32::from_rgb(0x00, 0xff, 0x00)), // Green
@@ -166,12 +170,13 @@ impl PerformanceUIState {
         PerformanceUIState {
             last_update: RefCell::new(Instant::now()),
             throttle_interval: Duration::from_millis(100),
-            benchmark_duration_seconds: RefCell::new(60),
+            benchmark_duration_seconds: RefCell::new(999),
             stressor_cpu_enabled: RefCell::new(true),
             stressor_memory_enabled: RefCell::new(false),
             stressor_scheduler_enabled: RefCell::new(false),
             benchmark_countdown: RefCell::new(None),
             live_monitoring_active: RefCell::new(false),
+            is_benchmark_session: RefCell::new(false),
             comparison_test_a_selected: RefCell::new(None),
             comparison_test_b_selected: RefCell::new(None),
             comparison_available_tests: RefCell::new(Vec::new()),
@@ -185,6 +190,7 @@ impl PerformanceUIState {
             test_to_delete: RefCell::new(None),
             spectrum_strips: RefCell::new(spectrum_strips),
             goat_score: RefCell::new(0),
+            monitoring_start_time: RefCell::new(None),
         }
     }
     
@@ -251,151 +257,309 @@ impl PerformanceUIState {
     pub fn update_spectrum_from_metrics(&self, metrics: &crate::system::performance::PerformanceMetrics) {
         let mut strips = self.spectrum_strips.borrow_mut();
 
-        // ===== METRIC 0: Latency (L.i.B) - HIGH-END RIG CALIBRATION =====
-        // Using rolling 1000-sample P99 ONLY - NO session max fallback for recovery
-        // High-end calibration (9800X3D/265K): 10µs (Optimal/1.0) → 500µs (Poor/0.0)
-        // This reflects "Holy Grail" performance for ultra-responsive systems
-        let latency_val = metrics.rolling_p99_us.max(10.0).min(500.0);
-        let latency_norm = (1.0 - ((latency_val - 10.0) / 490.0)).clamp(0.001, 1.0);
-        strips[0].update(latency_norm * 100.0);
-        strips[0].normalized_score = latency_norm;
-        strips[0].raw_value_display = format!("{:.1}µs", latency_val);
+        // === IDLE STATE STANDARDIZATION ===
+        // When metrics.state == Idle, standardize ALL 7 strips to neutral/ready state
+        if metrics.state == crate::system::performance::CollectionState::Idle {
+            for strip in strips.iter_mut() {
+                strip.value = 0.0;
+                strip.normalized_score = 0.5; // Neutral gray
+                strip.raw_value_display = "Ready".to_string();
+            }
+            return;
+        }
+
+        // ===== METRIC 0: Latency (L.i.B) - MULTI-SCALE UNCLAMPED (10ms CEILING) =====
+        // REVERTED: Uses rolling P99 ONLY (from 1000-sample window) for visual stability
+        // Allows recovery from P99.9 spikes while maintaining responsiveness indication
+        // NEW: Piecewise linear multi-scale normalization (10-10,000µs range)
+        // - 0-100µs: 0.0-0.6 (high-precision sub-µs region)
+        // - 100-1000µs: 0.6-0.8 (microsecond region)
+        // - 1000-10000µs: 0.8-1.0 (millisecond region)
+        // This preserves sub-microsecond visibility while accommodating 10ms without clamping
+        // Data availability: If no samples, show "---" and return neutral score
+        let latency_norm = if metrics.rolling_p99_us <= 0.0 {
+            strips[0].update(0.0);
+            strips[0].normalized_score = 0.5; // Neutral/gray during initialization
+            strips[0].raw_value_display = "Ready".to_string();
+            0.5 // Neutral score during initialization
+        } else {
+            let latency_val = metrics.rolling_p99_us.min(10000.0); // Clamp to 10ms ceiling
+            let norm = if latency_val <= 100.0 {
+                // Sub-microsecond precision: 10µs (1.0) → 100µs (0.6)
+                0.6 + ((100.0 - latency_val) / 100.0) * 0.4
+            } else if latency_val <= 1000.0 {
+                // Microsecond region: 100µs (0.6) → 1000µs (0.8)
+                let progress = (latency_val - 100.0) / 900.0;
+                0.6 - (progress * 0.2)
+            } else {
+                // Millisecond region: 1000µs (0.4) → 10000µs (0.0)
+                // FIXED: Changed starting score from 0.8 to 0.4 to eliminate +0.4 discontinuity
+                let progress = (latency_val - 1000.0) / 9000.0;
+                0.4 - (progress * 0.4)
+            }.max(0.001).min(1.0);
+            strips[0].update(norm * 100.0);
+            strips[0].normalized_score = norm;
+            strips[0].raw_value_display = format!("{:.1}µs", latency_val);
+            norm
+        };
 
         // ===== METRIC 1: Throughput (H.i.B) =====
-        // Using rolling 1000-sample P99 throughput ONLY - NO session max fallback for recovery
+        // UNIFIED: Always prioritize rolling_throughput_p99 (real-time rolling data)
         // Higher is better: 1.0M ops/s (Optimal/1.0) → 100k ops/s (Poor/0.0)
+        // Fallback: Only use benchmark snapshots if rolling data is 0.0 (unavailable)
         let (throughput_norm, throughput_display_str) = if metrics.rolling_throughput_p99 > 0.0 {
+            // PRIORITY 1: Use rolling P99 throughput (real-time, allows recovery)
             let norm = ((metrics.rolling_throughput_p99 - 100_000.0) / 900_000.0).clamp(0.0, 1.0);
             (norm, format!("{:.0}k/s", metrics.rolling_throughput_p99 / 1000.0))
         } else if let Some(bm) = metrics.benchmark_metrics.as_ref() {
+            // PRIORITY 2: Only fallback to benchmark snapshot if rolling is 0.0
             if let Some(syscall) = bm.syscall_saturation.as_ref() {
                 let val_f32 = syscall.calls_per_second as f32;
                 let norm = ((val_f32 - 100_000.0) / 900_000.0).clamp(0.0, 1.0);
                 (norm, format!("{:.0}k/s", val_f32 / 1000.0))
             } else {
-                // Fallback: inverse rolling latency mapping (not max)
-                let norm = (50.0 / metrics.rolling_p99_us.max(50.0)).clamp(0.0, 1.0);
-                let estimated_ops = 1_000_000.0 / metrics.rolling_p99_us.max(1.0);
-                (norm, format!("{:.0}k/s", estimated_ops / 1000.0))
+                // No throughput data available - show neutral "Ready"
+                (0.5, "Ready".to_string())
             }
         } else {
-            // Fallback: inverse rolling latency mapping (not max)
-            let norm = (50.0 / metrics.rolling_p99_us.max(50.0)).clamp(0.0, 1.0);
-            let estimated_ops = 1_000_000.0 / metrics.rolling_p99_us.max(1.0);
-            (norm, format!("{:.0}k/s", estimated_ops / 1000.0))
+            // No throughput data available - show neutral "Ready"
+            (0.5, "Ready".to_string())
         };
         strips[1].update(throughput_norm * 100.0);
-        strips[1].normalized_score = throughput_norm.clamp(0.001, 1.0);
+        strips[1].normalized_score = throughput_norm;
         strips[1].raw_value_display = throughput_display_str;
 
-        // ===== METRIC 2: Jitter (L.i.B) - CLAMPED RELATIVE JITTER (Purity of Scheduling) =====
-        // Clamped Relative Jitter Formula: (1.0 - ((std_dev / mean) - 0.05) / 0.25).clamp(0.001, 1.0)
-        // Optimal: 5% Noise (1.0) - Holy Grail of Scheduling Purity
-        // Poor: 30% Noise (0.001) - Objectively High Jitter
-        // Maps scheduling consistency across all rigs (accounts for baseline latency)
-        let (jitter_val, jitter_norm) = if metrics.jitter_history.is_empty() {
-            (0.0, 1.0) // Default to optimal if no data
+        // ===== METRIC 2: Jitter (L.i.B) - ABSOLUTE PEAK JITTER (0-10ms) =====
+        // Prioritizes rolling_jitter_us (absolute peak from scheduler variance)
+        // Falls back to micro-jitter P99.99 data when rolling jitter unavailable
+        //
+        // Jitter Peak Normalization (0-10,000µs range):
+        // - Green: 0-1000µs (1.0) - Excellent scheduling, sub-millisecond jitter
+        // - Yellow: 1000-5000µs (0.5) - Good scheduling, moderate jitter
+        // - Red: 5000-10000µs (0.001) - Poor scheduling, severe jitter
+        // Piecewise linear scale: mapping 0-10000µs to 1.0-0.001 score
+        // ===== METRIC 2: Jitter (L.i.B) - ABSOLUTE PEAK JITTER (0-10ms) =====
+        // Ensure "Ready" display when no data available
+        let (_jitter_val, jitter_norm, jitter_display) = if metrics.rolling_jitter_us > 0.0 {
+            // Use rolling peak jitter (absolute maximum from scheduler variance)
+            let rolling_jitter = metrics.rolling_jitter_us.min(10000.0);
+            // Piecewise normalization aligned with gauge ceiling (10000µs)
+            let norm = if rolling_jitter <= 1000.0 {
+                // 0-1000µs: 1.0-0.6 (high-precision region)
+                1.0 - ((rolling_jitter / 1000.0) * 0.4)
+            } else if rolling_jitter <= 5000.0 {
+                // 1000-5000µs: 0.6-0.2 (moderate jitter region)
+                0.6 - (((rolling_jitter - 1000.0) / 4000.0) * 0.4)
+            } else {
+                // 5000-10000µs: 0.2-0.001 (severe jitter region)
+                0.2 - (((rolling_jitter - 5000.0) / 5000.0) * 0.199)
+            };
+            (rolling_jitter, norm.clamp(0.001, 1.0), format!("{:.1}µs", rolling_jitter))
+        } else if let Some(bm) = metrics.benchmark_metrics.as_ref() {
+            if let Some(micro_jitter) = bm.micro_jitter.as_ref() {
+                // Fallback: Use high-precision micro-jitter P99.99 percentile data
+                let p99_99_us = micro_jitter.p99_99_us;
+                let norm = (1.0 - ((p99_99_us - 1.0) / 49.0)).clamp(0.001, 1.0);
+                (p99_99_us, norm, format!("{:.1}µs", p99_99_us))
+            } else if metrics.jitter_history.is_empty() {
+                // No jitter data at all - show "Ready"
+                (0.0, 0.5, "Ready".to_string())
+            } else {
+                // Ultimate fallback: relative jitter from jitter_history
+                let mean = metrics.jitter_history.iter().sum::<f32>() / metrics.jitter_history.len() as f32;
+                if mean <= 0.0 {
+                    (0.0, 0.5, "Ready".to_string())
+                } else {
+                    let variance = metrics.jitter_history.iter()
+                        .map(|x| (x - mean).powi(2))
+                        .sum::<f32>() / metrics.jitter_history.len() as f32;
+                    let std_dev = variance.sqrt();
+                    let relative_jitter = std_dev / mean;
+                    let norm = (1.0 - ((relative_jitter - 0.05) / 0.25)).clamp(0.001, 1.0);
+                    (std_dev, norm, format!("{:.1}µs", std_dev))
+                }
+            }
+        } else if metrics.jitter_history.is_empty() {
+            (0.0, 0.5, "Ready".to_string())
         } else {
+            // Fallback: relative jitter from jitter_history
             let mean = metrics.jitter_history.iter().sum::<f32>() / metrics.jitter_history.len() as f32;
             if mean <= 0.0 {
-                (0.0, 1.0) // Avoid division by zero
+                (0.0, 0.5, "Ready".to_string())
             } else {
                 let variance = metrics.jitter_history.iter()
                     .map(|x| (x - mean).powi(2))
                     .sum::<f32>() / metrics.jitter_history.len() as f32;
                 let std_dev = variance.sqrt();
-                let relative_jitter = std_dev / mean;  // Coefficient of Variation
+                let relative_jitter = std_dev / mean;
                 let norm = (1.0 - ((relative_jitter - 0.05) / 0.25)).clamp(0.001, 1.0);
-                (std_dev, norm)
+                (std_dev, norm, format!("{:.1}µs", std_dev))
             }
         };
         strips[2].update(jitter_norm * 100.0);
         strips[2].normalized_score = jitter_norm;
-        strips[2].raw_value_display = format!("{:.1}µs", jitter_val);
+        strips[2].raw_value_display = jitter_display;
 
         // ===== METRIC 3: CPU Efficiency (L.i.B) - Context-Switch Overhead =====
-        // Using rolling 1000-sample P99 efficiency ONLY - NO session max fallback for recovery
-        // Lower efficiency overhead = Higher score: 1µs (Optimal/1.0) → 100µs (Poor/0.0)
+        // RECALIBRATED LABORATORY-GRADE: Always prioritize rolling_efficiency_p99 (real-time rolling data)
+        // Uses MEDIAN RTT (representative) not P99 (biased)
+        // Piecewise linear EXPANDED RANGE (0.5µs - 50µs) to reflect real-world hardware:
+        // - 0.5µs: 1.0 (Perfect - ultra-low kernel overhead)
+        // - 5.0µs: 0.8 (Excellent - typical high-performance tuned kernel)
+        // - 15.0µs: 0.5 (Good/Baseline - reasonable production kernel, 8.0µs scores ~0.7)
+        // - 30.0µs: 0.2 (Acceptable - marginal but workable overhead)
+        // - 50.0µs: 0.0 (Floor - unacceptable overhead)
+        // Fallback: Only use benchmark snapshots if rolling data is 0.0 (unavailable)
         let (cpu_eff_norm, cpu_eff_display) = if metrics.rolling_efficiency_p99 > 0.0 {
-            // Use rolling P99 efficiency value (context-switch overhead in µs)
-            let efficiency_val = metrics.rolling_efficiency_p99.max(1.0).min(100.0);
-            let norm = (1.0 - ((efficiency_val - 1.0) / 99.0)).clamp(0.001, 1.0);
-            (norm, format!("{:.1}µs", efficiency_val))
-        } else if let Some(bm) = metrics.benchmark_metrics.as_ref() {
-            if let Some(ctx_switch) = bm.context_switch_rtt.as_ref() {
-                // Use rolling equivalent if available, not session max
-                let efficiency = ctx_switch.avg_rtt_us.max(1.0).min(100.0);
-                let norm = (1.0 - ((efficiency - 1.0) / 99.0)).clamp(0.001, 1.0);
-                (norm, format!("{:.1}µs", efficiency))
+            // PRIORITY 1: Use rolling median efficiency (real-time, allows recovery)
+            let efficiency_val = metrics.rolling_efficiency_p99.min(50.0);
+            let norm = if efficiency_val <= 0.5 {
+                // Perfect ultra-low overhead: 0.5µs = 1.0 score
+                1.0
+            } else if efficiency_val <= 5.0 {
+                // Excellent region: 0.5-5µs maps to 1.0-0.8 score
+                let progress = (efficiency_val - 0.5) / 4.5;
+                1.0 - (progress * 0.2)
+            } else if efficiency_val <= 15.0 {
+                // Good/Baseline region: 5-15µs maps to 0.8-0.5 score
+                // At 8.0µs: progress = (8.0-5.0)/10.0 = 0.3, score = 0.8 - (0.3*0.3) = 0.71
+                let progress = (efficiency_val - 5.0) / 10.0;
+                0.8 - (progress * 0.3)
+            } else if efficiency_val <= 30.0 {
+                // Acceptable region: 15-30µs maps to 0.5-0.2 score
+                let progress = (efficiency_val - 15.0) / 15.0;
+                0.5 - (progress * 0.3)
             } else {
-                // Fallback: use rolling P99 latency for estimation (not max)
-                let norm = (50.0 / metrics.rolling_p99_us.max(50.0)).clamp(0.001, 1.0);
-                let estimated_eff = metrics.rolling_p99_us.max(1.0);
-                (norm, format!("{:.1}µs", estimated_eff))
+                // Poor region: 30-50µs maps to 0.2-0.0 score
+                let progress = (efficiency_val - 30.0) / 20.0;
+                0.2 - (progress * 0.2)
+            }.max(0.0).min(1.0);
+            (norm, format!("{:.3}µs", efficiency_val))
+        } else if let Some(bm) = metrics.benchmark_metrics.as_ref() {
+            // PRIORITY 2: Only fallback to benchmark snapshot if rolling is 0.0
+            if let Some(ctx_switch) = bm.context_switch_rtt.as_ref() {
+                let efficiency = ctx_switch.avg_rtt_us.min(50.0);
+                let norm = if efficiency <= 0.5 {
+                    1.0
+                } else if efficiency <= 5.0 {
+                    let progress = (efficiency - 0.5) / 4.5;
+                    1.0 - (progress * 0.2)
+                } else if efficiency <= 15.0 {
+                    let progress = (efficiency - 5.0) / 10.0;
+                    0.8 - (progress * 0.3)
+                } else if efficiency <= 30.0 {
+                    let progress = (efficiency - 15.0) / 15.0;
+                    0.5 - (progress * 0.3)
+                } else {
+                    let progress = (efficiency - 30.0) / 20.0;
+                    0.2 - (progress * 0.2)
+                }.max(0.0).min(1.0);
+                (norm, format!("{:.3}µs", efficiency))
+            } else {
+                // No CPU efficiency data available - show neutral "Ready"
+                (0.5, "Ready".to_string())
             }
         } else {
-            // Fallback: use rolling P99 latency for estimation (not max)
-            let norm = (50.0 / metrics.rolling_p99_us.max(50.0)).clamp(0.001, 1.0);
-            let estimated_eff = metrics.rolling_p99_us.max(1.0);
-            (norm, format!("{:.1}µs", estimated_eff))
+            // No CPU efficiency data available - show neutral "Ready"
+            (0.5, "Ready".to_string())
         };
         strips[3].update(cpu_eff_norm * 100.0);
         strips[3].normalized_score = cpu_eff_norm;
         strips[3].raw_value_display = cpu_eff_display;
 
         // ===== METRIC 4: Thermal (L.i.B) =====
-        // Lower is better: 40°C (Optimal/1.0) → 90°C (Poor/0.0)
+        // NEW: Tiered thermal normalization (0-85°C+ range)
+        // - 0.0 to 60.0°C: 1.0 score (Green Zone - optimal)
+        // - 60.0 to 85.0°C: 1.0 down to 0.5 (Yellow Zone - acceptable)
+        // - Above 85.0°C: 0.5 down to 0.001 (Red Zone - critical)
+        // This gives generous green zone until 60°C, matches backend scoring.rs
         // Uses MAX core temperature to match backend implementation in scoring.rs
-        let max_temp = if metrics.core_temperatures.is_empty() {
-            45.0 // Default to neutral if no data
+        // Data availability: If no temperature data, show "---" and return neutral score
+        let thermal_norm = if metrics.core_temperatures.is_empty() {
+            strips[4].update(0.0);
+            strips[4].normalized_score = 0.5; // Neutral/gray during initialization
+            strips[4].raw_value_display = "Ready".to_string();
+            0.5 // Neutral score during initialization
         } else {
-            metrics.core_temperatures.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+            let max_temp = metrics.core_temperatures.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let norm = if max_temp <= 60.0 {
+                // Green zone: 0-60°C (optimal)
+                1.0
+            } else if max_temp <= 85.0 {
+                // Yellow zone: 60-85°C maps to 1.0-0.5 score
+                let progress = (max_temp - 60.0) / 25.0;
+                1.0 - (progress * 0.5)
+            } else {
+                // Red zone: Above 85°C maps to 0.5-0.001 score
+                let progress = ((max_temp - 85.0) / 15.0).min(1.0);
+                0.5 - (progress * 0.499)
+            }.max(0.001).min(1.0);
+            strips[4].update(norm * 100.0);
+            strips[4].normalized_score = norm;
+            strips[4].raw_value_display = format!("{:.1}°C", max_temp);
+            norm
         };
-        let thermal_norm = if max_temp == 0.0 {
-            0.5 // Neutral default
-        } else {
-            (1.0 - ((max_temp - 40.0) / 50.0)).clamp(0.001, 1.0)
-        };
-        strips[4].update(thermal_norm * 100.0);
-        strips[4].normalized_score = thermal_norm;
-        strips[4].raw_value_display = format!("{:.1}°C", max_temp);
 
-        // ===== METRIC 5: Consistency (L.i.B) - LABORATORY GRADE CV % SCALE =====
-        // Using Coefficient of Variation (CV % = std_dev / mean) for frame pacing precision
-        // CV % reflects relative jitter independent of baseline latency
-        // Laboratory Grade Calibration:
-        // - CV <= 5% (< 0.05): 1.0 score (Laboratory Grade / "Silent" Kernels)
-        // - CV >= 30% (>= 0.30): 0.001 score (Poor / Frame Pacing Issues)
-        // Linear Normalization: Score = (1.0 - (CV - 0.05) / 0.25).clamp(0.001, 1.0)
-        let std_dev_us = metrics.rolling_consistency_us;  // Standard deviation from rolling window
-        let (consistency_norm, _cv_percent) = if metrics.rolling_p99_us > 0.0 && std_dev_us > 0.0 {
-            // Calculate CV from rolling latency mean and std_dev
-            let cv = std_dev_us / metrics.rolling_p99_us;  // Coefficient of Variation
-            let norm = (1.0 - ((cv - 0.05) / 0.25)).clamp(0.001, 1.0);
-            (norm, cv * 100.0)
+        // ===== METRIC 5: Consistency (L.i.B) - STANDARD DEVIATION (10k-sample calibrated) =====
+        // Using Standard Deviation (µs) for scheduling consistency measurement
+        // Std Dev measures variability: lower values = more consistent performance
+        // Calibrated for 10,000-sample RollingWindow with EMA smoothing (alpha=0.1 ~ 50-sample)
+        // Professional Calibration (KernBench Tier):
+        // - StdDev <= 5µs (0.0-50): 1.0 score (Laboratory Grade / "Silent" Kernels)
+        // - StdDev >= 50µs (>= 500): 0.001 score (Poor / High Jitter)
+        // Piecewise Linear Normalization: Score = (1.0 - ((std_dev - 5) / 45)).clamp(0.001, 1.0)
+        // Data availability: If no consistency data, show "Ready" and return neutral score
+        let std_dev_us = metrics.rolling_consistency_us;
+        let consistency_norm = if std_dev_us > 0.0 {
+            // Direct Standard Deviation normalization (already smoothed by EMA in rolling window)
+            // Scale: 5µs (optimal) → 50µs (poor), clamped to 0.001-1.0
+            let norm = if std_dev_us <= 5.0 {
+                1.0  // Perfect: < 5µs std dev
+            } else if std_dev_us <= 50.0 {
+                // Linear region: 5-50µs maps to 1.0-0.001 score
+                let progress = (std_dev_us - 5.0) / 45.0;
+                (1.0 - progress).clamp(0.001, 1.0)
+            } else {
+                // Beyond 50µs: minimal score (poor consistency)
+                0.001
+            };
+            norm
         } else {
-            (1.0, 0.0)  // Default to optimal if data unavailable
+            0.5  // Neutral/gray if data unavailable
         };
         strips[5].update(consistency_norm * 100.0);
         strips[5].normalized_score = consistency_norm;
-        // Display: Show only the standard deviation in µs (NO CV% label)
-        strips[5].raw_value_display = format!("{:.1}µs", std_dev_us);
+        // Display: Show the smoothed standard deviation in µs (EMA-smoothed, no recalculation)
+        let consistency_display = if std_dev_us > 0.0 {
+            format!("{:.1}µs", std_dev_us)
+        } else {
+            "Ready".to_string()
+        };
+        strips[5].raw_value_display = consistency_display;
 
         // ===== METRIC 6: SMI Resilience (H.i.B) =====
-        // Higher is better: 0 SMIs (Optimal/1.0) → 10+ SMIs (Poor/0.0)
-        // Returns 1.0 (Full/Green) if no SMIs are detected
-        let smi_norm = if metrics.total_smis == 0 {
-            1.0 // Perfect score if no SMIs detected
-        } else {
+        // Higher is better: 0 SMI-correlated spikes (Optimal/1.0) → Multiple spikes (Poor/0.0)
+        // Data availability: Only show "No data" if SMI collector is truly inactive/errored
+        // If spikes_correlated_to_smi == 0, show "0" in green with full bar (Score 1.0) - perfect resilience
+        let smi_norm = if metrics.spikes_correlated_to_smi == 0 {
+            // Perfect: No latency spikes correlated to SMI - excellent resilience
+            1.0
+        } else if metrics.total_smis > 0 {
+            // SMI data is being collected and some spikes correlated - calculate resilience ratio
             let ratio = metrics.spikes_correlated_to_smi as f32 / metrics.total_smis as f32;
             (1.0 - ratio.min(1.0)).clamp(0.001, 1.0)
+        } else {
+            // Ambiguous state: correlated spikes detected but no SMI events (collector issue)
+            0.0
         };
         strips[6].update(smi_norm * 100.0);
         strips[6].normalized_score = smi_norm;
-        strips[6].raw_value_display = if metrics.total_smis == 0 {
-            "0 SMIs".to_string()
-        } else {
+        strips[6].raw_value_display = if metrics.spikes_correlated_to_smi == 0 {
+            "0".to_string()  // Perfect: 0 spikes correlated to SMI events
+        } else if metrics.total_smis > 0 {
             format!("{}/{}", metrics.spikes_correlated_to_smi, metrics.total_smis)
+        } else {
+            "Ready".to_string()  // SMI collector is inactive or not operational
         };
 
         // ===== CALCULATE GOAT SCORE (0-1000) =====
@@ -726,14 +890,48 @@ fn render_mini_heatmap(ui: &mut egui::Ui, core_temps: &[f32]) {
 /// Uses dynamic color gradient based on normalized_score (0.0-1.0)
 ///
 /// Optional phase_highlight: If Some, pulsing effect is applied to this strip if it's the active metric for the phase
-fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlight: Option<&str>) {
+/// Optional noise_floor_us: If Some and > 0, shows hardware noise badge and applies firmware interference color
+fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlight: Option<&str>, noise_floor_us: Option<f32>) {
+    // Detect if data is unavailable (raw_value_display is "---" or history is empty)
+    // "Ready" is a valid initialization state (neutral gray coloring)
+    let data_unavailable = strip.raw_value_display == "---" || (strip.history.is_empty() && strip.raw_value_display != "Ready");
+    
+    // Check for firmware-induced noise: latency > 500µs but <= noise_floor_us
+    let is_firmware_interference = if let Some(nf) = noise_floor_us {
+        if nf > 0.0 {
+            // Only applies to Latency strip (check by label)
+            if strip.label == "Latency" {
+                let latency_val = if let Ok(val) = strip.raw_value_display.trim_end_matches('µ').trim_end_matches('s').parse::<f32>() {
+                    val
+                } else {
+                    0.0
+                };
+                latency_val > 500.0 && latency_val <= nf
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    
     // Get dynamic color based on normalized score
-    let mut dynamic_color = get_score_color(strip.normalized_score);
+    // Use neutral gray if data is initializing/unavailable
+    let mut dynamic_color = if data_unavailable {
+        egui::Color32::from_rgb(100, 100, 100) // Neutral gray for "no data" state
+    } else if is_firmware_interference {
+        // Cyan (0x51afef) for firmware-induced noise
+        egui::Color32::from_rgb(0x51, 0xaf, 0xef)
+    } else {
+        get_score_color(strip.normalized_score)
+    };
     
     // Apply pulsing effect if this strip is highlighted for the current phase
     // Pulsing is achieved by brightening the color every 500ms
     if let Some(highlight_metric) = phase_highlight {
-        if strip.label.eq_ignore_ascii_case(highlight_metric) {
+        if strip.label.eq_ignore_ascii_case(highlight_metric) && !data_unavailable {
             let pulse_phase = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -761,6 +959,7 @@ fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlig
         });
 
         // Digital Value (60px) - Display raw value, not the score
+        // Shows "---" when data is initializing/unavailable
         ui.vertical(|ui| {
             ui.set_max_width(60.0);
             ui.set_min_width(60.0);
@@ -769,10 +968,27 @@ fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlig
             } else {
                 strip.raw_value_display.clone()
             };
-            ui.colored_label(
-                dynamic_color,
-                egui::RichText::new(value_text).monospace().strong(),
+            // Use gray color for "---" (initializing state), otherwise use dynamic color
+            let display_color = if value_text == "---" {
+                egui::Color32::from_rgb(128, 128, 128) // Gray for "no data"
+            } else if is_firmware_interference {
+                egui::Color32::from_rgb(0x51, 0xaf, 0xef) // Cyan for firmware interference
+            } else {
+                dynamic_color
+            };
+            
+            // Create a response area for tooltip
+            let value_response = ui.colored_label(
+                display_color,
+                egui::RichText::new(&value_text).monospace().strong(),
             );
+            
+            // Add tooltip for latency strip explaining noise floor
+            if strip.label == "Latency" {
+                value_response.on_hover_text(
+                    "Noise Floor Detection: Red spikes > 500µs within hardware noise floor window are firmware-induced (shown in Cyan), not kernel issues."
+                );
+            }
         });
 
         // Signal & Pulse Bar (remaining space - custom painted)
@@ -802,7 +1018,8 @@ fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlig
             let max_y = response.rect.max.y;
 
             // ===== DRAW BACKGROUND SPARKLINE (subtle area-filled) =====
-            if !strip.history.is_empty() {
+            // Skip sparkline if data is initializing (empty history)
+            if !strip.history.is_empty() && !data_unavailable {
                 let min_val = strip.history.iter().copied().fold(f32::INFINITY, f32::min);
                 let max_val = strip.history.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let range = (max_val - min_val).max(0.1);
@@ -841,8 +1058,13 @@ fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlig
             let usable_width = bar_width - (segment_padding * (num_segments as f32 - 1.0));
             let segment_width = (usable_width / num_segments as f32).max(1.0);
 
-            let progress = strip.progress();
-            let filled_segments = (progress * num_segments as f32).ceil() as usize;
+            // When data is initializing, show all segments as unfilled (empty/gray state)
+            let filled_segments = if data_unavailable {
+                0  // Show no filled segments when waiting for data
+            } else {
+                let progress = strip.progress();
+                (progress * num_segments as f32).ceil() as usize
+            };
 
             for i in 0..num_segments {
                 // Integer-based step calculation for non-overlapping segments
@@ -853,7 +1075,7 @@ fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlig
                     egui::pos2(segment_max_x, (max_y - 4.0).floor()),
                 );
 
-                if i < filled_segments {
+                if i < filled_segments && !data_unavailable {
                     // Filled segment: apply glow to peak blocks (last 2-3)
                     let is_peak = filled_segments > 0 && i >= (filled_segments.saturating_sub(3));
                     let segment_color = if is_peak {
@@ -875,12 +1097,19 @@ fn render_spectrum_strip(ui: &mut egui::Ui, strip: &SpectrumStrip, phase_highlig
                     }
                 } else {
                     // Unfilled segment: dark semi-transparent background
-                    painter.rect_filled(segment_rect, 1.0, egui::Color32::from_black_alpha(100));
+                    // Use darker appearance during initialization to signal "waiting for data"
+                    let unfilled_color = if data_unavailable {
+                        egui::Color32::from_black_alpha(150)  // Darker during wait state
+                    } else {
+                        egui::Color32::from_black_alpha(100)  // Normal unfilled
+                    };
+                    painter.rect_filled(segment_rect, 1.0, unfilled_color);
                 }
             }
 
             // ===== OVERLAY PULSE INDICATOR (moving average line) =====
-            if !strip.history.is_empty() {
+            // Skip pulse if data is initializing (empty history or "---" state)
+            if !strip.history.is_empty() && !data_unavailable {
                 let min_val = strip.history.iter().copied().fold(f32::INFINITY, f32::min);
                 let max_val = strip.history.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let range = (max_val - min_val).max(0.1);
@@ -1022,7 +1251,7 @@ fn render_phase_status(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController>
 /// Render the Performance Spectrum card (7 horizontal metric strips)
 /// SYNCHRONIZED WIDTH: Matches the KPI card above by using same column width constraint
 /// All internal strips scale to fit the forced width perfectly (no bleeding)
-fn render_performance_spectrum(ui: &mut egui::Ui, state: &PerformanceUIState, phase_highlight: Option<&str>) {
+fn render_performance_spectrum(ui: &mut egui::Ui, state: &PerformanceUIState, phase_highlight: Option<&str>, metrics: Option<&crate::system::performance::PerformanceMetrics>) {
     ui.group(|ui| {
         // CRITICAL: Get available width at start and use it as fixed constraint
         // This ensures the spectrum card matches the KPI card width exactly
@@ -1030,9 +1259,22 @@ fn render_performance_spectrum(ui: &mut egui::Ui, state: &PerformanceUIState, ph
         ui.set_max_width(column_width);
         ui.set_min_width(column_width);
         
-        // === Header with GOAT Score and Tier ===
+        // === Header with GOAT Score, Tier, and Hardware Noise Badge ===
         ui.horizontal(|ui| {
             ui.heading("⚡ Performance Spectrum");
+            
+            // Add hardware noise detected badge if noise_floor_us > 0
+            if let Some(m) = metrics {
+                if m.noise_floor_us > 0.0 {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(0xff, 0xaa, 0x00), // Orange warning
+                        egui::RichText::new(format!("⚠ Hardware Noise ({:.0}µs)", m.noise_floor_us))
+                            .monospace()
+                            .strong()
+                            .size(12.0),
+                    ).on_hover_text("Firmware-induced latency spikes detected and calibrated. Spikes within this threshold are not kernel bugs.");
+                }
+            }
             
             // SPACER
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1059,11 +1301,57 @@ fn render_performance_spectrum(ui: &mut egui::Ui, state: &PerformanceUIState, ph
                 );
             });
         });
+        
+        // === CALIBRATING indicator if monitoring < 10 seconds ===
+        if let Some(start_time) = *state.monitoring_start_time.borrow() {
+            let elapsed = start_time.elapsed();
+            if elapsed < Duration::from_secs(10) {
+                ui.colored_label(
+                    egui::Color32::from_rgb(0xff, 0xff, 0x00), // Yellow
+                    egui::RichText::new(format!("🔄 CALIBRATING... ({:.1}s/10s)", elapsed.as_secs_f32()))
+                        .monospace()
+                        .strong()
+                        .size(12.0),
+                ).on_hover_text("Noise floor calibration in progress. Baseline hardware noise being established.");
+            }
+        }
+        
         ui.separator();
 
         let strips = state.spectrum_strips.borrow();
-        for strip in strips.iter() {
-            render_spectrum_strip(ui, strip, phase_highlight);
+        let noise_floor = metrics.map(|m| m.noise_floor_us);
+        let mode = state.get_monitoring_mode();
+        
+        // === DETERMINE IF ACTIVE BENCHMARKING IS RUNNING ===
+        // Benchmark metrics are greyed out during passive Continuous monitoring
+        // Only enable benchmark-specific metrics when in active benchmark mode AND state is Running
+        let is_benchmark_active = if let Some(m) = metrics {
+            let mode_is_benchmark = matches!(mode, MonitoringMode::Benchmark(_) | MonitoringMode::SystemBenchmark);
+            let state_is_running = m.state == crate::system::performance::CollectionState::Running;
+            mode_is_benchmark && state_is_running
+        } else {
+            false
+        };
+        
+        // UPDATED: Show all metrics including Throughput (index 1) and Efficiency (index 3) in Continuous mode
+        // During Continuous monitoring, these show "Ready" if no live data is available, or live estimates if collectors are active
+        for (idx, strip) in strips.iter().enumerate() {
+            // === GREY-OUT BENCHMARK-SPECIFIC METRICS ===
+            // Indices 1 (Throughput), 3 (Efficiency), and 6 (SMI Resilience) are benchmark-only
+            // Passive telemetry metrics (0: Latency, 2: Jitter, 4: Thermal, 5: Consistency) remain enabled
+            let is_benchmark_metric = idx == 1 || idx == 3 || idx == 6;
+            
+            if is_benchmark_metric {
+                // During Continuous mode, show Throughput/Efficiency with live estimates or "Ready"
+                // During Benchmark mode, grey out if benchmark isn't actively running
+                let enabled_in_continuous = true; // Allow display in Continuous mode with live data/Ready state
+                ui.add_enabled_ui(is_benchmark_active || (mode == MonitoringMode::Continuous && enabled_in_continuous), |ui| {
+                    render_spectrum_strip(ui, strip, phase_highlight, noise_floor);
+                });
+            } else {
+                // Passive telemetry metrics always render normally
+                render_spectrum_strip(ui, strip, phase_highlight, noise_floor);
+            }
         }
     });
 }
@@ -1095,14 +1383,69 @@ pub fn render_performance(
         }
     };
     
+    // Extract monitoring status BEFORE using it in RT warning banner
+    let (is_monitoring, lifecycle_state) = {
+        if let Ok(ctrl) = controller.try_read() {
+            ctrl.get_monitoring_status()
+        } else {
+            (false, "Unknown".to_string())
+        }
+    };
+    
+    // === RT STATUS WARNING BANNER ===
+    // Display warning if real-time priority is not active AND monitoring is active
+    // Suppress warning in Idle state
+    if let Some(ref m) = metrics {
+        if is_monitoring && !m.rt_active {
+            let _warning_bg_color = egui::Color32::from_rgba_unmultiplied(100, 85, 0, 200); // Khaki/yellow background
+            let warning_text_color = egui::Color32::from_rgb(255, 255, 100); // Bright yellow text
+            
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    // Warning header with icon
+                    ui.horizontal(|ui| {
+                        ui.colored_label(
+                            warning_text_color,
+                            egui::RichText::new("⚠ REAL-TIME PRIORITY INACTIVE")
+                                .monospace()
+                                .strong()
+                                .size(14.0),
+                        );
+                    });
+                    
+                    // Error message (if available)
+                    if let Some(ref error_msg) = m.rt_error {
+                        ui.label(egui::RichText::new(format!("Error: {}", error_msg))
+                            .small()
+                            .color(warning_text_color));
+                    }
+                    
+                    // Hint for resolution
+                    ui.label(egui::RichText::new("💡 Hint: Ensure 'memlock' ulimits are unlimited and CAP_IPC_LOCK is set.")
+                        .small()
+                        .color(egui::Color32::from_rgb(200, 200, 150)));
+                });
+            });
+            
+            ui.separator();
+        }
+    }
+    
     // Extract jitter history from AppController (always use latest, no throttling for render)
-    let (max_latency, p99_9_latency, jitter_history, core_temps) =
+    let (max_latency, _p99_9_latency, jitter_history, core_temps) =
         PERF_UI_STATE.with(|state| {
             // FIXED: Always show latest metrics in UI, only throttle data collection at controller level
             // This ensures gauges/charts update every frame while data collection is still throttled
-            let max_lat = metrics.as_ref().map(|m| m.max_us).unwrap_or(0.0);
+            // ALIGNED: Use rolling P99.9 for gauge (from 1000-sample rolling window)
+            let max_lat = metrics.as_ref().map(|m| m.rolling_p99_9_us).unwrap_or(0.0);
             let p99_9_lat = metrics.as_ref().map(|m| m.p99_9_us).unwrap_or(0.0);
-            let jitter_vec = metrics.as_ref().map(|m| m.jitter_history.clone()).unwrap_or_default();
+            let jitter_vec = metrics.as_ref().map(|m| {
+                if m.jitter_history.len() > 500 {
+                    m.jitter_history[m.jitter_history.len() - 500..].to_vec()
+                } else {
+                    m.jitter_history.clone()
+                }
+            }).unwrap_or_default();
             let core_temps = metrics.as_ref().map(|m| m.core_temperatures.clone()).unwrap_or_default();
             
             // Update spectrum from current metrics
@@ -1113,17 +1456,18 @@ pub fn render_performance(
             (max_lat, p99_9_lat, jitter_vec, core_temps)
         });
     
-    // Extract monitoring status
-    let (is_monitoring, lifecycle_state) = {
-        if let Ok(ctrl) = controller.try_read() {
-            ctrl.get_monitoring_status()
-        } else {
-            (false, "Unknown".to_string())
-        }
-    };
-    
     // Display monitoring status with completion indicator
-    let (status_text, status_color) = if lifecycle_state == "Completed" {
+    let (status_text, status_color) = if let Some(ref m) = metrics {
+        if m.state == crate::system::performance::CollectionState::WarmingUp {
+            ("⏳ WARMING UP... (Stabilizing CPU)".to_string(), egui::Color32::from_rgb(0xff, 0xff, 0x00))  // Yellow
+        } else if lifecycle_state == "Completed" {
+            ("✅ BENCHMARK COMPLETE".to_string(), egui::Color32::from_rgb(0x98, 0xbe, 0x65))
+        } else if is_monitoring {
+            (format!("🟢 MONITORING ACTIVE ({})", lifecycle_state), egui::Color32::GREEN)
+        } else {
+            ("⏸ Idle".to_string(), egui::Color32::GRAY)
+        }
+    } else if lifecycle_state == "Completed" {
         ("✅ BENCHMARK COMPLETE".to_string(), egui::Color32::from_rgb(0x98, 0xbe, 0x65))
     } else if is_monitoring {
         (format!("🟢 MONITORING ACTIVE ({})", lifecycle_state), egui::Color32::GREEN)
@@ -1145,19 +1489,36 @@ pub fn render_performance(
     PERF_UI_STATE.with(|state| {
         let duration = *state.benchmark_duration_seconds.borrow();
         if duration == 999 {  // SystemBenchmark mode
-            if lifecycle_state == "Completed" {
+            if lifecycle_state == "Completed" && !is_monitoring && *state.is_benchmark_session.borrow() {
+                // STRICT COMPLETION TRIGGER (Benchmark Session Flag Fix):
+                // Only show completion when ALL conditions are met:
+                // 1. lifecycle_state is "Completed" (benchmark finished)
+                // 2. is_monitoring is false (monitoring stopped)
+                // 3. is_benchmark_session is true (started as benchmark, not live monitor)
+                // 4. naming_prompt_triggered was cleared when benchmark started (NOT stale state)
+                //
+                // The is_benchmark_session flag acts as a session identifier:
+                // - TRUE = Started via "Start Benchmark" (SystemBenchmark mode)
+                // - FALSE = Started via "Live Monitor" (Continuous mode)
+                // This prevents triggering naming prompt when stopping live monitoring
                 render_benchmark_completion_summary(ui, controller, state);
                 
                 // Auto-show name benchmark prompt when benchmark completes
-                // Only trigger once per completion cycle
+                // Only trigger once per completion cycle (guarded by naming_prompt_triggered)
                 let mut naming_triggered = state.naming_prompt_triggered.borrow_mut();
                 if !*naming_triggered {
                     *state.show_name_benchmark_prompt.borrow_mut() = true;
                     *naming_triggered = true;
                 }
-            } else {
+                drop(naming_triggered);
+                
+                // Reset is_benchmark_session flag now that naming prompt is triggered
+                // This prevents accidental re-triggering if monitoring state changes later
+                *state.is_benchmark_session.borrow_mut() = false;
+            } else if lifecycle_state == "Running" || is_monitoring {
+                // Show phase status while benchmark is running
                 render_phase_status(ui, controller);
-                // Reset trigger flag when benchmark is no longer completed
+                // Reset trigger flag while still running (ensures fresh state for completion)
                 *state.naming_prompt_triggered.borrow_mut() = false;
             }
             ui.separator();
@@ -1165,8 +1526,11 @@ pub fn render_performance(
     });
     
     // === MAIN LAYOUT: KPIs, Spectrum, Perpetual Jitter History, and Controls ===
-    let jitter_val = calculate_jitter(&jitter_history);
-    let avg_temp = core_temps.iter().sum::<f32>() / core_temps.len().max(1) as f32;
+    let _jitter_val = calculate_jitter(&jitter_history);
+    let _avg_temp = core_temps.iter().sum::<f32>() / core_temps.len().max(1) as f32;
+    
+    // Get monitoring mode for conditional gauge rendering
+    let mode = PERF_UI_STATE.with(|state| state.get_monitoring_mode());
     
     ui.columns(2, |cols| {
         // ===== LEFT COLUMN: KPIs & Performance Spectrum =====
@@ -1177,53 +1541,87 @@ pub fn render_performance(
             ui.label("Real-Time KPIs (Professional Tiers)");
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    // Max Latency KPI: Professional tier 0-1000µs (Green<50, Yellow 150, Red>500)
-                    widgets::radial_gauge(ui, max_latency, 0.0..1000.0, "Max Latency (µs)");
+                    // Peak Latency KPI (P99.9 rolling): Extended range 0-100,000µs (100ms) for millisecond-scale visibility
+                    // Uses 1000-sample rolling window for recovery from spikes
+                    // UNIFIED: Shows only rolling P99.9 - no redundant session-wide gauge
+                    // Professional tier: Green<50µs, Yellow 500µs, Red>2ms
+                    // Unclamped to show full range without clamping millisecond events
+                    widgets::radial_gauge(ui, max_latency.min(1000.0), 0.0..1000.0, "Peak Latency (P99.9)");
                 });
                 ui.vertical(|ui| {
-                    // P99.9 Latency KPI: Professional tier 0-200µs (Green<20, Yellow 50, Red>100)
-                    widgets::radial_gauge(ui, p99_9_latency, 0.0..200.0, "P99.9 Latency (µs)");
+                    // Jitter Peak (rolling max): 0-10,000µs (10ms) range for absolute peak jitter display
+                    // Aligned with Spectrum Strip: uses rolling_jitter_us for consistency
+                    let jitter_peak = metrics.as_ref().map(|m| m.rolling_jitter_us).unwrap_or(0.0);
+                    widgets::radial_gauge(ui, jitter_peak.min(500.0), 0.0..500.0, "Jitter Peak (µs)");
                 });
                 ui.vertical(|ui| {
-                    widgets::radial_gauge(ui, jitter_val, 0.0..50.0, "Jitter (σ)");
+                    // Package Temperature (MAX core): 0-100°C (critical at ~90°C)
+                    // UNIFIED: Shows MAX core temperature to match Thermal spectrum strip
+                    let max_temp = core_temps.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    widgets::radial_gauge(ui, max_temp.min(90.0), 0.0..90.0, "Pkg Temp MAX (°C)");
                 });
+                // CPU Efficiency Gauge - visible in all modes
+                // In Continuous mode: uses rolling P99 efficiency from real-time ContextSwitch collector
+                // In Benchmark mode: uses context_switch_rtt from benchmark metrics
                 ui.vertical(|ui| {
-                    widgets::radial_gauge(ui, avg_temp, 0.0..100.0, "Package Temp (°C)");
+                    let efficiency = if mode == MonitoringMode::Continuous {
+                        // Continuous mode: use rolling P99 efficiency from RollingWindow
+                        metrics.as_ref()
+                            .map(|m| m.rolling_efficiency_p99)
+                            .unwrap_or(0.0)
+                    } else {
+                        // Benchmark mode: use context_switch_rtt from collectors
+                        metrics.as_ref()
+                            .and_then(|m| m.benchmark_metrics.as_ref())
+                            .and_then(|bm| bm.context_switch_rtt.as_ref())
+                            .map(|cs| cs.avg_rtt_us)
+                            .unwrap_or(0.0)
+                    };
+                    widgets::radial_gauge(ui, efficiency.min(40.0), 0.0..40.0, "CPU Eff RTT (µs)");
                 });
             });
         });
 
         // === Performance Spectrum Display (Single column, full width) ===
          PERF_UI_STATE.with(|state| {
-             // Determine phase-specific metric highlight for pulsing effect
-             let phase_highlight = {
-                 if let Ok(ctrl) = controller.try_read() {
-                     if let Ok(orch_lock) = ctrl.benchmark_orchestrator.read() {
-                         if let Some(ref orch) = *orch_lock {
-                             use crate::system::performance::BenchmarkPhase;
-                             let phase = orch.current_phase;
-                             Some(match phase {
-                                 BenchmarkPhase::Baseline => "Latency",  // Phase 1: baseline latency baseline
-                                 BenchmarkPhase::ComputationalHeat => "Latency",  // Phase 2: CPU heat = latency stress
-                                 BenchmarkPhase::MemorySaturation => "Throughput",  // Phase 3: memory = throughput stress
-                                 BenchmarkPhase::SchedulerFlood => "Jitter",  // Phase 4: scheduler = jitter stress
-                                 BenchmarkPhase::GamingSimulator => "Efficiency",  // Phase 5: gaming = efficiency
-                                 BenchmarkPhase::TheGauntlet => "Consistency",  // Phase 6: ultimate = consistency
-                             }).map(|s| s.to_string())
-                         } else {
-                             None
-                         }
-                     } else {
-                         None
-                     }
-                 } else {
-                     None
-                 }
-             };
-             
-             let phase_ref = phase_highlight.as_deref();
-             render_performance_spectrum(&mut cols[0], state, phase_ref);
-         });
+              // Track monitoring start time for CALIBRATING indicator
+              if is_monitoring {
+                  if state.monitoring_start_time.borrow().is_none() {
+                      *state.monitoring_start_time.borrow_mut() = Some(Instant::now());
+                  }
+              } else {
+                  *state.monitoring_start_time.borrow_mut() = None;
+              }
+              
+              // Determine phase-specific metric highlight for pulsing effect
+              let phase_highlight = {
+                  if let Ok(ctrl) = controller.try_read() {
+                      if let Ok(orch_lock) = ctrl.benchmark_orchestrator.read() {
+                          if let Some(ref orch) = *orch_lock {
+                              use crate::system::performance::BenchmarkPhase;
+                              let phase = orch.current_phase;
+                              Some(match phase {
+                                  BenchmarkPhase::Baseline => "Latency",  // Phase 1: baseline latency baseline
+                                  BenchmarkPhase::ComputationalHeat => "Latency",  // Phase 2: CPU heat = latency stress
+                                  BenchmarkPhase::MemorySaturation => "Throughput",  // Phase 3: memory = throughput stress
+                                  BenchmarkPhase::SchedulerFlood => "Jitter",  // Phase 4: scheduler = jitter stress
+                                  BenchmarkPhase::GamingSimulator => "Efficiency",  // Phase 5: gaming = efficiency
+                                  BenchmarkPhase::TheGauntlet => "Consistency",  // Phase 6: ultimate = consistency
+                              }).map(|s| s.to_string())
+                          } else {
+                              None
+                          }
+                      } else {
+                          None
+                      }
+                  } else {
+                      None
+                  }
+              };
+              
+              let phase_ref = phase_highlight.as_deref();
+              render_performance_spectrum(&mut cols[0], state, phase_ref, metrics.as_ref());
+          });
         
         
         // ===== RIGHT COLUMN: Perpetual Jitter History, Benchmark Controls with Mini Heatmap =====
@@ -1278,6 +1676,8 @@ pub fn render_performance(
                     }
                     if ui.radio(duration == 999, "GOATd Benchmark (60s)").clicked() {
                         *state.benchmark_duration_seconds.borrow_mut() = 999;
+                        // DON'T set naming_prompt_triggered here - wait for actual benchmark start
+                        // This prevents premature trigger on mode selection
                     }
                 });
                 
@@ -1350,6 +1750,15 @@ pub fn render_performance(
                             }
                         });
                     } else {
+                        // RACE CONDITION FIX: Clear naming_prompt_triggered IMMEDIATELY when starting benchmark
+                        // This resets the state for the NEW benchmark run, preventing premature trigger
+                        // from stale "Completed" state of previous benchmarks
+                        *state.naming_prompt_triggered.borrow_mut() = false;
+                        
+                        // Set is_benchmark_session flag: true only for SystemBenchmark (duration == 999)
+                        let duration = *state.benchmark_duration_seconds.borrow();
+                        *state.is_benchmark_session.borrow_mut() = duration == 999;
+                        
                         let controller_clone = controller.clone();
                         let stressors = state.get_selected_stressors();
                         let monitoring_mode = state.get_monitoring_mode();
