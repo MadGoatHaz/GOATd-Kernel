@@ -239,6 +239,62 @@ impl AsyncOrchestrator {
         let _ = patcher.cleanup_previous_artifacts();
 
         // =========================================================================
+        // INITIALIZE MODPROBED-DB - Database for module detection
+        // =========================================================================
+        {
+            match tokio::process::Command::new("which")
+                .arg("modprobed-db")
+                .status()
+                .await
+            {
+                Ok(status) if status.success() => {
+                    // modprobed-db is available, initialize the database
+                    self.send_log_event("Initializing modprobed-db database...".to_string()).await;
+                    eprintln!("[Build] [MODPROBED] Starting modprobed-db initialization");
+                    
+                    // First execution: create/initialize the database
+                    match tokio::process::Command::new("modprobed-db")
+                        .arg("store")
+                        .status()
+                        .await
+                    {
+                        Ok(status) if status.success() => {
+                            eprintln!("[Build] [MODPROBED] ✓ First modprobed-db store completed");
+                            
+                            // Wait 500ms before second run
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            
+                            // Second execution: populate/update the database
+                            match tokio::process::Command::new("modprobed-db")
+                                .arg("store")
+                                .status()
+                                .await
+                            {
+                                Ok(status) if status.success() => {
+                                    eprintln!("[Build] [MODPROBED] ✓ Second modprobed-db store completed");
+                                    self.send_status("modprobed-db database initialized successfully".to_string()).await;
+                                }
+                                _ => {
+                                    eprintln!("[Build] [MODPROBED] ⚠ Second modprobed-db store failed, continuing anyway");
+                                    // Non-fatal: continue with build
+                                }
+                            }
+                        }
+                        _ => {
+                            eprintln!("[Build] [MODPROBED] ⚠ First modprobed-db store failed, continuing anyway");
+                            // Non-fatal: continue with build
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!("[Build] [MODPROBED] ⚠ modprobed-db not found, skipping initialization");
+                    self.send_log_event("modprobed-db not installed - skipping database initialization".to_string()).await;
+                    // Non-fatal: continue with build
+                }
+            }
+        }
+
+        // =========================================================================
         // PHASE 1b: HARDWARE VALIDATION - After source acquisition, validate hardware
         // =========================================================================
         // Validate hardware meets minimum requirements and kernel source exists
