@@ -32,6 +32,13 @@ pub trait SystemWrapper: Send + Sync {
     ///
     /// Reduces authentication prompts by batching all privileged operations.
     fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<(), String>;
+    
+    /// Execute multiple commands as the current user (without privileges)
+    ///
+    /// Joins commands with ` && ` and executes them sequentially as the current user.
+    /// Intended for user-level operations that should NOT run with elevated privileges,
+    /// such as GPG key imports, git operations, or other user-specific tasks.
+    fn batch_user_commands(&self, commands: Vec<&str>) -> Result<(), String>;
 }
 
 /// Trait for kernel management operations

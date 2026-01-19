@@ -302,6 +302,20 @@ impl SystemWrapper for SystemImpl {
         }
     }
     
+    /// Execute multiple privileged commands in sequence
+    ///
+    /// Joins commands with ` && ` and executes them via `pkexec sh -c`.
+    /// All commands must succeed for the batch to succeed.
+    ///
+    /// # Important
+    /// This method should NOT be used for user-level operations like GPG key imports.
+    /// Use `batch_user_commands` instead for operations that should run with current user privileges.
+    ///
+    /// # Arguments
+    /// * `commands` - Vector of command strings to execute in sequence
+    ///
+    /// # Returns
+    /// `Ok(())` if all commands succeed, otherwise `Err` with error message
     fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<(), String> {
         if commands.is_empty() {
             return Err("No commands provided for batch execution".to_string());
@@ -342,6 +356,66 @@ impl SystemWrapper for SystemImpl {
             }
             Err(e) => {
                 let err_msg = format!("Failed to execute batch privileged commands: {}", e);
+                log_info!("[SystemWrapper] {}", err_msg);
+                Err(err_msg)
+            }
+        }
+    }
+
+    /// Execute multiple commands as the current user (without privileges)
+    ///
+    /// Joins commands with ` && ` and executes them via `sh -c` as the current user.
+    /// All commands must succeed for the batch to succeed.
+    ///
+    /// # Use Cases
+    /// Intended for user-level operations that should NOT run with elevated privileges,
+    /// such as GPG key imports, git operations, or other user-specific tasks.
+    ///
+    /// # Arguments
+    /// * `commands` - Vector of command strings to execute in sequence
+    ///
+    /// # Returns
+    /// `Ok(())` if all commands succeed, otherwise `Err` with error message containing
+    /// exit code or detailed error information
+    fn batch_user_commands(&self, commands: Vec<&str>) -> Result<(), String> {
+        if commands.is_empty() {
+            return Err("No commands provided for batch execution".to_string());
+        }
+
+        // Chain commands with && so they all must succeed
+        let combined = commands.join(" && ");
+        
+        log_info!("[SystemWrapper] Executing batch user commands ({} steps)", commands.len());
+
+        match Command::new("sh")
+            .arg("-c")
+            .arg(&combined)
+            .output()  // CAPTURE stdout and stderr instead of inheriting
+        {
+            Ok(output) => {
+                // Capture and log stdout
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if !stdout.is_empty() {
+                    log::info!("[batch user] stdout: {}", stdout);
+                }
+                
+                // Capture and log stderr
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.is_empty() {
+                    log::info!("[batch user] stderr: {}", stderr);
+                }
+                
+                if output.status.success() {
+                    log_info!("[SystemWrapper] Batch user execution succeeded");
+                    Ok(())
+                } else {
+                    let err_msg = format!("Batch user execution failed with status: {:?}", output.status.code());
+                    log_info!("[SystemWrapper] {}", err_msg);
+                    Err(err_msg)
+                }
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to execute batch user commands: {}", e);
                 log_info!("[SystemWrapper] {}", err_msg);
                 Err(err_msg)
             }

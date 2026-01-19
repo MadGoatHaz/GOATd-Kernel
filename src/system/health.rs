@@ -145,14 +145,14 @@ impl HealthManager {
             }
         }
 
-        // Check GPG keys
+        // Check GPG keys with verification
         let gpg_keys = vec![
-            "38DBBDC86092693E", // Greg Kroah-Hartman
-            "B8AC08600F108CDF", // Jan Alexander Steffens/heftig
+            ("38DBBDC86092693E", "6092693E"), // Greg Kroah-Hartman
+            ("B8AC08600F108CDF", "0F108CDF"), // Jan Alexander Steffens/heftig
         ];
 
-        for key_id in gpg_keys {
-            if !Self::is_gpg_key_imported(key_id) {
+        for (key_id, fp_suffix) in gpg_keys {
+            if !Self::is_gpg_key_imported_with_verification(key_id, fp_suffix) {
                 report.missing_gpg_keys.push(key_id.to_string());
             }
         }
@@ -220,6 +220,41 @@ impl HealthManager {
             .unwrap_or(false)
     }
 
+    /// Check if a GPG key is imported with fingerprint verification
+    /// Uses `gpg --with-colons` to extract and verify the fingerprint suffix
+    fn is_gpg_key_imported_with_verification(key_id: &str, expected_fp_suffix: &str) -> bool {
+        let output = match Command::new("gpg")
+            .arg("--with-colons")
+            .arg("--list-keys")
+            .arg(key_id)
+            .output() {
+            Ok(o) => o,
+            Err(_) => return false,
+        };
+
+        if !output.status.success() {
+            return false;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Parse GPG output in colon-delimited format
+        // Format: fpr:::::::::FINGERPRINT:
+        for line in stdout.lines() {
+            if line.starts_with("fpr:") {
+                // Extract fingerprint from the colon-separated fields
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() > 9 {
+                    let fingerprint = parts[9];
+                    if fingerprint.ends_with(expected_fp_suffix) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Detect if running on Arch Linux
     fn is_arch_system() -> bool {
         // Check for pacman package manager
@@ -229,6 +264,25 @@ impl HealthManager {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+    }
+
+    /// Generate GPG setup commands for missing keys using multiple keyservers
+    /// Constructs robust shell commands that try multiple keyserver sources
+    pub fn generate_gpg_setup_commands(report: &HealthReport) -> Vec<String> {
+        let mut commands = Vec::new();
+
+        if !report.missing_gpg_keys.is_empty() {
+            for key_id in &report.missing_gpg_keys {
+                // Try multiple keyservers in sequence: Ubuntu, OpenPGP, MIT
+                let cmd = format!(
+                    "timeout 15 gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys {} || timeout 15 gpg --keyserver hkps://keys.openpgp.org --recv-keys {} || timeout 15 gpg --keyserver hkps://pgp.mit.edu --recv-keys {}",
+                    key_id, key_id, key_id
+                );
+                commands.push(cmd);
+            }
+        }
+
+        commands
     }
 
     /// Generate a privileged command batch to fix environment
@@ -246,16 +300,8 @@ impl HealthManager {
             commands.push(format!("pacman -S --needed --noconfirm {}", pkg_list));
         }
 
-        // Setup GPG keys
-        if !report.missing_gpg_keys.is_empty() {
-            for key_id in &report.missing_gpg_keys {
-                // Try to import from keyserver (with timeout)
-                commands.push(format!(
-                    "timeout 15 gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys {} || timeout 15 gpg --keyserver hkps://keys.openpgp.org --recv-keys {}",
-                    key_id, key_id
-                ));
-            }
-        }
+        // Setup GPG keys using the new command generator
+        commands.extend(Self::generate_gpg_setup_commands(report));
 
         // Join with && so all must succeed
         if commands.is_empty() {
@@ -310,5 +356,33 @@ mod tests {
         let cmd = HealthManager::generate_fix_command(&report);
         assert!(cmd.contains("gpg"));
         assert!(cmd.contains("38DBBDC86092693E"));
+    }
+
+    #[test]
+    fn test_generate_gpg_setup_commands_multiple_keyservers() {
+        let mut report = HealthReport::default();
+        report.missing_gpg_keys = vec!["38DBBDC86092693E".to_string()];
+        let cmds = HealthManager::generate_gpg_setup_commands(&report);
+        assert_eq!(cmds.len(), 1);
+        let cmd = &cmds[0];
+        // Verify all three keyservers are included
+        assert!(cmd.contains("hkps://keyserver.ubuntu.com"));
+        assert!(cmd.contains("hkps://keys.openpgp.org"));
+        assert!(cmd.contains("hkps://pgp.mit.edu"));
+        // Verify key ID is present
+        assert!(cmd.contains("38DBBDC86092693E"));
+    }
+
+    #[test]
+    fn test_generate_gpg_setup_commands_multiple_keys() {
+        let mut report = HealthReport::default();
+        report.missing_gpg_keys = vec![
+            "38DBBDC86092693E".to_string(),
+            "B8AC08600F108CDF".to_string(),
+        ];
+        let cmds = HealthManager::generate_gpg_setup_commands(&report);
+        assert_eq!(cmds.len(), 2);
+        assert!(cmds[0].contains("38DBBDC86092693E"));
+        assert!(cmds[1].contains("B8AC08600F108CDF"));
     }
 }

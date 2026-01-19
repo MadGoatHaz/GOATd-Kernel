@@ -391,24 +391,93 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
                 ui.horizontal(|ui| {
                     if ui.button("✓ Confirm & Execute").clicked() {
                         let controller_clone = Arc::clone(controller);
-                        let fix_cmd = pending_cmd.clone();
+                        let health_report_snapshot = health_report.clone();
+                        let ctx_for_repaint = ui.ctx().clone();
                         
                         tokio::spawn(async move {
-                            eprintln!("[DASHBOARD] [HEALTH] Starting system fix with command: {}", fix_cmd);
-                            let controller_guard = controller_clone.read().await;
-                            match controller_guard.system.batch_privileged_commands(vec![&fix_cmd]) {
-                                Ok(()) => {
-                                    eprintln!("[DASHBOARD] [HEALTH] ✓ System environment fixed successfully");
-                                    // CRITICAL FIX: Request a repaint after successful fix to refresh health state
-                                    // This ensures the UI immediately reflects the updated health status
-                                    if let Some(ctx) = controller_guard.get_ui_context() {
-                                        ctx.request_repaint();
-                                        eprintln!("[DASHBOARD] [HEALTH] ✓ Requested UI repaint to refresh health state");
+                            eprintln!("[DASHBOARD] [HEALTH] ========== STARTING 4-STEP SYSTEM FIX ==========");
+                            let mut all_success = true;
+                            
+                            // ================================================================
+                            // STEP 1: Install packages via pkexec
+                            // ================================================================
+                            eprintln!("[DASHBOARD] [HEALTH] [STEP 1] Installing packages via pkexec...");
+                            if !health_report_snapshot.missing_official_packages.is_empty() || !health_report_snapshot.missing_optional_tools.is_empty() {
+                                let mut packages_to_install = health_report_snapshot.missing_official_packages.clone();
+                                packages_to_install.extend(health_report_snapshot.missing_optional_tools.clone());
+                                let pkg_list = packages_to_install.join(" ");
+                                let install_cmd = format!("pacman -S --needed --noconfirm {}", pkg_list);
+                                
+                                eprintln!("[DASHBOARD] [HEALTH] [STEP 1] Command: {}", install_cmd);
+                                let controller_guard = controller_clone.read().await;
+                                match controller_guard.system.batch_privileged_commands(vec![&install_cmd]) {
+                                    Ok(()) => {
+                                        eprintln!("[DASHBOARD] [HEALTH] [STEP 1] ✓ Packages installed successfully");
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[DASHBOARD] [HEALTH] [STEP 1] ✗ Package installation failed: {}", e);
+                                        all_success = false;
                                     }
                                 }
-                                Err(e) => {
-                                    eprintln!("[DASHBOARD] [HEALTH] ✗ Failed to fix system environment: {}", e);
+                            } else {
+                                eprintln!("[DASHBOARD] [HEALTH] [STEP 1] ✓ No official packages to install (skipped)");
+                            }
+                            
+                            // ================================================================
+                            // STEP 2: Import GPG keys as user (NO elevation)
+                            // ================================================================
+                            eprintln!("[DASHBOARD] [HEALTH] [STEP 2] Importing GPG keys as user...");
+                            if !health_report_snapshot.missing_gpg_keys.is_empty() {
+                                let gpg_commands = HealthManager::generate_gpg_setup_commands(&health_report_snapshot);
+                                eprintln!("[DASHBOARD] [HEALTH] [STEP 2] Generated {} GPG key import commands", gpg_commands.len());
+                                
+                                let controller_guard = controller_clone.read().await;
+                                let gpg_cmd_refs: Vec<&str> = gpg_commands.iter().map(|s| s.as_str()).collect();
+                                match controller_guard.system.batch_user_commands(gpg_cmd_refs) {
+                                    Ok(()) => {
+                                        eprintln!("[DASHBOARD] [HEALTH] [STEP 2] ✓ GPG keys imported successfully (user-level, NO elevation)");
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[DASHBOARD] [HEALTH] [STEP 2] ✗ GPG key import failed: {}", e);
+                                        all_success = false;
+                                    }
                                 }
+                            } else {
+                                eprintln!("[DASHBOARD] [HEALTH] [STEP 2] ✓ No GPG keys to import (skipped)");
+                            }
+                            
+                            // ================================================================
+                            // STEP 3: Re-check system health
+                            // ================================================================
+                            eprintln!("[DASHBOARD] [HEALTH] [STEP 3] Re-checking system health...");
+                            let updated_health = HealthManager::check_system_health();
+                            eprintln!("[DASHBOARD] [HEALTH] [STEP 3] Health status after fixes: {} | Missing Official: {} | Missing GPG: {} | Missing Optional: {}",
+                                updated_health.status.as_str(),
+                                updated_health.missing_official_packages.len(),
+                                updated_health.missing_gpg_keys.len(),
+                                updated_health.missing_optional_tools.len());
+                            
+                            if updated_health.status as i32 == crate::system::health::HealthStatus::Excellent as i32 ||
+                               updated_health.missing_official_packages.is_empty() && updated_health.missing_gpg_keys.is_empty() {
+                                eprintln!("[DASHBOARD] [HEALTH] [STEP 3] ✓ System health check complete - improvements detected");
+                            } else {
+                                eprintln!("[DASHBOARD] [HEALTH] [STEP 3] ⚠ Some issues remain after fixes");
+                            }
+                            
+                            // ================================================================
+                            // STEP 4: Request UI repaint
+                            // ================================================================
+                            eprintln!("[DASHBOARD] [HEALTH] [STEP 4] Requesting UI repaint to refresh dashboard...");
+                            ctx_for_repaint.request_repaint();
+                            eprintln!("[DASHBOARD] [HEALTH] [STEP 4] ✓ UI repaint requested");
+                            
+                            // ================================================================
+                            // Final result
+                            // ================================================================
+                            if all_success {
+                                eprintln!("[DASHBOARD] [HEALTH] ========== ✓ ALL STEPS COMPLETED SUCCESSFULLY ==========");
+                            } else {
+                                eprintln!("[DASHBOARD] [HEALTH] ========== ✗ SOME STEPS FAILED - CHECK LOGS ==========");
                             }
                         });
                     }
