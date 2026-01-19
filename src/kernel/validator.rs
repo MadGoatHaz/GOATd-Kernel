@@ -10,6 +10,7 @@ use std::fs;
 use std::path::Path;
 use regex::Regex;
 use crate::error::PatchError;
+use crate::error::AppError;
 
 /// Result type for validation operations
 pub type ValidationResult<T> = std::result::Result<T, PatchError>;
@@ -237,6 +238,50 @@ pub fn validate_lto_shielding(makefile_path: &Path) -> ValidationResult<()> {
         ));
     }
 
+    Ok(())
+}
+
+/// Validate that a path is suitable for Kbuild operations.
+///
+/// Kbuild forbids paths containing spaces (' ') or colons (':').
+/// This is a pre-flight check to prevent build failures.
+///
+/// # Arguments
+///
+/// * `path` - Path to validate
+///
+/// # Returns
+///
+/// Success if path is valid for Kbuild, AppError::InvalidPath otherwise
+///
+/// # Examples
+///
+/// ```ignore
+/// use std::path::Path;
+/// use goatd_kernel::kernel::validator::validate_kbuild_path;
+///
+/// let result = validate_kbuild_path(Path::new("/home/user/kernel"));
+/// assert!(result.is_ok());
+/// ```
+pub fn validate_kbuild_path(path: &Path) -> std::result::Result<(), AppError> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| AppError::InvalidPath(
+            "Path contains invalid UTF-8 characters".to_string()
+        ))?;
+    
+    if path_str.contains(' ') {
+        return Err(AppError::InvalidPath(
+            format!("Path contains spaces: {}", path_str)
+        ));
+    }
+    
+    if path_str.contains(':') {
+        return Err(AppError::InvalidPath(
+            format!("Path contains colons: {}", path_str)
+        ));
+    }
+    
     Ok(())
 }
 
@@ -494,5 +539,37 @@ mod tests {
 
         let result = validate_lto_shielding(&makefile_path);
         assert!(result.is_err());
+    }
+
+    // ======= KBUILD PATH VALIDATION TESTS (Tests 17-19)
+
+    // Test 17: Validate valid path without spaces or colons
+    #[test]
+    fn test_validate_kbuild_path_valid() {
+        let path = std::path::Path::new("/home/user/kernel");
+        let result = validate_kbuild_path(path);
+        assert!(result.is_ok());
+    }
+
+    // Test 18: Validation fails when path contains spaces
+    #[test]
+    fn test_validate_kbuild_path_with_spaces() {
+        let path = std::path::Path::new("/home/user/Documents/GOATd Kernel");
+        let result = validate_kbuild_path(path);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            assert!(err.to_string().contains("spaces"));
+        }
+    }
+
+    // Test 19: Validation fails when path contains colons
+    #[test]
+    fn test_validate_kbuild_path_with_colons() {
+        let path = std::path::Path::new("/home/user:kernel");
+        let result = validate_kbuild_path(path);
+        assert!(result.is_err());
+        if let Err(err) = result {
+            assert!(err.to_string().contains("colons"));
+        }
     }
 }

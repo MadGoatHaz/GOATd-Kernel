@@ -736,6 +736,21 @@ impl AppController {
             }
         };
         
+        // =========================================================================
+        // PRE-FLIGHT VALIDATION: Check if workspace path is valid for Kbuild
+        // =========================================================================
+        use crate::kernel::validator::validate_kbuild_path;
+        
+        if let Err(validation_err) = validate_kbuild_path(&workspace_path) {
+            let error_msg = validation_err.user_message();
+            eprintln!("[Controller] [PRE-FLIGHT] VALIDATION FAILED: {}", error_msg);
+            log_info!("[Controller] [PRE-FLIGHT] Path validation failed: {}", error_msg);
+            let _ = self.build_tx.try_send(BuildEvent::Error(error_msg.clone()));
+            return Err(error_msg);
+        }
+        
+        eprintln!("[Controller] [PRE-FLIGHT] ✓ Workspace path validation passed: {}", workspace_path.display());
+        
         let kernel_path = workspace_path.join(&state.selected_variant);
         
         eprintln!("[Controller] [PRE-FLIGHT] Using authorized workspace: {}", workspace_path.display());

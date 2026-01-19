@@ -109,6 +109,24 @@ pub fn render_settings(
             }
         });
         
+        // =========================================================================
+        // VISUAL WARNING: Path Validation for Kbuild
+        // =========================================================================
+        // Display a red warning if the workspace path contains spaces or colons,
+        // which are forbidden by Kbuild and will cause build failures
+        let path_is_valid = {
+            use crate::kernel::validator::validate_kbuild_path;
+            use std::path::Path;
+            validate_kbuild_path(Path::new(&app_ui_state.workspace_path)).is_ok()
+        };
+        
+        if !path_is_valid && !app_ui_state.workspace_path.is_empty() {
+            ui.colored_label(
+                egui::Color32::from_rgb(255, 100, 100),
+                "⚠ WARNING: Path contains spaces or colons - Kbuild will fail!"
+            );
+        }
+        
         ui.horizontal(|ui| {
             ui.label("Kernel Source:");
             ui.monospace(format!("{}/src", app_ui_state.workspace_path));

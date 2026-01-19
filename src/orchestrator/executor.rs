@@ -51,6 +51,21 @@ pub fn prepare_build_environment(hardware: &HardwareInfo, kernel_path: &Path) ->
     
     validate_hardware(hardware)?;
     
+    // =========================================================================
+    // SAFEGUARD VALIDATION: Check if workspace path is valid for Kbuild
+    // =========================================================================
+    // Redundant check: even if controller validation is bypassed, this ensures
+    // we catch invalid paths (with spaces or colons) before attempting the build
+    use crate::kernel::validator::validate_kbuild_path;
+    
+    validate_kbuild_path(kernel_path).map_err(|app_err| {
+        let error_msg = app_err.user_message();
+        eprintln!("[Build] [SAFEGUARD] Path validation failed: {}", error_msg);
+        BuildError::PreparationFailed(error_msg)
+    })?;
+    
+    eprintln!("[Build] [SAFEGUARD] ✓ Workspace path validation passed");
+    
     if !kernel_path.exists() {
         return Err(BuildError::PreparationFailed(
             format!("Kernel source not found at: {}", kernel_path.display())

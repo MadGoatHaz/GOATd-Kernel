@@ -135,6 +135,10 @@ pub enum AppError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
     
+    /// Invalid path for Kbuild operations (contains spaces or colons)
+    #[error("Invalid path for Kbuild: {0}")]
+    InvalidPath(String),
+    
     /// Audit operation cancelled or timed out
     #[error("Audit error: {0}")]
     Audit(String),
@@ -158,6 +162,8 @@ impl AppError {
                 format!("Failed to initialize application: {}", msg),
             AppError::InvalidInput(msg) =>
                 format!("Invalid input: {}", msg),
+            AppError::InvalidPath(msg) =>
+                format!("Invalid workspace path for Kbuild: {}", msg),
             AppError::Audit(msg) =>
                 format!("System audit failed: {}", msg),
         }
