@@ -266,6 +266,7 @@ mod tests {
              scx_active_scheduler: None,
              native_optimizations: true,
              user_toggled_native_optimizations: false,
+             kernel_variant: String::new(),
           };
 
           let state = OrchestrationState::new(hw.clone(), config.clone());
@@ -323,6 +324,7 @@ mod tests {
              scx_active_scheduler: None,
              native_optimizations: true,
              user_toggled_native_optimizations: false,
+             kernel_variant: String::new(),
          };
 
          let mut state = OrchestrationState::new(hw, config);
@@ -380,6 +382,7 @@ mod tests {
              scx_active_scheduler: None,
              native_optimizations: true,
              user_toggled_native_optimizations: false,
+             kernel_variant: String::new(),
          };
 
         let mut state = OrchestrationState::new(hw, config);
@@ -436,6 +439,7 @@ mod tests {
             scx_active_scheduler: None,
             native_optimizations: true,
             user_toggled_native_optimizations: false,
+            kernel_variant: String::new(),
         };
 
         let mut state = OrchestrationState::new(hw, config);

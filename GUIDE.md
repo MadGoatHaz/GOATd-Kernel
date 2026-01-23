@@ -7,12 +7,13 @@
 ## Table of Contents
 
 1. [Setup & Installation](#setup--installation)
-2. [Understanding modprobed-db](#understanding-modprobed-db)
-3. [Understanding Performance Metrics](#understanding-performance-metrics)
-4. [The GOAT Recipe: Optimal Configuration](#the-goat-recipe-optimal-configuration)
-5. [Dashboard Flow & First-Run Guide](#dashboard-flow--first-run-guide)
-6. [Troubleshooting](#troubleshooting)
-7. [Advanced Topics](#advanced-topics)
+2. [Environment Purity & Workspace Management](#environment-purity--workspace-management) (NEW)
+3. [Understanding modprobed-db](#understanding-modprobed-db)
+4. [Understanding Performance Metrics](#understanding-performance-metrics)
+5. [The GOAT Recipe: Optimal Configuration](#the-goat-recipe-optimal-configuration)
+6. [Dashboard Flow & First-Run Guide](#dashboard-flow--first-run-guide)
+7. [Troubleshooting](#troubleshooting)
+8. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -91,6 +92,55 @@ After the GUI launches, you'll see the **Dashboard Flow**. Follow these steps in
 6. **Benchmark Your Kernel** — Run the GOATd Full Benchmark to measure results
 
 See [Dashboard Flow & First-Run Guide](#dashboard-flow--first-run-guide) for detailed walkthrough of each tab.
+
+---
+
+## Environment Purity & Workspace Management
+
+### Understanding Environment Purity Controls
+
+GOATd Kernel enforces **hermetically sealed build environments** to prevent contamination from system-wide compiler flags or variables that could interfere with kernel compilation:
+
+#### What is Environment Purity?
+
+The build system creates a "clean room" compilation context by:
+- **Explicit Variable Management**: All CFLAGS, LDFLAGS, and compiler flags defined centrally (not inherited from system defaults)
+- **PATH Purification**: GCC directories removed; only Clang/LLVM tools available in build PATH
+- **Global Clang Enforcement**: All build phases mandatory use Clang via `_FORCE_CLANG=1` environment variable
+- **Bytecode Cache Prevention**: `PYTHONDONTWRITEBYTECODE=1` prevents Python tools from contaminating build artifacts with cached `.pyc` files
+
+#### Impact on Your Builds
+
+This environment purity provides:
+- **Reproducible Builds**: Same configuration produces identical binaries across systems
+- **Deterministic Compilation**: No surprise system-wide CFLAGS affecting your kernel optimization
+- **Clean Artifacts**: No path leaks or build metadata embedded in final kernel images
+- **Safe Cross-System Deployments**: Kernels built on one system work reliably on others
+
+### Workspace Root & Build Pipeline
+
+GOATd Kernel manages builds in isolated workspaces to maintain clean separation between:
+- **Source Checkout**: Temporary kernel source from upstream repositories
+- **Build Artifacts**: Compiled kernel and modules
+- **Caching**: ccache and build state for incremental rebuilds
+- **Logging**: Complete build transcripts for debugging and verification
+
+#### Workspace Detection
+
+The application automatically detects your workspace root via:
+1. **Configuration File Location**: Looks for `.goatdrc` or similar marker in project root
+2. **Fallback Detection**: Uses current working directory or environment variable `GOATD_HOME`
+3. **Canonical Path Resolution**: Converts all paths to absolute filesystem paths to prevent symlink issues
+
+If you move the GOATd Kernel directory, workspace detection automatically adjusts. For custom workspace locations, set the `GOATD_HOME` environment variable before launching.
+
+#### Build Pipeline Guarantee
+
+All critical operations run through the **Unified Surgical Engine** ([`KernelPatcher`](src/kernel/patcher.rs)) which ensures:
+- **Atomic File Operations**: `.config` and PKGBUILD modifications use atomic swaps with full backups
+- **Verification Before Commit**: All patches validated via dry-run before actual file modification
+- **Rollback Capability**: Original files preserved; easy revert if build fails verification
+- **Audit Trail**: All modifications logged with timestamps and context for future reference
 
 ---
 

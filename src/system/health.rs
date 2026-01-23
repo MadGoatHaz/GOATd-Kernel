@@ -105,11 +105,13 @@ impl HealthManager {
         }
 
         // On Arch: check packages and GPG keys
-        let critical_packages = vec![
-            "rust", "base-devel", "git", "bc", "rust-bindgen", "rust-src",
-            "graphviz", "python-sphinx", "texlive-latexextra", "llvm",
-            "clang", "lld", "polly",
-        ];
+         // Includes all kernel build dependencies: bc, pahole, python, python-sphinx, texinfo, base-devel, git
+         let critical_packages = vec![
+             "rust", "base-devel", "git", "bc", "pahole", "python", "python-sphinx",
+             "texinfo", "rust-bindgen", "rust-src",
+             "graphviz", "texlive-latexextra", "llvm",
+             "clang", "lld", "polly",
+         ];
 
         let optional_tools = vec![
             "modprobed-db",

@@ -285,6 +285,55 @@ pub fn validate_kbuild_path(path: &Path) -> std::result::Result<(), AppError> {
     Ok(())
 }
 
+/// Validate PKGBUILD shell syntax using bash -n.
+///
+/// CRITICAL FIX: Validates that generated PKGBUILD is syntactically correct
+/// before attempting to execute with makepkg. This prevents runtime failures
+/// due to malformed shell code injections.
+///
+/// # Arguments
+///
+/// * `pkgbuild_path` - Path to PKGBUILD file to validate
+///
+/// # Returns
+///
+/// Success if bash syntax is valid, error message if syntax errors found
+pub fn validate_pkgbuild_syntax(pkgbuild_path: &Path) -> ValidationResult<()> {
+    use std::process::Command;
+    
+    if !pkgbuild_path.exists() {
+        return Err(PatchError::FileNotFound(format!(
+            "PKGBUILD not found: {}",
+            pkgbuild_path.display()
+        )));
+    }
+
+    eprintln!("[Validator] [PKGBUILD-SYNTAX] Validating PKGBUILD syntax with bash -n");
+    eprintln!("[Validator] [PKGBUILD-SYNTAX] File: {}", pkgbuild_path.display());
+
+    // Run bash -n to check syntax without executing
+    let output = Command::new("bash")
+        .arg("-n")
+        .arg(pkgbuild_path)
+        .output()
+        .map_err(|e| PatchError::ValidationFailed(
+            format!("Failed to run bash syntax check: {}", e)
+        ))?;
+
+    if output.status.success() {
+        eprintln!("[Validator] [PKGBUILD-SYNTAX] ✓ PKGBUILD syntax is valid");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[Validator] [PKGBUILD-SYNTAX] ✗ PKGBUILD syntax errors found:");
+        eprintln!("[Validator] [PKGBUILD-SYNTAX] {}", stderr);
+        Err(PatchError::ValidationFailed(format!(
+            "PKGBUILD syntax errors:\n{}",
+            stderr
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

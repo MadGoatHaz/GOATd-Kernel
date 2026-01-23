@@ -31,7 +31,8 @@ pub trait SystemWrapper: Send + Sync {
     /// Execute multiple privileged commands in a single pkexec session
     ///
     /// Reduces authentication prompts by batching all privileged operations.
-    fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<(), String>;
+    /// Returns stdout for sentinel scanning and output parsing.
+    fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<String, String>;
     
     /// Execute multiple commands as the current user (without privileges)
     ///
@@ -39,6 +40,12 @@ pub trait SystemWrapper: Send + Sync {
     /// Intended for user-level operations that should NOT run with elevated privileges,
     /// such as GPG key imports, git operations, or other user-specific tasks.
     fn batch_user_commands(&self, commands: Vec<&str>) -> Result<(), String>;
+    
+    /// Ensure DKMS safety net configuration for GOATd kernels
+    ///
+    /// Creates /etc/dkms/framework.conf.d/goatd.conf to configure DKMS
+    /// to use the LLVM/Clang toolchain for all GOATd kernel module builds.
+    fn ensure_dkms_safety_net(&self) -> Result<(), String>;
 }
 
 /// Trait for kernel management operations

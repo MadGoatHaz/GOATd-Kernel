@@ -38,6 +38,9 @@ pub struct BuildUIState {
     
     /// Use native optimizations (-march=native)
     pub native_optimizations: bool,
+    
+    /// Resolved kernel version (populated when dynamic version is resolved)
+    pub resolved_kernel_version: Option<String>,
 }
 
 /// Render the Build view
@@ -65,12 +68,49 @@ pub fn render_build(
                             let variant_str = variant.to_string();
                             let controller_clone = Arc::clone(controller);
                             
-                            // Update state (version polling is now handled by the update() loop with debouncing)
-                            tokio::spawn(async move {
-                                let controller = controller_clone.read().await;
-                                let _ = controller.update_state(|state| {
+                            eprintln!("[BUILD] [VARIANT_CHANGE] ⭐ START VARIANT SELECTION TRACE");
+                            eprintln!("[BUILD] [VARIANT_CHANGE] User selected variant: '{}'", variant_str);
+                            eprintln!("[BUILD] [VARIANT_CHANGE] UI Index: {} -> String: '{}'", i, variant_str);
+                            
+                            // CRITICAL FIX: Update state SYNCHRONOUSLY before async polling task
+                            // This ensures start_build() will read the correct selected_variant
+                            // The race condition was: user selects variant → async update → user clicks BUILD
+                            // Now: user selects variant → SYNC update → async polling → user clicks BUILD (uses correct variant)
+                            if let Ok(controller_guard) = controller.try_read() {
+                                let result = controller_guard.update_state(|state| {
+                                    let old_variant = state.selected_variant.clone();
                                     state.selected_variant = variant_str.clone();
+                                    eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] State updated synchronously: '{}' -> '{}'", old_variant, variant_str);
+                                    eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] After update, state.selected_variant = '{}'", state.selected_variant);
                                 });
+                                match result {
+                                    Ok(()) => {
+                                        eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] ✓ State persistence SUCCESS");
+                                        // DIAGNOSTIC: Verify the state was actually saved
+                                        if let Ok(controller_guard2) = controller.try_read() {
+                                            if let Ok(saved_state) = controller_guard2.get_state() {
+                                                eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] VERIFICATION: saved state.selected_variant = '{}'", saved_state.selected_variant);
+                                                if saved_state.selected_variant != variant_str {
+                                                    eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] ❌ MISMATCH! Expected '{}', got '{}'", variant_str, saved_state.selected_variant);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] ✗ State persistence FAILED: {}", e),
+                                }
+                            } else {
+                                eprintln!("[BUILD] [VARIANT_CHANGE_SYNC] ✗ Could not acquire controller read lock");
+                            }
+                            eprintln!("[BUILD] [VARIANT_CHANGE] ⭐ END VARIANT SELECTION TRACE");
+                            
+                            // Version polling can happen async without blocking the UI
+                            tokio::spawn(async move {
+                                eprintln!("[BUILD] [VARIANT_CHANGE_ASYNC] Variant selection change async task started for '{}'", variant_str);
+                                let controller = controller_clone.read().await;
+                                eprintln!("[BUILD] [VARIANT_CHANGE_ASYNC] Controller lock acquired for variant '{}'", variant_str);
+                                // Trigger version polling (non-blocking, UI-independent)
+                                controller.trigger_version_poll(variant_str.clone());
+                                eprintln!("[BUILD] [VARIANT_CHANGE_ASYNC] ✓ Version polling triggered for '{}'", variant_str);
                             });
                         }
                     }
@@ -83,6 +123,10 @@ pub fn render_build(
                 ui.label("Checking version...");
             } else if let Some(version) = app.ui_state.latest_versions.get(selected_variant_name) {
                 ui.label(format!("(Latest: {})", version));
+            } else {
+                // Version not found in cache and polling is not active
+                eprintln!("[BUILD] [VERSION_DISPLAY] Variant '{}' version not in cache, showing fallback", selected_variant_name);
+                ui.label("(Latest: Unknown)");
             }
         });
         

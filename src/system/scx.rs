@@ -72,6 +72,12 @@ const SCX_CACHE_DURATION: Duration = Duration::from_secs(300);  // 5-minute cach
 static SCX_READINESS_CACHE: Mutex<Option<(SCXReadiness, Instant)>> = Mutex::new(None);
 const SCX_READINESS_CACHE_DURATION: Duration = Duration::from_secs(60);  // 60-second cache TTL
 
+// State tracking for redundant log suppression
+// Stores the last logged SCXReadiness state to detect changes
+lazy_static::lazy_static! {
+    static ref SCX_READINESS_LOGGED_STATE: Mutex<Option<SCXReadiness>> = Mutex::new(None);
+}
+
 /// SCX Scheduler Mode - Abstracts complex CLI flags into standardized profiles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SchedulerMode {
@@ -196,6 +202,39 @@ pub struct SCXManager;
 /// Persistent SCX Manager - Applies scheduler config to `/etc/scx_loader/config.toml` via Polkit
 #[derive(Debug, Clone)]
 pub struct PersistentSCXManager;
+
+/// Determines if SCX readiness state has changed since last logged.
+/// Returns true if:
+/// - Debug mode is enabled (environment variable SCX_DEBUG_LOG=1)
+/// - No previous state was logged (first detection)
+/// - Readiness state changed (transition occurred)
+/// Returns false if:
+/// - Same state as previously logged AND debug mode disabled
+fn should_log_scx_state_change(current_state: SCXReadiness) -> bool {
+    // Check for debug override - force logging if SCX_DEBUG_LOG=1
+    if std::env::var("SCX_DEBUG_LOG").map(|v| v == "1").unwrap_or(false) {
+        return true;
+    }
+    
+    let mut last_state = SCX_READINESS_LOGGED_STATE.lock().unwrap();
+    
+    // First detection - no prior state exists
+    if last_state.is_none() {
+        *last_state = Some(current_state);
+        return true;
+    }
+    
+    let prior = last_state.unwrap();
+    
+    // State changed (transition detected)
+    if prior != current_state {
+        *last_state = Some(current_state);
+        return true;
+    }
+    
+    // State unchanged (redundant) and debug mode disabled
+    false
+}
 
 impl SCXManager {
     /// Check if the running kernel supports SCX via /proc/config.gz
@@ -442,27 +481,46 @@ impl SCXManager {
         None
     }
 
-    /// Compute SCX readiness by performing all checks
-    /// (Internal helper, called by get_scx_readiness after cache miss)
+    /// Computes current SCX readiness state with smart logging.
+    ///
+    /// Logs are suppressed when readiness state hasn't changed, preventing log spam.
+    /// This behavior can be overridden for debugging by setting environment variable:
+    /// - SCX_DEBUG_LOG=1: Forces verbose logging on every state recomputation
+    ///
+    /// # Returns
+    /// The current SCXReadiness state (Ready, KernelMissingSupport, PackagesMissing, or ServiceMissing)
     fn compute_scx_readiness() -> SCXReadiness {
-        // Check kernel support first
-        if !Self::check_scx_support() {
-            return SCXReadiness::KernelMissingSupport;
+        // First, compute the current readiness state without logging
+        let current_state = if !Self::check_scx_support() {
+            SCXReadiness::KernelMissingSupport
+        } else if Self::is_scx_installed().is_empty() {
+            SCXReadiness::PackagesMissing
+        } else if Self::find_scx_service().is_none() {
+            SCXReadiness::ServiceMissing
+        } else {
+            SCXReadiness::Ready
+        };
+        
+        // Check if state has changed since last logged
+        if should_log_scx_state_change(current_state) {
+            // Log only when state transitions occur
+            match current_state {
+                SCXReadiness::Ready => {
+                    log_info!("[SCXManager] SCX environment ready");
+                }
+                SCXReadiness::KernelMissingSupport => {
+                    log_info!("[SCXManager] Kernel lacks SCX support");
+                }
+                SCXReadiness::PackagesMissing => {
+                    log_info!("[SCXManager] No SCX schedulers found");
+                }
+                SCXReadiness::ServiceMissing => {
+                    log_info!("[SCXManager] SCX service not installed");
+                }
+            }
         }
-
-        // Check for installed binaries
-        let installed = Self::is_scx_installed();
-        if installed.is_empty() {
-            return SCXReadiness::PackagesMissing;
-        }
-
-        // Check for SCX systemd service unit (supports both scx_loader.service and scx.service)
-        if !Self::find_scx_service().is_some() {
-            log_info!("[SCXManager] No SCX service unit found (checked scx_loader.service and scx.service)");
-            return SCXReadiness::ServiceMissing;
-        }
-
-        SCXReadiness::Ready
+        // Return state regardless of logging (silent on repeated states)
+        current_state
     }
 
     /// Provision the SCX environment with packages and systemd service.
@@ -725,7 +783,9 @@ impl PersistentSCXManager {
             "mkdir -p /etc/scx_loader && cp {} /etc/scx_loader/config.toml && systemctl daemon-reload && systemctl enable scx_loader.service && systemctl restart scx_loader.service",
             escaped_temp_path
         );
-        let pkexec_cmd = format!("pkexec bash -c \"{}\"", shell_cmd);
+        // CRITICAL: Use single-quote escaping (standardized across all pkexec calls)
+        // Single quotes prevent shell interpretation of special chars and variable expansion
+        let pkexec_cmd = format!("pkexec bash -c '{}'", shell_cmd);
 
         log_info!(
             "[PersistentSCXManager] Executing Polkit-elevated TOML deployment with persistence enable via pkexec"

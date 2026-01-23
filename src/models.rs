@@ -262,6 +262,7 @@ pub struct KernelConfig {
     pub scx_active_scheduler: Option<String>, // Currently active SCX scheduler
     pub native_optimizations: bool,       // Enable -march=native
     pub user_toggled_native_optimizations: bool, // User manually toggled native optimizations
+    pub kernel_variant: String,           // Kernel variant
 }
 
 impl Default for KernelConfig {
@@ -275,7 +276,7 @@ impl Default for KernelConfig {
             hardening: HardeningLevel::Standard,
             secure_boot: false,
             profile: "Generic".to_string(),
-            version: "6.6.0".to_string(),
+            version: "latest".to_string(),
             use_polly: false,
             use_mglru: false,
             use_bore: false,              // Default: BORE disabled
@@ -294,7 +295,20 @@ impl Default for KernelConfig {
             scx_active_scheduler: None,   // No active SCX scheduler by default
             native_optimizations: true,   // Default: native optimizations enabled
             user_toggled_native_optimizations: false, // Not manually toggled by default
+            kernel_variant: String::new(), // Default: empty kernel variant
         }
+    }
+}
+
+impl KernelConfig {
+    /// Returns true if the config is set to track the latest version.
+    pub fn is_dynamic_version(&self) -> bool {
+        self.version == "latest"
+    }
+
+    /// Checks if the version is a concrete (non-dynamic) version string.
+    pub fn is_concrete_version(&self) -> bool {
+        !self.is_dynamic_version()
     }
 }
 
@@ -434,6 +448,193 @@ impl Default for KernelAudit {
 }
 
 
+/// Metadata Persistence Layer (MPL) Metadata
+///
+/// Immutable metadata file stored at workspace root (`.goatd_metadata`).
+/// Contains the definitive source of truth for kernel build information.
+/// This replaces the fragile 5-level fallback strategy with a single, reliable metadata file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MPLMetadata {
+    /// Unique build session identifier (UUID v4)
+    pub build_id: String,
+    
+    /// Exact kernel release string (from `include/config/kernel.release`)
+    /// E.g., "6.19.0-goatd-gaming"
+    pub kernel_release: String,
+    
+    /// Base kernel version (e.g., "6.19.0")
+    pub kernel_version: String,
+    
+    /// Profile name (e.g., "gaming", "workstation")
+    pub profile: String,
+    
+    /// Kernel variant (e.g., "linux", "linux-zen", "linux-lts")
+    pub variant: String,
+    
+    /// LTO configuration (e.g., "full", "thin", "none")
+    pub lto_level: String,
+    
+    /// Build completion timestamp (ISO 8601)
+    pub build_timestamp: String,
+    
+    /// Canonicalized workspace root path
+    pub workspace_root: PathBuf,
+    
+    /// Kernel source directory
+    pub source_dir: PathBuf,
+    
+    /// Package version (pkgver)
+    pub pkgver: String,
+    
+    /// Package release (pkgrel)
+    pub pkgrel: String,
+    
+    /// Profile suffix for LOCALVERSION (e.g., "-goatd-gaming")
+    pub profile_suffix: String,
+}
+
+impl MPLMetadata {
+    /// Create new MPL metadata
+    pub fn new(
+        build_id: String,
+        kernel_version: String,
+        profile: String,
+        variant: String,
+        lto_level: String,
+        workspace_root: PathBuf,
+    ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        let profile_suffix = if variant == "linux" {
+            format!("-goatd-{}", profile.to_lowercase())
+        } else {
+            let variant_part = variant.trim_start_matches("linux-").to_string();
+            format!("-goatd-{}-{}", variant_part, profile.to_lowercase())
+        };
+        
+        MPLMetadata {
+            build_id,
+            kernel_release: String::new(), // Will be populated after build
+            kernel_version: kernel_version.clone(),
+            profile,
+            variant,
+            lto_level,
+            build_timestamp: now,
+            workspace_root,
+            source_dir: PathBuf::new(),
+            pkgver: kernel_version,
+            pkgrel: "1".to_string(),
+            profile_suffix,
+        }
+    }
+    
+    /// Write MPL metadata to file as shell-sourceable format
+    pub fn write_to_file(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let content = self.to_shell_format();
+        std::fs::write(path, content)
+    }
+    
+    /// Convert MPL metadata to shell-sourceable format
+    pub fn to_shell_format(&self) -> String {
+        format!(
+            r#"# GOATd Kernel Build Metadata
+# Generated: {}
+# Build Session ID: {}
+
+GOATD_BUILD_ID="{}"
+GOATD_KERNELRELEASE="{}"
+GOATD_KERNEL_VERSION="{}"
+GOATD_PROFILE="{}"
+GOATD_VARIANT="{}"
+GOATD_LTO_LEVEL="{}"
+GOATD_BUILD_TIMESTAMP="{}"
+GOATD_WORKSPACE_ROOT="{}"
+GOATD_SOURCE_DIR="{}"
+GOATD_PKGVER="{}"
+GOATD_PKGREL="{}"
+GOATD_PROFILE_SUFFIX="{}"
+"#,
+            self.build_timestamp,
+            self.build_id,
+            self.build_id,
+            self.kernel_release,
+            self.kernel_version,
+            self.profile,
+            self.variant,
+            self.lto_level,
+            self.build_timestamp,
+            self.workspace_root.display(),
+            self.source_dir.display(),
+            self.pkgver,
+            self.pkgrel,
+            self.profile_suffix,
+        )
+    }
+    
+    /// Read MPL metadata from shell format
+    pub fn from_shell_format(content: &str) -> std::io::Result<Self> {
+        let mut metadata = MPLMetadata::default();
+        
+        for line in content.lines() {
+            if line.starts_with("GOATD_BUILD_ID=") {
+                metadata.build_id = extract_value(line);
+            } else if line.starts_with("GOATD_KERNELRELEASE=") {
+                metadata.kernel_release = extract_value(line);
+            } else if line.starts_with("GOATD_KERNEL_VERSION=") {
+                metadata.kernel_version = extract_value(line);
+            } else if line.starts_with("GOATD_PROFILE=") {
+                metadata.profile = extract_value(line);
+            } else if line.starts_with("GOATD_VARIANT=") {
+                metadata.variant = extract_value(line);
+            } else if line.starts_with("GOATD_LTO_LEVEL=") {
+                metadata.lto_level = extract_value(line);
+            } else if line.starts_with("GOATD_BUILD_TIMESTAMP=") {
+                metadata.build_timestamp = extract_value(line);
+            } else if line.starts_with("GOATD_WORKSPACE_ROOT=") {
+                metadata.workspace_root = PathBuf::from(extract_value(line));
+            } else if line.starts_with("GOATD_SOURCE_DIR=") {
+                metadata.source_dir = PathBuf::from(extract_value(line));
+            } else if line.starts_with("GOATD_PKGVER=") {
+                metadata.pkgver = extract_value(line);
+            } else if line.starts_with("GOATD_PKGREL=") {
+                metadata.pkgrel = extract_value(line);
+            } else if line.starts_with("GOATD_PROFILE_SUFFIX=") {
+                metadata.profile_suffix = extract_value(line);
+            }
+        }
+        
+        Ok(metadata)
+    }
+}
+
+impl Default for MPLMetadata {
+    fn default() -> Self {
+        MPLMetadata {
+            build_id: String::new(),
+            kernel_release: String::new(),
+            kernel_version: String::new(),
+            profile: String::new(),
+            variant: "linux".to_string(),
+            lto_level: "thin".to_string(),
+            build_timestamp: String::new(),
+            workspace_root: PathBuf::new(),
+            source_dir: PathBuf::new(),
+            pkgver: String::new(),
+            pkgrel: "1".to_string(),
+            profile_suffix: String::new(),
+        }
+    }
+}
+
+/// Helper function to extract quoted values from shell variable assignments
+fn extract_value(line: &str) -> String {
+    if let Some(eq_pos) = line.find('=') {
+        let value = &line[eq_pos + 1..];
+        value.trim_matches('"').to_string()
+    } else {
+        String::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,6 +697,7 @@ mod tests {
             scx_active_scheduler: None,
             native_optimizations: true,
             user_toggled_native_optimizations: false,
+            kernel_variant: String::new(),
         };
         assert_eq!(config.lto_type, LtoType::Thin);
         assert_eq!(config.hardening, HardeningLevel::Standard);

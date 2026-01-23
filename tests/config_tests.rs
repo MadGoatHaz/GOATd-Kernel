@@ -55,6 +55,7 @@ fn create_test_config() -> KernelConfig {
         scx_active_scheduler: None,
         native_optimizations: true,
         user_toggled_native_optimizations: false,
+        kernel_variant: String::new(),
     }
 }
 

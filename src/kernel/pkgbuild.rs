@@ -125,10 +125,33 @@ fn extract_pkgrel(content: &str) -> Result<String, String> {
 /// let version = get_latest_version_by_variant("linux").await?;
 /// ```
 pub async fn get_latest_version_by_variant(variant: &str) -> Result<String, String> {
-    let url = get_pkgbuild_url_for_variant(variant)
-        .ok_or_else(|| format!("Unknown kernel variant: {}", variant))?;
+    eprintln!("[PKGBUILD] [GET_VERSION] Starting version fetch for variant: '{}'", variant);
+    log::info!("[PKGBUILD] [GET_VERSION] Fetching latest version for variant: '{}'", variant);
     
-    get_latest_version_from_pkgbuild(&url).await
+    let url = get_pkgbuild_url_for_variant(variant)
+        .ok_or_else(|| {
+            let err_msg = format!("Unknown kernel variant: {}", variant);
+            eprintln!("[PKGBUILD] [GET_VERSION] [ERROR] {}", err_msg);
+            err_msg
+        })?;
+    
+    eprintln!("[PKGBUILD] [GET_VERSION] Resolved variant '{}' to URL: {}", variant, url);
+    log::debug!("[PKGBUILD] [GET_VERSION] URL resolved for variant '{}': {}", variant, url);
+    
+    let result = get_latest_version_from_pkgbuild(&url).await;
+    
+    match &result {
+        Ok(version) => {
+            eprintln!("[PKGBUILD] [GET_VERSION] [SUCCESS] Version fetched for '{}': '{}'", variant, version);
+            log::info!("[PKGBUILD] [GET_VERSION] Successfully fetched version for '{}': '{}'", variant, version);
+        }
+        Err(e) => {
+            eprintln!("[PKGBUILD] [GET_VERSION] [ERROR] Failed to fetch version for '{}': {}", variant, e);
+            log::error!("[PKGBUILD] [GET_VERSION] Error fetching version for '{}': {}", variant, e);
+        }
+    }
+    
+    result
 }
 
 #[cfg(test)]

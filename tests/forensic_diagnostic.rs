@@ -16,7 +16,6 @@ mod forensic_diagnostic {
     use goatd_kernel::system::performance::{
         LatencyCollector, MonitoringState,
         SyscallSaturationCollector, SyscallSaturationConfig,
-        collector::CollectorEvent,
         diagnostic_buffer,
     };
     use goatd_kernel::system::performance::collector::LatencyProcessor;

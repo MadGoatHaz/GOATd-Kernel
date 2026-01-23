@@ -236,6 +236,7 @@ pub fn generate_lto_config(lto_type: crate::models::LtoType) -> String {
                 "# LTO Configuration (Phase 3.5) - Full LTO",
                 "CONFIG_LTO_CLANG=y",
                 "CONFIG_LTO_CLANG_FULL=y",
+                "CONFIG_HAS_LTO_CLANG=y",
                 "CONFIG_CFI_CLANG=y",
                 "CONFIG_CFI_PERMISSIVE=n",
             ]
@@ -246,6 +247,7 @@ pub fn generate_lto_config(lto_type: crate::models::LtoType) -> String {
                 "# LTO Configuration (Phase 3.5) - Thin LTO",
                 "CONFIG_LTO_CLANG=y",
                 "CONFIG_LTO_CLANG_THIN=y",
+                "CONFIG_HAS_LTO_CLANG=y",
                 "CONFIG_CFI_CLANG=y",
                 "CONFIG_CFI_PERMISSIVE=n",
             ]
@@ -628,6 +630,7 @@ obj-y += arch/"#;
     fn test_generate_lto_config() {
         let config = generate_lto_config(crate::models::LtoType::Thin);
         assert!(config.contains("CONFIG_LTO_CLANG=y"));
+        assert!(config.contains("CONFIG_HAS_LTO_CLANG=y"));
         assert!(config.contains("CONFIG_CFI_CLANG=y"));
     }
 
@@ -636,6 +639,7 @@ obj-y += arch/"#;
     fn test_generate_lto_thin() {
         let config = generate_lto_config(crate::models::LtoType::Thin);
         assert!(config.contains("CONFIG_LTO_CLANG_THIN=y"));
+        assert!(config.contains("CONFIG_HAS_LTO_CLANG=y"));
     }
 
     // Test 19: Generate LTO includes CFI permissive disabled
@@ -643,6 +647,7 @@ obj-y += arch/"#;
     fn test_generate_lto_cfi_permissive() {
         let config = generate_lto_config(crate::models::LtoType::Thin);
         assert!(config.contains("CONFIG_CFI_PERMISSIVE=n"));
+        assert!(config.contains("CONFIG_HAS_LTO_CLANG=y"));
     }
 
     // Test 19b: Generate LTO Full variant
@@ -651,6 +656,7 @@ obj-y += arch/"#;
         let config = generate_lto_config(crate::models::LtoType::Full);
         assert!(config.contains("CONFIG_LTO_CLANG_FULL=y"));
         assert!(config.contains("CONFIG_LTO_CLANG=y"));
+        assert!(config.contains("CONFIG_HAS_LTO_CLANG=y"));
     }
 
     // Test 19c: Generate LTO None (disabled)
@@ -659,6 +665,7 @@ obj-y += arch/"#;
         let config = generate_lto_config(crate::models::LtoType::None);
         assert!(config.contains("CONFIG_LTO_CLANG=n"));
         assert!(config.contains("CONFIG_CFI_CLANG=n"));
+        // Note: CONFIG_HAS_LTO_CLANG is NOT present for None type (disabled)
     }
 
     // Test 20: Generate GPU exclusions

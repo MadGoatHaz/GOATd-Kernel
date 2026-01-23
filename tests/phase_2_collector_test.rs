@@ -135,37 +135,36 @@ fn test_context_switch_collector() {
     let metrics = collector.run().expect("Context-switch collector failed");
 
     eprintln!("[CS.TEST] Results:");
-    eprintln!("  - Avg RTT: {}µs", metrics.avg_rtt_us);
-    eprintln!("  - Min RTT: {}µs", metrics.min_rtt_us);
-    eprintln!("  - Max RTT: {}µs", metrics.max_rtt_us);
-    eprintln!("  - P99 RTT: {}µs", metrics.p99_rtt_us);
+    eprintln!("  - Mean RTT: {}µs", metrics.mean);
+    eprintln!("  - Median RTT: {}µs", metrics.median);
+    eprintln!("  - P95 RTT: {}µs", metrics.p95);
     eprintln!("  - Successful Passes: {}", metrics.successful_passes);
 
     // Validation checks
     eprintln!("[CS.TEST] Validation Checks:");
     
     // Check 1: All RTT values should be positive
-    eprintln!("  [CHECK] Avg RTT > 0: {}", metrics.avg_rtt_us > 0.0);
-    assert!(metrics.avg_rtt_us > 0.0, "Avg RTT should be positive, got {}", metrics.avg_rtt_us);
+    eprintln!("  [CHECK] Mean RTT > 0: {}", metrics.mean > 0.0);
+    assert!(metrics.mean > 0.0, "Mean RTT should be positive, got {}", metrics.mean);
     
-    eprintln!("  [CHECK] Min RTT >= 0: {}", metrics.min_rtt_us >= 0.0);
-    assert!(metrics.min_rtt_us >= 0.0, "Min RTT should be >= 0, got {}", metrics.min_rtt_us);
+    eprintln!("  [CHECK] Median RTT >= 0: {}", metrics.median >= 0.0);
+    assert!(metrics.median >= 0.0, "Median RTT should be >= 0, got {}", metrics.median);
     
-    eprintln!("  [CHECK] Max RTT >= Avg: {}", metrics.max_rtt_us >= metrics.avg_rtt_us);
-    assert!(metrics.max_rtt_us >= metrics.avg_rtt_us, 
-        "Max {} should be >= Avg {}", metrics.max_rtt_us, metrics.avg_rtt_us);
+    eprintln!("  [CHECK] P95 RTT >= Mean: {}", metrics.p95 >= metrics.mean);
+    assert!(metrics.p95 >= metrics.mean,
+        "P95 {} should be >= Mean {}", metrics.p95, metrics.mean);
     
     // Check 2: RTT values should be within physical bounds
-    eprintln!("  [CHECK] Max RTT <= {}: {}", bounds.cs_rtt_max_us, metrics.max_rtt_us <= bounds.cs_rtt_max_us);
-    assert!(metrics.max_rtt_us <= bounds.cs_rtt_max_us, 
-        "Max RTT {} exceeds bound {}", metrics.max_rtt_us, bounds.cs_rtt_max_us);
+    eprintln!("  [CHECK] P95 RTT <= {}: {}", bounds.cs_rtt_max_us, metrics.p95 <= bounds.cs_rtt_max_us);
+    assert!(metrics.p95 <= bounds.cs_rtt_max_us,
+        "P95 RTT {} exceeds bound {}", metrics.p95, bounds.cs_rtt_max_us);
     
-    // Check 3: P99 should be between min and max
-    eprintln!("  [CHECK] Min <= P99 <= Max: {} && {}", 
-        metrics.p99_rtt_us >= metrics.min_rtt_us, metrics.p99_rtt_us <= metrics.max_rtt_us);
-    assert!(metrics.p99_rtt_us >= metrics.min_rtt_us && metrics.p99_rtt_us <= metrics.max_rtt_us,
-        "P99 {} should be between min {} and max {}", 
-        metrics.p99_rtt_us, metrics.min_rtt_us, metrics.max_rtt_us);
+    // Check 3: P95 should be between median and mean
+    eprintln!("  [CHECK] Median <= Mean <= P95: {} && {}",
+        metrics.median <= metrics.mean, metrics.mean <= metrics.p95);
+    assert!(metrics.median <= metrics.mean && metrics.mean <= metrics.p95,
+        "Median {} should be <= Mean {} <= P95 {}",
+        metrics.median, metrics.mean, metrics.p95);
     
     // Check 4: Successful passes should match iterations
     eprintln!("  [CHECK] Successful Passes == Iterations: {} == {}",

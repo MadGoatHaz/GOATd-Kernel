@@ -151,6 +151,7 @@ tests/
 ├── hardware_tests.rs          # Hardware detection tests
 ├── profile_pipeline_validation.rs  # Profile application verification
 ├── build_pipeline_tests.rs    # Build orchestration tests
+├── real_kernel_build_integration.rs # Full-pipe automated tests
 ├── performance_*.rs           # Performance diagnostic tests
 └── modprobed_*.rs             # Modprobed-DB integration tests
 ```
@@ -451,10 +452,11 @@ cargo test -- --nocapture --test-threads=1
 ### Key Test Files
 
 1. **`build_pipeline_tests.rs`**: Build Pipeline Verification test (dry-run validation)
-2. **`profile_pipeline_validation.rs`**: Profile application & LTO enforcement
-3. **`config_tests.rs`**: Configuration loading, whitelist validation
-4. **`performance_battle_tests.rs`**: GOAT Score calculation verification
-5. **`modprobed_localmodconfig_validation.rs`**: Modprobed-DB integration
+2. **`real_kernel_build_integration.rs`**: Full-pipe automated verification with mock sources
+3. **`profile_pipeline_validation.rs`**: Profile application & LTO enforcement
+4. **`config_tests.rs`**: Configuration loading, whitelist validation
+5. **`performance_battle_tests.rs`**: GOAT Score calculation verification
+6. **`modprobed_localmodconfig_validation.rs`**: Modprobed-DB integration
 
 ### Deep Pipe Verification Test
 
@@ -703,6 +705,7 @@ eprintln!("[APP_STATE] Build phase: {:?}", state.build_phase);
 - **Development History**: [`DEVLOG.md`](../DEVLOG.md) (42+ phases of development)
 - **Project Scope**: [`PROJECTSCOPE.md`](../PROJECTSCOPE.md) (architectural scope)
 - **User Guide**: [`docs/USER_GUIDE.md`](USER_GUIDE.md) (end-user documentation)
+- **Build Pipe Testing**: [`docs/BUILD_PIPE_TESTING.md`](BUILD_PIPE_TESTING.md) (automated test guide)
 
 ---
 

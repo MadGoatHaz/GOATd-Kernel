@@ -1,5 +1,18 @@
 # MASTER ARCHITECTURAL SPECIFICATION (BLUEPRINT V2): THE CANONICAL TRUTH
 
+## EXECUTIVE SUMMARY: Recent Achievements
+
+### Laboratory-Grade Hardened Environment (Phase 44+)
+This specification documents the matured GOATd Kernel Builder implementing **laboratory-grade hardening** with **robust build pipeline** and **definitive Rust headers fix**. Recent phases achieved:
+- **20-Point Review Cycle**: Comprehensive architectural audit of all core systems
+- **Environment Purity Controls**: Hermetically sealed build environment with explicit variable management
+- **Rust Headers Fix**: AST-aware regex injection securing DKMS out-of-tree driver compatibility across kernel variants
+- **Unified Environment Architecture**: Single source of truth for all environment variables, compiler flags, and build parameters
+- **Regex-Based PKGBUILD Patching**: Deterministic, testable patch injection system with whitespace-agnostic matching
+- **Atomic Configuration Management**: All `.config` and PKGBUILD modifications use atomic swap patterns with backups
+
+---
+
 ## 1. System Vision & Philosophy
 The GOATd Kernel Builder has transitioned from a **Static Preset** model to a **Dynamic Surgical Override** model with **Persistent Sched_ext Strategy Management**, **High-Fidelity Performance Diagnostics**, and **egui-based event-driven architecture**.
 - **User Intent is Sovereign**: UI toggles in the `egui` interface generate explicit overrides that persist through the entire pipeline.
@@ -224,6 +237,32 @@ MGLRU is tuned at the **Rule Engine** layer according to the selected profile:
 - **Gaming/Workstation**: `enabled_mask=0x0007`, `min_ttl_ms=1000` (Balanced).
 - **Laptop**: `enabled_mask=0x0007`, `min_ttl_ms=500` (Aggressive memory reclaim for power).
 - **Server**: `enabled_mask=0x0000` (Disabled for deterministic performance).
+
+---
+
+## 7.5. Unified Environment Architecture & Rust Headers Fix
+
+### **Hermetically Sealed Build Environment**
+The orchestrator enforces strict environment purity by:
+1. **Explicit Variable Management**: All CFLAGS, LDFLAGS, and compiler paths defined centrally in [`Executor`](src/orchestrator/executor.rs)
+2. **PATH Purification**: Removes conflicting GCC directories and prepends Clang-only paths
+3. **Global Clang Enforcement**: `_FORCE_CLANG=1` environment variable mandates Clang for all build phases
+
+### **Definitive Rust Headers Fix**
+The system implements an **AST-aware regex injection** for kernel header installation that circumvents upstream kernel build system limitations:
+- **Root Cause**: Kernel build system's header installation script uses relative path resolution that fails when PKGBUILD runs from non-canonical directories
+- **Solution**: [`inject_rust_headers_fix`](src/kernel/patcher.rs) implements three-stage path resolution:
+  1. **Canonical Path**: Resolves `$srcdir` via `readlink -f` to absolute filesystem path
+  2. **Fallback Detection**: Searches for Rust version markers in multiple common locations (`rust-toolchain`, `Cargo.toml`)
+  3. **Atomic Injection**: Surgically injects resolved paths into the PKGBUILD build() function
+- **Verification**: Post-install DKMS autoinstall validates header availability across diverse kernel configurations
+
+### **Regex-Based PKGBUILD Patching System**
+The [`KernelPatcher`](src/kernel/patcher.rs) uses deterministic, testable regex patterns for all PKGBUILD modifications:
+1. **Whitespace-Agnostic Matching**: Patterns use `^[ \t]*` to match indentation-independent function definitions
+2. **Atomic Injection**: All patches are surrounded by clear markers (`# GOATd BEGIN`, `# GOATd END`) for easy identification and removal
+3. **Validation**: Each patch is tested via regex dry-run before actual file modification
+4. **Backup Strategy**: Original PKGBUILD backed up before any modification; rollback available on verification failure
 
 ---
 

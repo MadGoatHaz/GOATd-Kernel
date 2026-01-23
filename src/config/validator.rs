@@ -4,7 +4,11 @@ use crate::error::ConfigError;
 use crate::models::{KernelConfig, LtoType};
 use std::collections::HashMap;
 
-/// Validate kernel version (X.Y.Z format).
+/// Validate kernel version (X.Y.Z format or "latest" sentinel).
+///
+/// Accepts either:
+/// - "latest" - sentinel value for dynamic versioning (will be resolved during build preparation)
+/// - X.Y.Z format - concrete semantic version (e.g., "6.6.0", "6.6.0-generic")
 pub fn validate_kernel_version(version: &str) -> Result<(), ConfigError> {
     // Check if version is empty
     if version.is_empty() {
@@ -13,6 +17,13 @@ pub fn validate_kernel_version(version: &str) -> Result<(), ConfigError> {
         ));
     }
 
+    // STEP 1: Accept "latest" as special sentinel value for dynamic versioning
+    // This value is resolved to a concrete version during build preparation phase
+    if version == "latest" {
+        return Ok(());
+    }
+
+    // STEP 2: Validate concrete versions in X.Y.Z format
     // Split on first '-' to separate version from suffix (e.g., "6.6.0-generic")
     let version_part = version.split('-').next().unwrap_or(version);
 
@@ -22,7 +33,7 @@ pub fn validate_kernel_version(version: &str) -> Result<(), ConfigError> {
     // Require at least 3 parts (X.Y.Z)
     if parts.len() < 3 {
         return Err(ConfigError::ValidationFailed(format!(
-            "Kernel version must follow semantic versioning (X.Y.Z), got: {}",
+            "Kernel version must follow semantic versioning (X.Y.Z) or be 'latest', got: {}",
             version
         )));
     }
@@ -179,6 +190,12 @@ mod tests {
         assert!(validate_kernel_version("5.15.0").is_ok());
         assert!(validate_kernel_version("6.6.0-generic").is_ok());
         assert!(validate_kernel_version("5.15.0-arch1-1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_kernel_version_latest_sentinel() {
+        // "latest" is a valid sentinel value for dynamic versioning
+        assert!(validate_kernel_version("latest").is_ok());
     }
 
     #[test]

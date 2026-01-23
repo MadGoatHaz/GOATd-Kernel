@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::collections::HashSet;
-use git2::Repository;
+use git2::{Repository, build::RepoBuilder};
 use thiserror::Error;
 
 /// Errors that can occur during git operations
@@ -225,7 +225,11 @@ impl GitManager {
         Ok(GitManager { repo_path })
     }
     
-    /// Clones a repository from a URL to the target path
+    /// Clones a repository from a URL to the target path with shallow clone optimization
+    ///
+    /// This implementation uses shallow cloning (depth=1) to optimize network bandwidth
+    /// and storage requirements. It attempts shallow clone first, with proper error handling
+    /// for repositories that don't support shallow cloning.
     ///
     /// # Arguments
     /// * `url` - The repository URL (HTTP/HTTPS/SSH)
@@ -236,13 +240,88 @@ impl GitManager {
     pub fn clone(url: &str, target_path: impl AsRef<Path>) -> GitResult<Self> {
         let target_path = target_path.as_ref();
         
-        Repository::clone(url, target_path)
-            .map_err(|e| GitError::Clone(format!(
-                "Failed to clone {} to {:?}: {}",
-                url, target_path, e
-            )))?;
+        eprintln!("[Git] [CLONE] Starting shallow clone with depth=1 for: {}", url);
+        eprintln!("[Git] [CLONE] Target path: {:?}", target_path);
         
+        // Attempt shallow clone with depth=1 for optimization
+        Self::shallow_clone(url, target_path)
+            .or_else(|shallow_err| {
+                eprintln!("[Git] [CLONE] ⚠ Shallow clone failed: {}", shallow_err);
+                eprintln!("[Git] [CLONE] Falling back to standard (full) clone");
+                
+                // Fallback to standard clone if shallow clone fails
+                    Repository::clone(url, target_path)
+                        .map(|_| ())
+                        .map_err(|e| GitError::Clone(format!(
+                            "Failed to clone {} to {:?} (fallback): {}",
+                            url, target_path, e
+                        )))
+            })?;
+        
+        eprintln!("[Git] [CLONE] ✓ Clone completed successfully");
         GitManager::new(target_path)
+    }
+    
+    /// Performs a shallow clone with depth=1 for bandwidth optimization
+    ///
+    /// Uses `git2::build::RepoBuilder` with fetch options to limit clone depth.
+    /// This significantly reduces bandwidth and storage requirements for large repositories.
+    ///
+    /// # Arguments
+    /// * `url` - The repository URL
+    /// * `target_path` - The local path where the repository will be cloned
+    ///
+    /// # Returns
+    /// * `Ok(())` if shallow clone succeeds
+    /// * `Err(GitError)` if shallow clone fails
+    fn shallow_clone(url: &str, target_path: &Path) -> GitResult<()> {
+        eprintln!("[Git] [SHALLOW-CLONE] Initiating shallow clone (depth=1)");
+        eprintln!("[Git] [SHALLOW-CLONE] URL: {}", url);
+        
+        // Create a new RepoBuilder for shallow cloning
+        let mut builder = RepoBuilder::new();
+        
+        // Configure fetch options for shallow clone
+        let mut fetch_options = git2::FetchOptions::new();
+        
+        // Enable shallow cloning with depth=1
+        eprintln!("[Git] [SHALLOW-CLONE] Setting fetch depth to 1");
+        fetch_options.depth(1);
+        
+        // Set up callbacks for progress reporting
+        let mut callbacks = git2::RemoteCallbacks::new();
+        
+        // Add transfer progress callback
+        callbacks.transfer_progress(|progress| {
+            let received = progress.received_objects();
+            let total = progress.total_objects();
+            let indexed = progress.indexed_objects();
+            
+            if total > 0 {
+                let percent = (received as f32 / total as f32 * 100.0) as u32;
+                eprintln!("[Git] [SHALLOW-CLONE] [PROGRESS] {}/{} objects ({} indexed) - {}%",
+                    received, total, indexed, percent);
+            }
+            true
+        });
+        
+        // Apply fetch options to the builder
+        fetch_options.remote_callbacks(callbacks);
+        builder.fetch_options(fetch_options);
+        
+        // Clone the repository
+        eprintln!("[Git] [SHALLOW-CLONE] Cloning repository to {:?}", target_path);
+        builder.clone(url, target_path)
+            .map_err(|e| {
+                eprintln!("[Git] [SHALLOW-CLONE] ✗ Shallow clone failed: {}", e);
+                GitError::Clone(format!(
+                    "Shallow clone failed for {}: {}",
+                    url, e
+                ))
+            })?;
+        
+        eprintln!("[Git] [SHALLOW-CLONE] ✓ Shallow clone completed successfully");
+        Ok(())
     }
     
     /// Fetches all tags and branches from the remote repository

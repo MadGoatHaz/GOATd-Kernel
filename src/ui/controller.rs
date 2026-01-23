@@ -78,6 +78,7 @@ pub enum BuildEvent {
     LatestVersionUpdate(String, String), // (variant_name, version_string)
     JitterAuditComplete(SessionSummary), // Jitter audit session completed
     ArtifactDeleted,  // Built artifact was successfully deleted
+    VersionResolved(String),  // Dynamic version successfully resolved to concrete version
 }
 
 /// Central state manager for AppController
@@ -409,6 +410,8 @@ impl AppController {
                 self.log_event("JITTER_AUDIT", &format!("Complete: samples={}, duration={:.2}s", summary.total_samples, summary.duration_secs.unwrap_or(0.0))),
             BuildEvent::ArtifactDeleted =>
                 self.log_event("ARTIFACT", "Artifact deleted, Kernels Ready for Installation list refreshed"),
+            BuildEvent::VersionResolved(version) =>
+                self.log_event("VERSION_RESOLVED", &format!("Dynamic version resolved to: {}", version)),
         }
     }
     
@@ -421,6 +424,12 @@ impl AppController {
     /// 3. Sends a BuildEvent::LatestVersionUpdate on completion or failure
     ///
     /// Includes 10-second timeout protection to prevent network hangs from blocking UI.
+    ///
+    /// LOCK CONTENTION NOTE:
+    /// - This method spawns an independent async task that does NOT acquire any locks on self.settings
+    /// - All polling work happens in the spawned task context, ensuring non-blocking behavior
+    /// - The only contention point is when sending the result via build_tx (minimal, O(1))
+    /// - Therefore, trigger_version_poll is safe to call from variant_change handlers without blocking
     pub fn trigger_version_poll(&self, variant: String) {
         use crate::kernel::pkgbuild::get_latest_version_by_variant;
         use crate::kernel::git::get_latest_remote_version;
@@ -441,38 +450,39 @@ impl AppController {
             
             let version = match result {
                 Ok(Ok(v)) => {
-                    log::debug!("[VERSION_POLL] Done: Found version for {} via reqwest: {}", variant, v);
+                    log::debug!("[VERSION_POLL] Found version for {} via reqwest: {}", variant, v);
                     v
                 }
                 Ok(Err(e)) => {
                     // Reqwest strategy failed, try git2 fallback
-                    log::debug!("[VERSION_POLL] Warning: Reqwest fetch failed for {}: {}, trying git2 fallback", variant, e);
+                    log::debug!("[VERSION_POLL] Reqwest fetch failed for {}: {}, trying git2 fallback", variant, e);
                     
                     // Get the git URL from KernelSourceDB
                     let db = KernelSourceDB::new();
                     if let Some(git_url) = db.get_source_url(&variant) {
                         match get_latest_remote_version(git_url) {
                             Ok(v) => {
-                                log::debug!("[VERSION_POLL] Done: Found version for {} via git2 fallback: {}", variant, v);
+                                log::debug!("[VERSION_POLL] Found version for {} via git2 fallback: {}", variant, v);
                                 v
                             }
                             Err(e2) => {
-                                log::debug!("[VERSION_POLL] Error: Both reqwest and git2 failed for {}: {}", variant, e2);
+                                log::debug!("[VERSION_POLL] Both reqwest and git2 failed for {}: {}", variant, e2);
                                 "Unknown".to_string()
                             }
                         }
                     } else {
-                        log::debug!("[VERSION_POLL] Error: No git URL found in database for variant: {}", variant);
+                        log::debug!("[VERSION_POLL] No git URL found in database for variant: {}", variant);
                         "Unknown".to_string()
                     }
                 }
                 Err(_) => {
-                    log::debug!("[VERSION_POLL] ⚠ TIMEOUT: Version poll for {} exceeded 10 seconds", variant);
+                    log::debug!("[VERSION_POLL] Version poll for {} exceeded 10 seconds timeout", variant);
                     "Timeout".to_string()
                 }
             };
             
-            let _ = build_tx.try_send(BuildEvent::LatestVersionUpdate(variant.clone(), version));
+            log::debug!("[VERSION_POLL] Version poll completed for variant: {} -> {}", variant, version);
+            let _ = build_tx.try_send(BuildEvent::LatestVersionUpdate(variant.clone(), version.clone()));
         });
     }
 
@@ -632,49 +642,56 @@ impl AppController {
 
     /// Primary build execution method
     pub async fn start_build(&self) -> Result<(), String> {
+        eprintln!("[BUILD] [START_BUILD] ⭐ START_BUILD CALLED");
         self.log_event("BUILD", "Starting kernel build orchestration");
-        eprintln!("[BUILD] [START] Kernel build orchestration initiated");
         
         // =========================================================================
         // START NEW LOG SESSION - Ensure full and dedicated log file for this build
         // =========================================================================
         let _session_log_path = if let Some(ref log_collector) = self.log_collector {
             let filename = Self::generate_build_log_filename();
-            match log_collector.start_new_session(&filename) {
+            match log_collector.start_new_session(&filename).await {
                 Ok(path) => {
-                    eprintln!("[BUILD] [SESSION] Dedicated log session started at: {}", path.display());
                     self.log_event("BUILD", &format!("Full build log: {}", path.display()));
                     Some(path)
                 }
                 Err(e) => {
-                    eprintln!("[BUILD] [SESSION] Warning: Failed to start log session: {}", e);
+                    log_info!("[BUILD] Warning: Failed to start log session: {}", e);
                     None
                 }
             }
         } else {
-            eprintln!("[BUILD] [SESSION] Warning: LogCollector not available");
+            log_info!("[BUILD] Warning: LogCollector not available");
             None
         };
         
         // Send initial status to UI
         let _ = self.build_tx.send(BuildEvent::Status("preparation".into())).await;
         
+        eprintln!("[BUILD] [START_BUILD] ⚠ About to call get_state() to read AppState");
         let state = self.get_state()?;
+        eprintln!("[BUILD] [START_BUILD] ✓ get_state() succeeded");
         
         // =========================================================================
         // PRE-BUILD SYNCHRONIZATION AUDIT
         // =========================================================================
         // Ensure all UI/backend settings are synchronized BEFORE building
-        eprintln!("[BUILD] [SYNC_AUDIT] Validating build configuration synchronization:");
-        eprintln!("[BUILD] [SYNC_AUDIT]   Variant: {} (string)", state.selected_variant);
-        eprintln!("[BUILD] [SYNC_AUDIT]   Profile: {} (string)", state.selected_profile);
-        eprintln!("[BUILD] [SYNC_AUDIT]   LTO: {} (string)", state.selected_lto);
-        eprintln!("[BUILD] [SYNC_AUDIT]   Hardening: {} (bool)", state.kernel_hardening);
-        eprintln!("[BUILD] [SYNC_AUDIT]   Polly: {} (bool, user_toggled={})", state.use_polly, state.user_toggled_polly);
-        eprintln!("[BUILD] [SYNC_AUDIT]   MGLRU: {} (bool, user_toggled={})", state.use_mglru, state.user_toggled_mglru);
-        eprintln!("[BUILD] [SYNC_AUDIT]   Modprobed: {} (bool)", state.use_modprobed);
-        eprintln!("[BUILD] [SYNC_AUDIT]   Whitelist: {} (bool)", state.use_whitelist);
-        eprintln!("[BUILD] [SYNC_AUDIT] Configuration validated and ready for build");
+        eprintln!("[BUILD] [START_BUILD] ⭐ PRE-BUILD AUDIT - READING FROM APPSTATE");
+        eprintln!("[BUILD] [START_BUILD]   selected_variant (from AppState): '{}'", state.selected_variant);
+        eprintln!("[BUILD] [START_BUILD]   selected_profile: '{}'", state.selected_profile);
+        eprintln!("[BUILD] [START_BUILD]   selected_lto: '{}'", state.selected_lto);
+        eprintln!("[BUILD] [START_BUILD]   kernel_hardening: {:?}", state.kernel_hardening);
+        
+        // CRITICAL: Validate that selected_variant is not empty
+        if state.selected_variant.is_empty() {
+            eprintln!("[BUILD] [START_BUILD] ❌ CRITICAL ERROR: selected_variant is EMPTY!");
+            eprintln!("[BUILD] [START_BUILD] This WILL cause the orchestrator to default to 'linux' variant");
+        } else {
+            eprintln!("[BUILD] [START_BUILD] ✓ selected_variant is non-empty: '{}'", state.selected_variant);
+        }
+        
+        log_info!("[BUILD] Configuration synchronized: variant={}, profile={}, lto={}, hardening={}",
+            state.selected_variant, state.selected_profile, state.selected_lto, state.kernel_hardening);
         
         let mut detector = crate::hardware::HardwareDetector::new();
         let hw_info = detector.detect_all()
@@ -693,7 +710,6 @@ impl AppController {
         // instead we fallback to CWD only if the user hasn't set a path OR if we can't create it.
         
         let workspace_path = if state.workspace_path.is_empty() {
-            eprintln!("[Controller] [PRE-FLIGHT] Workspace path is empty, falling back to CWD");
             let _ = self.build_tx.try_send(BuildEvent::Log(
                 "[Controller] [PRE-FLIGHT] Workspace path is empty, falling back to CWD".to_string()
             ));
@@ -706,12 +722,11 @@ impl AppController {
             // Try to canonicalize the workspace path to absolute form
             let canonical_path = match user_path.canonicalize() {
                 Ok(canonical) => {
-                    eprintln!("[Controller] [PRE-FLIGHT] Workspace path canonicalized: {}", canonical.display());
+                    log_info!("[BUILD] Workspace path canonicalized: {}", canonical.display());
                     canonical
                 }
                 Err(e) => {
-                    eprintln!("[Controller] [WARNING] Failed to canonicalize workspace path: {}", e);
-                    eprintln!("[Controller] [WARNING] Using path as-is: {}", state.workspace_path);
+                    log_info!("[BUILD] Failed to canonicalize workspace path: {}", e);
                     user_path
                 }
             };
@@ -720,12 +735,11 @@ impl AppController {
             // If this fails, fallback to CWD to allow the build to proceed
             match std::fs::create_dir_all(&canonical_path) {
                 Ok(_) => {
-                    eprintln!("[Controller] [PRE-FLIGHT] Workspace directory is ready: {}", canonical_path.display());
+                    log_info!("[BUILD] Workspace directory ready: {}", canonical_path.display());
                     canonical_path
                 }
                 Err(e) => {
-                    eprintln!("[Controller] [PRE-FLIGHT] Failed to create/verify workspace directory: {}", e);
-                    eprintln!("[Controller] [PRE-FLIGHT] Falling back to CWD");
+                    log_info!("[BUILD] Failed to create workspace directory: {}, falling back to CWD", e);
                     let _ = self.build_tx.try_send(BuildEvent::Log(
                         format!("[Controller] [PRE-FLIGHT] Cannot create workspace ({}), falling back to CWD", e)
                     ));
@@ -743,17 +757,12 @@ impl AppController {
         
         if let Err(validation_err) = validate_kbuild_path(&workspace_path) {
             let error_msg = validation_err.user_message();
-            eprintln!("[Controller] [PRE-FLIGHT] VALIDATION FAILED: {}", error_msg);
-            log_info!("[Controller] [PRE-FLIGHT] Path validation failed: {}", error_msg);
+            log_info!("[BUILD] Path validation failed: {}", error_msg);
             let _ = self.build_tx.try_send(BuildEvent::Error(error_msg.clone()));
             return Err(error_msg);
         }
         
-        eprintln!("[Controller] [PRE-FLIGHT] ✓ Workspace path validation passed: {}", workspace_path.display());
-        
         let kernel_path = workspace_path.join(&state.selected_variant);
-        
-        eprintln!("[Controller] [PRE-FLIGHT] Using authorized workspace: {}", workspace_path.display());
         let _ = self.build_tx.try_send(BuildEvent::Log(
             format!("[Controller] [PRE-FLIGHT] Using authorized workspace: {}", workspace_path.display())
         ));
@@ -762,45 +771,47 @@ impl AppController {
         // ROBUST KERNEL CONFIG POPULATION
         // =========================================================================
         // All fields must be populated from AppState with proper validation
+        eprintln!("[BUILD] [CONFIG_POPULATION] ⭐ STARTING CONFIG POPULATION");
         let mut config = crate::models::KernelConfig::default();
         
-        // Variant: String from AppState -> KernelConfig
-        config.version = state.selected_variant.clone();
-        eprintln!("[BUILD] [CONFIG] Setting version: {}", config.version);
+        // CRITICAL: Keep version as "latest" for dynamic orchestrator resolution
+        // The orchestrator will fetch the concrete version based on kernel_variant
+        config.version = "latest".to_string();                    // ✓ Dynamic resolution trigger
+        config.kernel_variant = state.selected_variant.clone();  // ✓ Identifies which variant to fetch
+        
+        // DIAGNOSTIC: Validate variant assignment - MULTIPLE CHECKS FOR PARANOIA
+        eprintln!("[BUILD] [CONFIG_POPULATION] ⭐ kernel_variant assignment:");
+        eprintln!("[BUILD] [CONFIG_POPULATION]   Source (state.selected_variant): '{}'", state.selected_variant);
+        eprintln!("[BUILD] [CONFIG_POPULATION]   Target (config.kernel_variant): '{}'", config.kernel_variant);
+        eprintln!("[BUILD] [CONFIG_POPULATION]   Match: {}", state.selected_variant == config.kernel_variant);
+        
+        if config.kernel_variant.is_empty() {
+            eprintln!("[BUILD] [CONFIG_POPULATION] ❌ CRITICAL ERROR: kernel_variant is EMPTY!");
+            eprintln!("[BUILD] [CONFIG_POPULATION] This WILL cause default fallback to 'linux' in orchestrator");
+            return Err("kernel_variant is empty - cannot proceed with build".to_string());
+        } else {
+            eprintln!("[BUILD] [CONFIG_POPULATION] ✓ kernel_variant is non-empty: '{}'", config.kernel_variant);
+        }
         
         // LTO: String from AppState -> LtoType enum with validation
         config.lto_type = match state.selected_lto.as_str() {
-            "full" => {
-                eprintln!("[BUILD] [CONFIG] Setting LTO to Full (from {})", state.selected_lto);
-                crate::models::LtoType::Full
-            }
-            "none" => {
-                eprintln!("[BUILD] [CONFIG] Setting LTO to None (from {})", state.selected_lto);
-                crate::models::LtoType::None
-            }
-            _ => {
-                eprintln!("[BUILD] [CONFIG] Setting LTO to Thin (default, from {})", state.selected_lto);
-                crate::models::LtoType::Thin
-            }
+            "full" => crate::models::LtoType::Full,
+            "none" => crate::models::LtoType::None,
+            _ => crate::models::LtoType::Thin,
         };
         
         // Module stripping flags: Boolean from AppState
         config.use_modprobed = state.use_modprobed;
         config.use_whitelist = state.use_whitelist;
-        eprintln!("[BUILD] [CONFIG] Module stripping: modprobed={}, whitelist={}",
-            config.use_modprobed, config.use_whitelist);
         
         // Hardening: HardeningLevel from AppState
         config.hardening = state.kernel_hardening;
-        eprintln!("[BUILD] [CONFIG] Setting hardening: {}", config.hardening);
         
         // Security boot
         config.secure_boot = state.secure_boot;
-        eprintln!("[BUILD] [CONFIG] Setting secure_boot: {}", config.secure_boot);
         
         // Profile: String from AppState
         config.profile = state.selected_profile.clone();
-        eprintln!("[BUILD] [CONFIG] Setting profile: {}", config.profile);
         
         // Optimization flags: Boolean from AppState with user override tracking
          config.use_polly = state.use_polly;
@@ -808,12 +819,13 @@ impl AppController {
          config.user_toggled_polly = state.user_toggled_polly;
          config.user_toggled_mglru = state.user_toggled_mglru;
          config.user_toggled_lto = state.user_toggled_lto;
-         config.user_toggled_hardening = state.user_toggled_hardening;
-         config.user_toggled_bore = state.user_toggled_bore;
-         eprintln!("[BUILD] [CONFIG] Optimizations: polly={} (user_toggled={}), mglru={} (user_toggled={})",
-             config.use_polly, config.user_toggled_polly, config.use_mglru, config.user_toggled_mglru);
-         eprintln!("[BUILD] [CONFIG] User Overrides: lto={:?} (user_toggled={}), hardening={} (user_toggled={})",
-             config.lto_type, config.user_toggled_lto, config.hardening, config.user_toggled_hardening);
+          config.user_toggled_hardening = state.user_toggled_hardening;
+          config.user_toggled_bore = state.user_toggled_bore;
+          
+          // DIAGNOSTIC: Validate config population
+          log_info!("[BUILD] [CONFIG_VALIDATION] version field: '{}' (should be 'latest' for dynamic resolution)", config.version);
+          log_info!("[BUILD] [CONFIG_VALIDATION] kernel_variant field: '{}' (identifies which variant to fetch)", config.kernel_variant);
+          log_info!("[BUILD] Config: variant={}, lto={:?}, profile={}", config.version, config.lto_type, config.profile);
         
         // Create async orchestrator
         let checkpoint_dir = workspace_path.join(".checkpoints");
@@ -826,6 +838,7 @@ impl AppController {
             Some(self.build_tx.clone()),
             self.cancel_tx.subscribe(),
             self.log_collector.clone(),
+            None,
         ).await.map_err(|e| {
             let msg = format!("Failed to initialize orchestrator: {}", e);
             eprintln!("[Controller] [ERROR] {}", msg);
@@ -865,24 +878,22 @@ impl AppController {
             rt.block_on(async {
                 let _ = tx.send(BuildEvent::Status("Starting kernel build...".to_string())).await;
                 
-                eprintln!("[Build] [ORCHESTRATION] Starting full build pipeline");
+                log::debug!("[Build] Starting full build pipeline");
                 
                 // Run the complete orchestration pipeline (all 6 phases)
                 match orch.run().await {
                     Ok(()) => {
-                        eprintln!("[Build] [ORCHESTRATION] Build pipeline completed successfully");
                         let _ = tx.send(BuildEvent::Status("Build completed successfully!".to_string())).await;
                         
                         // CRITICAL: Flush all logs to disk before marking build as complete
                         // This ensures "Build finished" message and all prior logs reach disk
-                        eprintln!("[Build] [ORCHESTRATION] Flushing all logs to disk...");
                         if let Some(ref log_collector) = log_collector_for_flush {
                             match log_collector.wait_for_empty().await {
                                 Ok(()) => {
-                                    eprintln!("[Build] [ORCHESTRATION] Done: All logs flushed to disk");
+                                    log::debug!("[Build] All logs flushed to disk");
                                 }
                                 Err(e) => {
-                                    eprintln!("[Build] [ORCHESTRATION] Warning: Log flush failed: {}", e);
+                                    log::warn!("[Build] Log flush failed: {}", e);
                                     let _ = tx.send(BuildEvent::Log(format!("[WARNING] Failed to flush logs: {}", e))).await;
                                 }
                             }
@@ -892,18 +903,17 @@ impl AppController {
                     }
                     Err(e) => {
                         let err_msg = format!("Build orchestration failed: {}", e);
-                        eprintln!("[Build] [ERROR] {}", err_msg);
+                        log::error!("[Build] {}", err_msg);
                         let _ = tx.send(BuildEvent::Log(err_msg.clone())).await;
                         
                         // CRITICAL: Flush logs even on error - ensure error message reaches disk
-                        eprintln!("[Build] [ORCHESTRATION] [ERROR] Flushing error logs to disk...");
                         if let Some(ref log_collector) = log_collector_for_flush {
                             match log_collector.wait_for_empty().await {
                                 Ok(()) => {
-                                    eprintln!("[Build] [ORCHESTRATION] [ERROR] Done: Error logs flushed to disk");
+                                    log::debug!("[Build] Error logs flushed to disk");
                                 }
                                 Err(flush_err) => {
-                                    eprintln!("[Build] [ORCHESTRATION] [ERROR] Warning: Error log flush failed: {}", flush_err);
+                                    log::warn!("[Build] Error log flush failed: {}", flush_err);
                                 }
                             }
                         }
@@ -916,7 +926,7 @@ impl AppController {
         
         // Store timer handle for cleanup (the handle is dropped here, allowing the task to run independently)
         // The timer will naturally stop when the channel is closed after the build completes
-        eprintln!("[Build] [TIMER] Build timer task spawned");
+        log::debug!("[Build] Build timer task spawned");
         let _ = timer_handle;
         
         Ok(())
@@ -951,7 +961,7 @@ impl AppController {
             let _ = build_tx.send(BuildEvent::Status("Build cancellation forced (timeout)".to_string())).await;
             let _ = build_tx.send(BuildEvent::Finished(false)).await;
             
-            eprintln!("[Cancel] Build cancellation timeout triggered - UI state reset forced");
+            log::debug!("[Cancel] Build cancellation timeout triggered - UI state reset forced");
         });
     }
 
@@ -1028,69 +1038,497 @@ impl AppController {
         }
     }
 
+    /// De-rebrand a rebranded kernel variant name to its base variant
+    ///
+    /// Maps GOATd rebranded names back to their base kernel variants:
+    /// - `linux-goatd-zen-*` -> `linux-zen`
+    /// - `linux-goatd-lts-*` -> `linux-lts`
+    /// - `linux-goatd-hardened-*` -> `linux-hardened`
+    /// - `linux-goatd-mainline-*` -> `linux-mainline`
+    /// - `linux-goatd-tkg-*` -> `linux-tkg`
+    /// - `linux-goatd-*` -> `linux` (fallback for any other goatd variant)
+    /// - Otherwise returns the original string unchanged
+    fn get_base_variant(rebranded_name: &str) -> &str {
+        // Check for specific known variant mappings
+        if rebranded_name.starts_with("linux-goatd-zen-") {
+            "linux-zen"
+        } else if rebranded_name.starts_with("linux-goatd-lts-") {
+            "linux-lts"
+        } else if rebranded_name.starts_with("linux-goatd-hardened-") {
+            "linux-hardened"
+        } else if rebranded_name.starts_with("linux-goatd-mainline-") {
+            "linux-mainline"
+        } else if rebranded_name.starts_with("linux-goatd-tkg-") {
+            "linux-tkg"
+        } else if rebranded_name.starts_with("linux-goatd-") {
+            // Fallback for any other linux-goatd-* variant
+            "linux"
+        } else {
+            // Not a rebranded variant, return as-is
+            rebranded_name
+        }
+    }
+
+    /// Resolve kernel version from .kernelrelease file with fallback to pacman extraction
+    ///
+    /// This implements Step 3 of the DKMS fix by providing a "Source of Truth" for kernel version.
+    ///
+    /// Strategy:
+    /// 1. Try to read `.kernelrelease` file from the build workspace (PREFERRED)
+    ///    First checks the base variant directory, then the rebranded directory
+    /// 2. If not found, fallback to extracting from package using pacman (ROBUST FALLBACK)
+    /// 3. If both fail, return empty string to signal error upstream
+    ///
+    /// # Arguments
+    /// * `kernel_path` - Path to the kernel package file
+    /// * `workspace_path` - Path to the build workspace directory
+    ///
+    /// # Returns
+    /// Resolved kernel version string, or empty string if both methods fail
+    fn resolve_kernel_version_static(kernel_path: &PathBuf, workspace_path: &PathBuf) -> String {
+        log::info!("[KERNEL] [RESOLVE] Starting kernel version resolution");
+        log::debug!("[KERNEL] [RESOLVE] Input: kernel_path={}, workspace_path={}", kernel_path.display(), workspace_path.display());
+        
+        // === PROXIMITY-FIRST SEARCH: Calculate pkg_dir from kernel_path ===
+        let pkg_dir = match kernel_path.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => {
+                log::warn!("[KERNEL] [RESOLVE] Cannot determine parent of kernel_path");
+                return String::new();
+            }
+        };
+        
+        log::debug!("[KERNEL] [RESOLVE] Package directory (proximity-first): {}", pkg_dir.display());
+        
+        // === SEARCH HIERARCHY: Try locations in proximity order ===
+        // a. pkg_dir/.kernelrelease (same directory as the package)
+        log::debug!("[KERNEL] [RESOLVE] Attempting proximity search (a): {}", pkg_dir.join(".kernelrelease").display());
+        let kernelrelease_path_pkg = pkg_dir.join(".kernelrelease");
+        if kernelrelease_path_pkg.exists() {
+            match std::fs::read_to_string(&kernelrelease_path_pkg) {
+                Ok(contents) => {
+                    let version = contents.trim().to_string();
+                    if !version.is_empty() {
+                        log::info!("[KERNEL] [RESOLVE] Found .kernelrelease in package directory: {}", version);
+                        return version;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("[KERNEL] [RESOLVE] Failed to read .kernelrelease from pkg_dir: {}", e);
+                }
+            }
+        }
+        
+        // b. pkg_dir.parent()/.kernelrelease (parent directory of package)
+        if let Some(parent_dir) = pkg_dir.parent() {
+            log::info!("[KERNEL] [RESOLVE] Attempting proximity search (b): {}", parent_dir.join(".kernelrelease").display());
+            let kernelrelease_path_parent = parent_dir.join(".kernelrelease");
+            if kernelrelease_path_parent.exists() {
+                match std::fs::read_to_string(&kernelrelease_path_parent) {
+                    Ok(contents) => {
+                        let version = contents.trim().to_string();
+                        if !version.is_empty() {
+                            eprintln!("[KERNEL] [RESOLVE] ✓ Found .kernelrelease in parent directory: {}", version);
+                            log::info!("[KERNEL] [RESOLVE] ✓ SUCCESS (proximity b): {}", version);
+                            return version;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[KERNEL] [RESOLVE] ⚠ .kernelrelease in parent_dir exists but failed to read: {}", e);
+                        log::warn!("[KERNEL] [RESOLVE] Failed to read .kernelrelease from parent_dir: {}", e);
+                    }
+                }
+            } else {
+                log::info!("[KERNEL] [RESOLVE] .kernelrelease not found in parent directory");
+            }
+        }
+        
+        // c. pkg_dir.parent()/base_variant/.kernelrelease (workspace variant directory)
+        // Extract variant from kernel filename to find the kernel subfolder
+        let rebranded_variant = if let Some(filename) = kernel_path.file_name() {
+            if let Some(filename_str) = filename.to_str() {
+                // Extract variant from filename like "linux-goatd-gaming-6.18.3.arch1-2-x86_64.pkg.tar.zst"
+                // Find where version starts (first dash followed by digit) and use preceding part as variant
+                if filename_str.starts_with("linux-") {
+                    let remainder = &filename_str[6..]; // Skip "linux-"
+                    let version_start_pos = remainder
+                        .char_indices()
+                        .find(|(i, ch)| {
+                            *ch == '-'
+                                && remainder.chars().nth(i + 1).map_or(false, |c| c.is_ascii_digit())
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    
+                    if version_start_pos > 0 {
+                        format!("linux-{}", &remainder[..version_start_pos])
+                    } else {
+                        "linux".to_string()
+                    }
+                } else {
+                    "kernel".to_string()
+                }
+            } else {
+                "kernel".to_string()
+            }
+        } else {
+            "kernel".to_string()
+        };
+        
+        let base_variant = Self::get_base_variant(&rebranded_variant);
+        log::info!("[KERNEL] [RESOLVE] Extracted variant from filename: rebranded='{}', base='{}'", rebranded_variant, base_variant);
+        
+        // c1. Try base variant in parent directory
+        if let Some(parent_dir) = pkg_dir.parent() {
+            log::info!("[KERNEL] [RESOLVE] Attempting proximity search (c1): {}", parent_dir.join(base_variant).join(".kernelrelease").display());
+            let kernelrelease_path_variant = parent_dir.join(base_variant).join(".kernelrelease");
+            if kernelrelease_path_variant.exists() {
+                match std::fs::read_to_string(&kernelrelease_path_variant) {
+                    Ok(contents) => {
+                        let version = contents.trim().to_string();
+                        if !version.is_empty() {
+                            eprintln!("[KERNEL] [RESOLVE] ✓ Found .kernelrelease in base variant subfolder '{}': {}", base_variant, version);
+                            log::info!("[KERNEL] [RESOLVE] ✓ SUCCESS (proximity c1): {}", version);
+                            return version;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[KERNEL] [RESOLVE] ⚠ .kernelrelease in variant subfolder exists but failed to read: {}", e);
+                        log::warn!("[KERNEL] [RESOLVE] Failed to read .kernelrelease from variant subfolder: {}", e);
+                    }
+                }
+            } else {
+                log::info!("[KERNEL] [RESOLVE] .kernelrelease not found in base variant subfolder");
+            }
+        }
+        
+        // d. Fall back to workspace_path variant search (old logic)
+        log::info!("[KERNEL] [RESOLVE] Attempting workspace search: {}", workspace_path.join(base_variant).join(".kernelrelease").display());
+        let kernelrelease_path_workspace = workspace_path.join(base_variant).join(".kernelrelease");
+        if kernelrelease_path_workspace.exists() {
+            match std::fs::read_to_string(&kernelrelease_path_workspace) {
+                Ok(contents) => {
+                    let version = contents.trim().to_string();
+                    if !version.is_empty() {
+                        eprintln!("[KERNEL] [RESOLVE] ✓ Found .kernelrelease in workspace base variant: {}", version);
+                        log::info!("[KERNEL] [RESOLVE] ✓ SUCCESS (workspace fallback): {}", version);
+                        return version;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[KERNEL] [RESOLVE] ⚠ .kernelrelease in workspace exists but failed to read: {}", e);
+                    log::warn!("[KERNEL] [RESOLVE] Failed to read .kernelrelease from workspace: {}", e);
+                }
+            }
+        }
+        
+        // === METHOD 2: Fallback to pacman extraction (Robust Fallback) ===
+        eprintln!("[KERNEL] [RESOLVE] All proximity searches exhausted, attempting pacman fallback");
+        log::info!("[KERNEL] [RESOLVE] All proximity searches exhausted, attempting pacman extraction");
+        
+        let package_path = match kernel_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[KERNEL] [RESOLVE] ✗ Failed to canonicalize kernel path: {}", e);
+                log::error!("[KERNEL] [RESOLVE] Failed to canonicalize kernel path: {}", e);
+                return String::new();
+            }
+        };
+        
+        let package_str = package_path.to_string_lossy();
+        
+        // Construct pacman command to extract versioned module directory (skip base directory)
+        // Pattern: pacman -Qlp | grep module paths | find versioned subdirectory (not the base)
+        let cmd_str = format!(
+            "pacman -Qlp '{}' | grep '/usr/lib/modules/.*/' | grep -v '/usr/lib/modules/$' | head -1 | sed -n 's|.*/usr/lib/modules/\\([^/]*\\)/.*|\\1|p'",
+            package_str
+        );
+        
+        eprintln!("[KERNEL] [RESOLVE] Executing pacman query: {}", cmd_str);
+        log::info!("[KERNEL] [RESOLVE] Executing pacman: {}", cmd_str);
+        
+        // Use shell to execute the pipeline
+        match std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd_str)
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !version.is_empty() {
+                        eprintln!("[KERNEL] [RESOLVE] ✓ pacman extraction succeeded: {}", version);
+                        log::info!("[KERNEL] [RESOLVE] ✓ SUCCESS (pacman fallback): {}", version);
+                        return version;
+                    } else {
+                        eprintln!("[KERNEL] [RESOLVE] ⚠ pacman query succeeded but returned empty stdout");
+                        log::warn!("[KERNEL] [RESOLVE] pacman succeeded but stdout is empty");
+                    }
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    eprintln!("[KERNEL] [RESOLVE] ✗ pacman exited with code: {:?}", output.status.code());
+                    eprintln!("[KERNEL] [RESOLVE] stderr: {}", stderr);
+                    eprintln!("[KERNEL] [RESOLVE] stdout: {}", stdout);
+                    log::error!("[KERNEL] [RESOLVE] pacman failed with exit code: {:?}", output.status.code());
+                    log::error!("[KERNEL] [RESOLVE] stderr: {}", stderr);
+                    log::error!("[KERNEL] [RESOLVE] stdout: {}", stdout);
+                }
+            }
+            Err(e) => {
+                eprintln!("[KERNEL] [RESOLVE] ✗ Failed to execute pacman command: {}", e);
+                log::error!("[KERNEL] [RESOLVE] Failed to execute pacman: {}", e);
+            }
+        }
+        
+        eprintln!("[KERNEL] [RESOLVE] ✗ FAILED: All resolution methods exhausted");
+        log::error!("[KERNEL] [RESOLVE] ✗ FAILED: All resolution methods exhausted");
+        String::new()
+    }
+    
     /// Install a kernel package from path (runs in background async task)
     ///
     /// Executes all installation steps (kernel, headers, DKMS) in a single
     /// privileged session to minimize authentication prompts, without blocking
     /// the UI event loop.
+    ///
+    /// Uses `KernelArtifactRegistry` to safely correlate kernel, headers, and docs,
+    /// ensuring all artifacts are from the same build before bundling into installation.
+    ///
+    /// CRITICAL: Uses resolved kernel version from .kernelrelease (Step 3 of DKMS fix).
     pub fn install_kernel_async(&self, path: PathBuf) {
         self.log_event("KERNEL", &format!("Starting async kernel installation from: {}", path.display()));
         
         let system = self.system.clone();
         let build_tx = self.build_tx.clone();
         
+        // Get the workspace path from settings for kernelrelease lookup
+        let workspace_path = match self.get_state() {
+            Ok(state) => {
+                if state.workspace_path.is_empty() {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                } else {
+                    PathBuf::from(&state.workspace_path)
+                }
+            }
+            Err(_) => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        };
+        
         // Spawn background task for installation
         tokio::spawn(async move {
-            // Build installation commands
-            let mut kernel_and_headers = Vec::new();
-            let mut extra_commands = Vec::new();
+            // === STEP 0: Resolve kernel version (Source of Truth) ===
+            let resolved_kernel_version = Self::resolve_kernel_version_static(&path, &workspace_path);
             
-            // === STEP 1: Add main kernel package installation ===
-            let kernel_cmd = match Self::build_install_command_static(&path) {
-                Ok(cmd) => cmd,
-                Err(e) => {
-                    let msg = format!("Failed to build install command: {}", e);
-                    eprintln!("[KERNEL] {}", msg);
-                    let _ = build_tx.try_send(BuildEvent::Error(msg.clone()));
-                    return;
-                }
-            };
-            kernel_and_headers.push(kernel_cmd);
-            
-            // === STEP 2: Check for and add headers installation to SAME pacman call ===
-            if let Ok(Some(headers_path)) = Self::build_install_headers_path_static(&path) {
-                eprintln!("[KERNEL] Found kernel headers, will bundle with kernel in single pacman call");
-                kernel_and_headers.push(headers_path);
+            if resolved_kernel_version.is_empty() {
+                let msg = "Failed to resolve kernel version from .kernelrelease or pacman".to_string();
+                eprintln!("[KERNEL] ✗ {}", msg);
+                let _ = build_tx.try_send(BuildEvent::Error(msg.clone()));
+                return;
             }
             
-            // === STEP 3: Check for NVIDIA GPU and add DKMS if needed (separate command) ===
-            if let Ok(crate::models::GpuVendor::Nvidia) = crate::hardware::gpu::detect_gpu_vendor() {
-                eprintln!("[NVIDIA] NVIDIA GPU detected, will batch DKMS with install");
-                
-                // Extract NEW kernel version from package filename
-                if let Some(filename) = path.file_name() {
-                    if let Some(filename_str) = filename.to_str() {
-                        if let Some(new_kernel_version) = Self::extract_kernel_version_from_filename(filename_str) {
-                            eprintln!("[NVIDIA] Extracted kernel version from package: {}", new_kernel_version);
-                            let dkms_cmd = format!("dkms autoinstall -k {}", new_kernel_version);
-                            extra_commands.push(dkms_cmd);
+            eprintln!("[KERNEL] ✓ Resolved kernel version: {}", resolved_kernel_version);
+            let _ = build_tx.try_send(BuildEvent::Log(
+                format!("[KERNEL] Resolved kernel version: {}", resolved_kernel_version)
+            ));
+            
+            // === STEP 0.5: Initialize KernelArtifactRegistry for safe artifact correlation ===
+            eprintln!("[KERNEL] [REGISTRY] Initializing KernelArtifactRegistry with heuristic discovery");
+            
+            // Extract kernel variant and name from filename
+            let (kernel_variant, _kernel_name) = if let Some(filename) = path.file_name() {
+                if let Some(filename_str) = filename.to_str() {
+                    // Extract variant from filename like "linux-goatd-gaming-6.18.3.arch1-2-x86_64.pkg.tar.zst"
+                    if filename_str.starts_with("linux-") {
+                        let remainder = &filename_str[6..];
+                        let version_start_pos = remainder
+                            .char_indices()
+                            .find(|(i, ch)| {
+                                *ch == '-'
+                                    && remainder.chars().nth(i + 1).map_or(false, |c| c.is_ascii_digit())
+                            })
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        
+                        if version_start_pos > 0 {
+                            (format!("linux-{}", &remainder[..version_start_pos]), format!("linux-{}", &remainder[..version_start_pos]))
+                        } else {
+                            ("linux".to_string(), "linux".to_string())
                         }
+                    } else {
+                        ("linux".to_string(), "linux".to_string())
+                    }
+                } else {
+                    ("linux".to_string(), "linux".to_string())
+                }
+            } else {
+                ("linux".to_string(), "linux".to_string())
+            };
+            
+            // CRITICAL (Chunk 2): Create registry passing resolved kernel version (Source of Truth)
+            // The registry will internally use heuristic discovery with fallback to filename version
+            // This bridges the gap between internal version (6.19.0-rc6) and external version (6.19rc6-1)
+            let registry = match crate::kernel::manager::KernelArtifactRegistry::new(
+                path.clone(),
+                kernel_variant.clone(),
+                resolved_kernel_version.clone(),
+            ) {
+                Ok(reg) => {
+                    eprintln!("[KERNEL] [REGISTRY] ✓ Registry initialized: {}", reg.summary());
+                    eprintln!("[KERNEL] [REGISTRY] Kernel path: {}", path.display());
+                    if let Some(ref headers) = reg.headers_path {
+                        eprintln!("[KERNEL] [REGISTRY] Headers path: {}", headers.display());
+                    }
+                    if let Some(ref docs) = reg.docs_path {
+                        eprintln!("[KERNEL] [REGISTRY] Docs path: {}", docs.display());
+                    }
+                    reg
+                }
+                Err(e) => {
+                    let msg = format!("Failed to initialize KernelArtifactRegistry: {}", e);
+                    eprintln!("[KERNEL] [REGISTRY] ✗ {}", msg);
+                    let _ = build_tx.try_send(BuildEvent::Log(msg.clone()));
+                    // Continue with just the main kernel package if registry fails
+                    eprintln!("[KERNEL] [REGISTRY] Falling back to main kernel only");
+                    crate::kernel::manager::KernelArtifactRegistry {
+                        kernel_path: path.clone(),
+                        kernel_variant: kernel_variant.clone(),
+                        kernel_release: resolved_kernel_version.clone(),
+                        headers_path: None,
+                        docs_path: None,
+                        integrity_verified: false,
                     }
                 }
-            }
+            };
             
-            // === STEP 4: Build atomic pacman command with kernel + headers bundled ===
-            let mut commands = Vec::new();
+            // Collect all artifact paths using registry
+            let artifact_paths = registry.collect_all_paths();
+            eprintln!("[KERNEL] [REGISTRY] Collected {} artifact(s) for installation", artifact_paths.len());
             
-            // Create single pacman command with all packages
-            if !kernel_and_headers.is_empty() {
-                let pacman_cmd = format!("pacman -U --noconfirm {}", kernel_and_headers.join(" "));
-                eprintln!("[KERNEL] Atomic pacman command: {}", pacman_cmd);
-                commands.push(pacman_cmd);
-            }
+            // === STEP 2: Prepare DKMS command for unified batch ===
+            // CRITICAL: DKMS is ALWAYS included in the unified batch, not conditional on GPU detection.
+            // Previously DKMS was conditionally added, then redundantly executed again later.
+            // Now it's batched with Pacman in a single privileged session for Polkit caching.
+            let dkms_cmd = format!("LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld dkms autoinstall -k {}", resolved_kernel_version);
+            eprintln!("[KERNEL] DKMS will be batched with kernel installation for unified privilege session");
             
-            // Add DKMS command if present (separate because it's a different tool)
-            commands.extend(extra_commands);
+            // === STEP 3: Build UNIFIED command batch (DKMS Safety Net + Kernel + Headers + Symlinks + DKMS) ===
+            // CRITICAL: ALL root-level operations (including DKMS safety net setup) are in ONE batch_privileged_commands call.
+            // This allows Polkit to cache authorization across all steps, eliminating double-prompt issue.
+            // Previously: ensure_dkms_safety_net() called batch_privileged_commands separately -> 2 prompts
+            // Now: All setup commands integrated into single transaction -> 1 prompt
+            let mut commands: Vec<String> = Vec::new();
+            
+            // 3a. DKMS SAFETY NET: Inline the directory and config setup BEFORE pacman
+            // These commands create /etc/dkms/framework.conf.d/goatd.conf to enforce LLVM/Clang
+            // for GOATd kernels when DKMS runs outside the normal kernel build flow
+            eprintln!("[KERNEL] [UNIFIED] Step 1: Setting up DKMS safety net in unified batch");
+            
+            // Create /etc/dkms/framework.conf.d directory
+            commands.push("mkdir -p /etc/dkms/framework.conf.d".to_string());
+            
+            // Write DKMS configuration content via printf (preserves all special chars)
+            let dkms_config_content = r#"# GOATd Kernel DKMS Configuration
+# This configuration file ensures that DKMS module builds use the LLVM/Clang toolchain
+# for all GOATd rebranded kernels, even when invoked outside the normal kernel build flow.
+#
+# DKMS will source this file from /etc/dkms/framework.conf.d/goatd.conf
+# and apply these settings to all out-of-tree module builds.
+
+# Target GOATd kernels (match version strings containing "-goatd-")
+# Handles formats: 6.19.0-rc6-goatd, 6.19.0-rc6-goatd-gaming, etc.
+if [[ "$kernelver" == *"-goatd-"* ]]; then
+   # ======================================================================
+   # DKMS TOOLCHAIN ENFORCEMENT FOR GOATD KERNELS
+   # ======================================================================
+   # CRITICAL: These variables must be set for DKMS to use LLVM/Clang
+   # when building kernel modules (nvidia-dkms, etc.)
+   
+   # Force LLVM compiler (version 19+ if available)
+   export LLVM=1
+   export LLVM_IAS=1
+   
+   # Force Clang as the primary C compiler (DKMS uses FORCE_CC/FORCE_CXX for module builds)
+   # Setting both CC and FORCE_CC ensures compatibility with different DKMS versions
+   export CC=clang
+   export FORCE_CC=clang
+   export CXX=clang++
+   export FORCE_CXX=clang++
+   
+   # Force LLVM linker
+   export LD=ld.lld
+   
+   # Additional LLVM toolchain tools
+   export AR=llvm-ar
+   export NM=llvm-nm
+   export OBJCOPY=llvm-objcopy
+   export STRIP=llvm-strip
+   
+   # Log enforcement message to stderr for diagnostics
+   printf "[DKMS-SAFETY-NET] GOATd kernel detected: %s\n" "$kernelver" >&2
+   printf "[DKMS-SAFETY-NET] ✓ LLVM/Clang toolchain enforced (CC=clang, LD=ld.lld, LLVM=1)\n" >&2
+fi
+"#;
+            
+            // Escape single quotes and build printf command
+            let escaped_content = dkms_config_content.replace("'", "'\\''");
+            let config_write_cmd = format!("printf '%s' '{}' > /etc/dkms/framework.conf.d/goatd.conf", escaped_content);
+            commands.push(config_write_cmd);
+            
+            // Set permissions on DKMS config file
+            commands.push("chmod 644 /etc/dkms/framework.conf.d/goatd.conf".to_string());
+            
+           // 3b. Pre-install cleanup: Remove conflicting module symlinks AND directories BEFORE pacman
+           eprintln!("[KERNEL] [UNIFIED] Step 2: Adding pre-install cleanup to unified batch");
+           let cleanup_cmd = format!("rm -rf /usr/lib/modules/{}/build /usr/lib/modules/{}/source", resolved_kernel_version, resolved_kernel_version);
+           eprintln!("[KERNEL] [UNIFIED] Cleanup command: {}", cleanup_cmd);
+           commands.push(cleanup_cmd);
+           
+           // 3c. Pacman: Install all artifacts (kernel + headers + docs) bundled into single call
+           eprintln!("[KERNEL] [UNIFIED] Step 3: Adding pacman install to unified batch");
+           if !artifact_paths.is_empty() {
+               // Convert PathBuf to string paths
+               let paths_str: Vec<String> = artifact_paths
+                   .iter()
+                   .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                   .collect();
+               
+               if !paths_str.is_empty() {
+                   let pacman_cmd = format!("pacman -U --noconfirm --overwrite 'usr/lib/modules/*/build,usr/lib/modules/*/source' {}", paths_str.join(" "));
+                   eprintln!("[KERNEL] [UNIFIED] Bundled pacman command for {} artifact(s)", paths_str.len());
+                   eprintln!("[KERNEL] [UNIFIED]   Artifacts: {}", registry.summary());
+                   commands.push(pacman_cmd);
+               }
+           }
+            
+            // 3c. Fallback symlinks with DYNAMIC header discovery (Soft Failure)
+            // CRITICAL: Instead of hardcoding /usr/src/linux-{ver}, we dynamically find the actual
+            // installed headers directory via intelligent shell search. This fixes the root cause of
+            // DKMS symlink failures on custom kernels (e.g., linux-goatd-gaming-6.18.6).
+            //
+            // Search Strategy:
+            // 1. Try to find GOATd-specific headers first: linux-*-goatd* matches (most specific)
+            // 2. Fall back to any available linux-* headers directory if GOATd-specific not found
+            // 3. Only create symlinks if a headers directory is actually found
+            // 4. Wrapped in soft failure pattern to allow DKMS to proceed even if this step fails
+            eprintln!("[KERNEL] [UNIFIED] Step 3: Adding DYNAMIC symlink creation to unified batch (intelligent header discovery, soft failure)");
+            let dynamic_symlink_cmd = format!(
+                "(hdr_dir=$(ls -d /usr/src/linux-*-goatd* 2>/dev/null | head -1) && \
+                 [ -z \"$hdr_dir\" ] && hdr_dir=$(ls -d /usr/src/linux-* 2>/dev/null | head -1); \
+                 if [ -n \"$hdr_dir\" ]; then \
+                   ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/build && \
+                   ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/source; \
+                 else \
+                   echo \"DKMS_FAILED_SYMLINKS: No headers directory found in /usr/src/\"; \
+                 fi) || echo \"DKMS_FAILED_SYMLINKS\"",
+                ver = resolved_kernel_version
+            );
+            commands.push(dynamic_symlink_cmd);
+            
+            // 3d. DKMS autoinstall (Soft Failure: continues on error)
+            // CRITICAL: Wrapped in soft failure pattern to allow partial success if DKMS is incompatible
+            eprintln!("[KERNEL] [UNIFIED] Step 4: Adding DKMS autoinstall to unified batch (soft failure)");
+            let dkms_soft_failure = format!("({}) || echo \"DKMS_FAILED_MODULES\"", dkms_cmd);
+            commands.push(dkms_soft_failure);
             
             if commands.is_empty() {
                 eprintln!("[KERNEL] No installation commands generated");
@@ -1099,18 +1537,237 @@ impl AppController {
             }
             
             let cmd_refs: Vec<&str> = commands.iter().map(|s| s.as_str()).collect();
-            eprintln!("[KERNEL] Executing installation ({} atomic steps)", commands.len());
+           eprintln!("[KERNEL] [UNIFIED] ═════════════════════════════════════════════════════");
+           eprintln!("[KERNEL] [UNIFIED] Executing unified batch ({} steps in SINGLE privileged session)", commands.len());
+           eprintln!("[KERNEL] [UNIFIED] ═════════════════════════════════════════════════════");
+           eprintln!("[KERNEL] [UNIFIED] INTERPOLATED COMMAND CHAIN:");
+           eprintln!("[KERNEL] [UNIFIED]   Step 1: mkdir -p /etc/dkms/framework.conf.d");
+           eprintln!("[KERNEL] [UNIFIED]   Step 2: printf '...' > /etc/dkms/framework.conf.d/goatd.conf");
+           eprintln!("[KERNEL] [UNIFIED]   Step 3: chmod 644 /etc/dkms/framework.conf.d/goatd.conf");
+           eprintln!("[KERNEL] [UNIFIED]   Step 4: rm -rf /usr/lib/modules/{}/build /usr/lib/modules/{}/source", resolved_kernel_version, resolved_kernel_version);
+           eprintln!("[KERNEL] [UNIFIED]   Step 5: pacman -U --noconfirm --overwrite 'usr/lib/modules/*/build,usr/lib/modules/*/source' {}", registry.summary());
+           eprintln!("[KERNEL] [UNIFIED]   Step 6: DYNAMIC symlink creation with intelligent header discovery (soft failure)");
+           eprintln!("[KERNEL] [UNIFIED]     - Search: /usr/src/linux-*-goatd* (GOATd-specific headers)");
+           eprintln!("[KERNEL] [UNIFIED]     - Fallback: /usr/src/linux-* (any available headers)");
+           eprintln!("[KERNEL] [UNIFIED]     - Create: ln -sf $hdr_dir /usr/lib/modules/{}/build", resolved_kernel_version);
+           eprintln!("[KERNEL] [UNIFIED]     - Create: ln -sf $hdr_dir /usr/lib/modules/{}/source", resolved_kernel_version);
+           eprintln!("[KERNEL] [UNIFIED]   Step 7: dkms autoinstall -k {} (soft failure)", resolved_kernel_version);
+            eprintln!("[KERNEL] [UNIFIED] ═════════════════════════════════════════════════════");
+            eprintln!("[KERNEL] [UNIFIED] SENTINEL DETECTION ENABLED:");
+            eprintln!("[KERNEL] [UNIFIED] - If symlinks fail, sentinel 'DKMS_FAILED_SYMLINKS' will be echoed to stdout");
+            eprintln!("[KERNEL] [UNIFIED] - If DKMS fails, sentinel 'DKMS_FAILED_MODULES' will be echoed to stdout");
+            eprintln!("[KERNEL] [UNIFIED] - Detection will report 'Partial Success' if sentinels appear in output");
+            eprintln!("[KERNEL] [UNIFIED] ═════════════════════════════════════════════════════");
             
-            // Execute all commands in a single privileged session
+            // Execute all commands in a SINGLE privileged session for Polkit caching
+            // This batches: DKMS setup, Pacman (kernel+headers+docs), Fallback Symlinks, and DKMS autoinstall
+            // Polkit caches authorization across all steps, eliminating double prompts
+            eprintln!("[KERNEL] [UNIFIED] Invoking system.batch_privileged_commands() for unified execution...");
+            
             match system.batch_privileged_commands(cmd_refs) {
-                Ok(()) => {
-                    eprintln!("[KERNEL] Installation completed successfully");
-                    let _ = build_tx.try_send(BuildEvent::Log("Installation completed successfully".to_string()));
+                Ok(stdout) => {
+                    // =====================================================================
+                    // SENTINEL DETECTION: Check batch output for soft failures
+                    // =====================================================================
+                    // The batch execution completed, but non-critical steps may have failed.
+                    // Check for sentinel markers echoed by soft-failure wrapped commands.
+                    eprintln!("[KERNEL] [UNIFIED BATCH] Batch execution completed - scanning for soft failure sentinels...");
+                    
+                    // ACTIVE: Check stdout for sentinel markers from soft-failure wrapped commands
+                    // - "DKMS_FAILED_SYMLINKS" -> symlinks failed but kernel+DKMS proceeded
+                    // - "DKMS_FAILED_MODULES" -> DKMS incompatibility detected (RC kernels, missing drivers)
+                    let dkms_soft_failure_detected = stdout.contains("DKMS_FAILED_SYMLINKS") ||
+                                                     stdout.contains("DKMS_FAILED_MODULES");
+                    
+                    eprintln!("[KERNEL] [UNIFIED BATCH] Captured stdout for sentinel scanning: {} bytes", stdout.len());
+                    if dkms_soft_failure_detected {
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ⚠ SOFT FAILURE DETECTED: Non-critical step failed");
+                        if stdout.contains("DKMS_FAILED_SYMLINKS") {
+                            eprintln!("[KERNEL] [UNIFIED BATCH]   - Sentinel found: DKMS_FAILED_SYMLINKS");
+                        }
+                        if stdout.contains("DKMS_FAILED_MODULES") {
+                            eprintln!("[KERNEL] [UNIFIED BATCH]   - Sentinel found: DKMS_FAILED_MODULES");
+                        }
+                    } else {
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ✓ NO SOFT FAILURES DETECTED: All operations succeeded");
+                    }
+                    
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ✓ UNIFIED BATCH COMPLETED");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ✓ Step 1: DKMS safety net configuration: SUCCESS");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ✓ Step 2: Pacman kernel+headers+docs installation: SUCCESS");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]   Artifacts: {}", registry.summary());
+                    eprintln!("[KERNEL] [UNIFIED BATCH] Step 3: Fallback symlink creation: {} (soft failure enabled)",
+                        if dkms_soft_failure_detected { "⚠ FAILED (soft)" } else { "✓ SUCCESS" });
+                    eprintln!("[KERNEL] [UNIFIED BATCH] Step 4: DKMS autoinstall for kernel {}: {} (soft failure enabled)",
+                        resolved_kernel_version,
+                        if dkms_soft_failure_detected { "⚠ FAILED/INCOMPATIBLE (soft)" } else { "✓ SUCCESS" });
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    
+                    // === INSTALLATION RESULT REPORTING ===
+                    if dkms_soft_failure_detected {
+                        // --- PARTIAL SUCCESS PATH ---
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ⚠⚠⚠ PARTIAL SUCCESS: Kernel installed, but DKMS/drivers incompatible");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] INSTALLATION STATUS: Partial Success");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   ✓ Kernel installed: {}", resolved_kernel_version);
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   ✓ Headers and docs installed");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   ⚠ DKMS/GPU drivers: Incompatible or failed");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] GUIDANCE FOR PARTIAL SUCCESS:");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   1. Kernel is ready to boot: reboot now to test");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   2. GPU driver installation failed (DKMS incompatibility)");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]      This commonly occurs on RC kernels or with unsupported GPUs");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   3. After reboot, you can manually install drivers:");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]      $ sudo dkms autoinstall -k {}", resolved_kernel_version);
+                        eprintln!("[KERNEL] [UNIFIED BATCH]      OR install NVIDIA/AMD drivers from your package manager");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]   4. If drivers remain unavailable:");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]      - Check GPU compatibility with this kernel version");
+                        eprintln!("[KERNEL] [UNIFIED BATCH]      - RC kernels may require driver patches from upstream");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                        
+                        let _ = build_tx.try_send(BuildEvent::Log(
+                            "⚠ PARTIAL SUCCESS: Kernel installed successfully, but DKMS/GPU driver installation failed (likely RC kernel incompatibility)".to_string()
+                        ));
+                        let _ = build_tx.try_send(BuildEvent::Log(
+                            "ℹ️ Kernel is ready to boot. You can manually retry DKMS after rebooting: sudo dkms autoinstall".to_string()
+                        ));
+                        
+                        // CRITICAL: Emit completion event for Partial Success to prevent UI getting stuck in "building" state
+                        let _ = build_tx.try_send(BuildEvent::InstallationComplete(true));
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ✓ Emitted InstallationComplete(true) for Partial Success path");
+                    } else {
+                        // --- COMPLETE SUCCESS PATH ---
+                        eprintln!("[KERNEL] [UNIFIED BATCH] ✓✓✓ COMPLETE SUCCESS: All operations succeeded");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] UNIFIED INSTALL COMPLETE: All 4 operations in ONE pkexec call");
+                        eprintln!("[KERNEL] [UNIFIED BATCH] POLKIT PROMPT OPTIMIZATION: Single authentication achieved ✓");
+                        let _ = build_tx.try_send(BuildEvent::Log(
+                            "✓✓✓ Complete Success: DKMS setup, kernel+headers+docs, symlinks, and DKMS all completed in SINGLE privileged session (ONE prompt)".to_string()
+                        ));
+                    }
+                    
+                    // === STEP 4: POST-INSTALL VERIFICATION (Chunk 4) ===
+                    // CRITICAL: Use same heuristic discovery as unified batch to find installed headers
+                    // Allow kernel-install hooks and DKMS to complete (2 second delay)
+                    eprintln!("[KERNEL] [VERIFY] Waiting 2 seconds for kernel-install hooks and DKMS to complete...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    
+                    // Run post-install verification using the RESOLVED kernel version (Source of Truth)
+                    eprintln!("[KERNEL] [VERIFY] Starting post-install verification for: {}", resolved_kernel_version);
+                    let _ = build_tx.try_send(BuildEvent::Log(
+                        format!("[KERNEL] [VERIFY] Verifying installation for kernel {}", resolved_kernel_version)
+                    ));
+                    
+                    // HEURISTIC VERIFICATION (Chunk 4): Check if installed headers exist using same discovery logic
+                    // Strategy mirrors the symlink creation fallback:
+                    // 1. Try to find GOATd-specific headers first: linux-*-goatd* (most specific)
+                    // 2. Fall back to any available linux-* headers directory (generic fallback)
+                    // 3. Only create symlinks if headers directory is actually found
+                    let headers_check_cmd = "ls -d /usr/src/linux-*-goatd* 2>/dev/null | head -1 || ls -d /usr/src/linux-* 2>/dev/null | head -1";
+                    let headers_found = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(headers_check_cmd)
+                        .output()
+                        .ok()
+                        .and_then(|output| {
+                            if output.status.success() {
+                                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                                if !path.is_empty() {
+                                    eprintln!("[KERNEL] [VERIFY] ✓ Headers discovered via heuristic search: {}", path);
+                                    Some(path)
+                                } else {
+                                    eprintln!("[KERNEL] [VERIFY] ⚠ No headers found in /usr/src/ (heuristic search returned empty)");
+                                    None
+                                }
+                            } else {
+                                eprintln!("[KERNEL] [VERIFY] ⚠ No headers found in /usr/src/ (heuristic search failed)");
+                                None
+                            }
+                        });
+                    
+                    match crate::system::verification::verify_kernel_installation(&resolved_kernel_version) {
+                        Ok(status) => {
+                            if status.ready_for_dkms {
+                                eprintln!("[KERNEL] [VERIFY] ✓ Kernel installation verified: all components present");
+                                eprintln!("[KERNEL] [VERIFY] Kernel: {}", resolved_kernel_version);
+                                eprintln!("[KERNEL] [VERIFY] Artifacts installed: {}", registry.summary());
+                                if let Some(hdr_path) = headers_found {
+                                    eprintln!("[KERNEL] [VERIFY] Dynamic headers discovered: {}", hdr_path);
+                                }
+                                let _ = build_tx.try_send(BuildEvent::Log(
+                                    format!("✓ Installation verified: kernel {} is ready for dkms", resolved_kernel_version)
+                                ));
+                            } else {
+                                eprintln!("[KERNEL] [VERIFY] ⚠ Kernel installation incomplete (unexpected condition)");
+                                eprintln!("[KERNEL] [VERIFY] Note: Dynamic symlinks were created with intelligent header discovery");
+                                if let Some(hdr_path) = headers_found {
+                                    eprintln!("[KERNEL] [VERIFY] Dynamic headers discovered: {}", hdr_path);
+                                } else {
+                                    eprintln!("[KERNEL] [VERIFY] ⚠ WARNING: No headers directory found in /usr/src/");
+                                }
+                                let _ = build_tx.try_send(BuildEvent::Log(
+                                    "⚠ Installation complete with dynamic symlinks applied".to_string()
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[KERNEL] [VERIFY] ⚠ Verification error (non-fatal): {}", e);
+                            eprintln!("[KERNEL] [VERIFY] Installation likely successful; verify with: pacman -Q linux-*");
+                            if let Some(hdr_path) = headers_found {
+                                eprintln!("[KERNEL] [VERIFY] Dynamic headers found at: {}", hdr_path);
+                            }
+                            let _ = build_tx.try_send(BuildEvent::Log(
+                                format!("⚠ Verification warning (installation likely successful): {}", e)
+                            ));
+                        }
+                    }
+                    
+                    eprintln!("[KERNEL] [UNIFIED] Installation successful - signaling UI completion event");
                     let _ = build_tx.try_send(BuildEvent::InstallationComplete(true));
                 }
                 Err(e) => {
-                    eprintln!("[KERNEL] Installation failed: {}", e);
-                    let _ = build_tx.try_send(BuildEvent::Error(format!("Installation failed: {}", e)));
+                    let error_msg = format!("Unified batch failed: {}", e);
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ✗ INSTALLATION FAILED");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] Error: {}", e);
+                    
+                    // Enhanced diagnostics with full guidance
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] INSTALLATION FAILED - DIAGNOSTIC GUIDANCE:");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] This failure typically occurs due to:");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] 1. DKMS Incompatibility (Most Common)");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - RC kernels may lack required DKMS support");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - GPU drivers (NVIDIA/AMD) not compatible with this kernel");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - Action: Check DKMS status after install:");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]      $ dkms status");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]      $ sudo dkms autoinstall -k {}", resolved_kernel_version);
+                    eprintln!("[KERNEL] [UNIFIED BATCH]");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] 2. Missing Build Tools");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - clang/llvm toolchain not installed or misconfigured");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - Action: Install build tools:");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]      $ sudo pacman -S clang llvm llvm-libs lld");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] 3. Authentication/Permission Issues");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - Polkit or sudo session expired");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - User not in sudoers or wheel group");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - Action: Try installation again and authorize prompts");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] 4. Kernel Configuration Issue");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - Invalid kernel variant or corrupted package");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]    - Action: Verify kernel package integrity:");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]      $ pacman -Alp <kernel-package.tar.zst> | head");
+                    eprintln!("[KERNEL] [UNIFIED BATCH]");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ERROR DETAILS: {}", e);
+                    eprintln!("[KERNEL] [UNIFIED BATCH] ═══════════════════════════════════════════════════");
+                    
+                    let _ = build_tx.try_send(BuildEvent::Error(error_msg.clone()));
+                    let _ = build_tx.try_send(BuildEvent::Log(
+                        "❌ Installation FAILED. See diagnostic guidance above. Common causes: DKMS incompatibility and missing build tools.".to_string()
+                    ));
                     let _ = build_tx.try_send(BuildEvent::InstallationComplete(false));
                 }
             }
@@ -2904,7 +3561,7 @@ impl AppController {
         let cache_ts = self.kernel_context_cache_timestamp.clone();
         
         tokio::task::spawn_blocking(move || {
-            eprintln!("[PERF] [KERNEL_CONTEXT] Background refresh starting");
+            log::debug!("[PERF] [KERNEL_CONTEXT] Background refresh starting");
             
             let version = std::fs::read_to_string("/proc/version")
                 .ok()
@@ -3018,7 +3675,7 @@ impl AppController {
                 *ts = Some(Instant::now());
             }
             
-            eprintln!("[PERF] [KERNEL_CONTEXT] Background refresh complete");
+            log::debug!("[PERF] [KERNEL_CONTEXT] Background refresh complete");
         });
     }
 

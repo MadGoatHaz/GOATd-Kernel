@@ -1,0 +1,78 @@
+#!/bin/bash
+# Kernel Package Template for GOATd Kernel
+# Based on Arch Linux's official linux package
+
+# Package metadata
+pkgbase=linux
+pkgname=(linux linux-headers)
+pkgver=6.12
+pkgrel=1
+arch=(x86_64)
+url="https://github.com/archlinux/linux"
+license=(GPL2)
+makedepends=(bc libelf pahole python python-sphinx texinfo base-devel git)
+options=('!strip')
+
+# Source configuration
+_srcname=linux-${pkgver}
+source=("https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/linux-${pkgver}.tar.xz")
+sha256sums=('SKIP')
+
+# Kernel release will be detected at runtime in package_linux() and package_linux-headers()
+
+prepare() {
+    cd $_srcname
+    
+    # Copy configuration file if it exists
+    if [[ -f ../config ]]; then
+        cp ../config .config
+    fi
+    
+    # Ensure configuration is consistent with kernel version
+    make olddefconfig
+    
+    # Note: Kernel branding (CONFIG_LOCALVERSION) is applied by the patcher
+    # This template is intentionally generic to support rebranding
+}
+
+build() {
+    cd $_srcname
+    make -j$(nproc) KERNELRELEASE="${pkgver}-${pkgrel}" all
+}
+
+package_linux() {
+    cd $_srcname
+    make KERNELRELEASE="${pkgver}-${pkgrel}" INSTALL_MOD_PATH="$pkgdir" modules_install
+    
+    # Install kernel image
+    install -Dm644 arch/x86/boot/bzImage "$pkgdir/boot/vmlinuz-linux"
+    
+    # Install System.map
+    install -Dm644 System.map "$pkgdir/boot/System.map-${pkgver}-${pkgrel}"
+    
+    # Install kernel config
+    install -Dm644 .config "$pkgdir/boot/config-${pkgver}-${pkgrel}"
+    
+    # Install kernel release info
+    echo "${pkgver}-${pkgrel}" > "$pkgdir/boot/.kernelrelease"
+}
+
+package_linux-headers() {
+    cd $_srcname
+    make INSTALL_HDR_PATH="$pkgdir/usr" headers_install
+    
+    # Copy Kbuild and Makefile
+    mkdir -p "$pkgdir/usr/src/linux-${pkgver}-${pkgrel}"
+    cp -a Makefile "$pkgdir/usr/src/linux-${pkgver}-${pkgrel}/"
+    cp -a Kbuild "$pkgdir/usr/src/linux-${pkgver}-${pkgrel}/"
+    
+    # Install Rust metadata files using find instead of glob expansion
+    # This ensures proper handling when .rmeta or .so files may not exist
+    local builddir="$pkgdir/usr/src/linux-${pkgver}-${pkgrel}"
+    if [ -d rust ]; then
+        echo "Installing Rust files..."
+        # Use find to safely handle cases where .rmeta or .so files may not exist
+        find rust -maxdepth 1 -type f -name '*.rmeta' -exec install -Dt "$builddir/rust" -m644 {} +
+        find rust -maxdepth 1 -type f -name '*.so' -exec install -Dt "$builddir/rust" {} +
+    fi
+}

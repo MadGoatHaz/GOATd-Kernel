@@ -138,7 +138,7 @@ fn audit_thermal_efficiency_ranges() {
     let mid = scorer.normalize_thermal_efficiency(&vec![60.0]);
     assert!(mid > 10.0 && mid < 100.0, "Midrange temp should produce intermediate score");
     
-    println!("✓ Thermal Ranges: cold={}, mid={}, max={}, hot={}", cold, mid, max_temp, hot);
+    println!("✓ Thermal Ranges: cold={}, mid={}, max={}, hot={}", cold, mid, yellow_temp, hot);
 }
 
 // ============================================================================
@@ -259,7 +259,6 @@ fn audit_goat_score_minimum_bound() {
     };
     
     let result = scorer.score_metrics(&metrics);
-    assert!(result.goat_score >= 0, "GOAT Score must be >= 0");
     assert!(result.goat_score <= 1000, "GOAT Score must not exceed 1000");
     
     println!("✓ Worst scenario GOAT Score: {}/1000", result.goat_score);

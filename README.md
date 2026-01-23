@@ -1,6 +1,6 @@
 # GOATd Kernel Builder
 
-**A single-developer kernel orchestration suite for Arch Linux built with pure Rust core, egui native UI, and Tokio async runtime. Delivers custom Linux kernels via hardware-aware system, modprobed-db driver auto-discovery with Desktop Experience safety-net whitelist, and high-fidelity performance diagnostics.**
+**A single-developer kernel orchestration suite for Arch Linux built with pure Rust core, egui native UI, and Tokio async runtime. Delivers laboratory-grade hardened custom Linux kernels via hardware-aware system, modprobed-db driver auto-discovery with Desktop Experience safety-net whitelist, robust build pipeline with environment purity controls, and high-fidelity performance diagnostics.**
 
 ## Purpose
 
@@ -120,6 +120,13 @@ The project uses a unified Rust + egui stack with a modular component architectu
 ---
 
 ## Key Features
+
+### -1. **Laboratory-Grade Hardening & Robust Build Pipeline**
+- **Environment Purity Controls**: The build pipeline enforces a hermetically sealed compilation environment via explicit environment variable management, preventing contamination from system-wide CFLAGS or compiler flags
+- **5-Phase Build Protection Stack**: Multi-layered enforcement gates (PHASE G1 PREBUILD LTO Hard Enforcer, PHASE G2 Post-Modprobed Hard Enforcer, PHASE G2.5 Post-Setting-Config Restorer, PHASE E1 Post-Oldconfig LTO Enforcement, PHASE 5 Surgical Atomic Enforcer) ensure configuration integrity across all makepkg stages
+- **Definitive Rust Headers Fix**: Circumvents upstream kernel build system limitations via AST-aware regex injection and atomic path resolution, guaranteeing DKMS out-of-tree driver compatibility across diverse kernel configurations
+- **Atomic Configuration Management**: All kernel `.config` modifications use atomic swap patterns with comprehensive backups, preventing partial configuration corruption
+- **PYTHONDONTWRITEBYTECODE Enforcement**: Prevents bytecode cache contamination in build artifacts, ensuring reproducible, clean package outputs free from path leakage
 
 ### 0. **Out-of-the-Box Reliability: Zero-Touch Automation**
 - **Arch Linux Auto-Install**: Single command `./goatdkernel.sh` triggers automatic detection and installation of all required system packages via `pacman` (Rust, LLVM/Clang, base-devel, etc.)

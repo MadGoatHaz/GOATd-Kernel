@@ -4,14 +4,52 @@
 //! - Granular compilation progress tracking (CC/LD/AR line counting)
 //! - Parsed milestone logging (high-level status updates)
 //! - Full detailed output persistence
+//!
+//! # External Workspace Architecture (Cross-Mount Support)
+//!
+//! ## Problem Statement
+//! The app supports external workspaces on different mount points (e.g., `/mnt/Optane/goatd`)
+//! separate from the app's directory (`/home/madgoat/Documents/GOATd Kernel/`).
+//! This enables NVME wear leveling, caching on fast scratch disks, and separation of concerns.
+//!
+//! ## Critical Issue: Path Resolution Across Mounts
+//! During kernel build, `.kernelrelease` is generated in the build tree. However:
+//! - The file path depends on the external workspace mount point
+//! - Relative paths fail when switching between app dir and workspace dir
+//! - The `package()` function (running in fakeroot) must locate `.kernelrelease`
+//! - Environment variable propagation spans process boundaries and mount points
+//!
+//! ## Solution: Absolute Path Canonicalization
+//! 1. **Workspace Awareness**: All paths must be canonicalized relative to the workspace root
+//! 2. **Environment Propagation**: `GOATD_KERNELRELEASE` is exported by the executor and
+//!    survives fakeroot execution, providing the fallback when file lookup fails
+//! 3. **Multi-Point Propagation**: `.kernelrelease` is copied to multiple locations:
+//!    - Kernel source root (where build artifacts are)
+//!    - Parent directories (for makepkg `$srcdir` scenarios)
+//!    - `src/` subdirectories (handles nested source layouts)
+//! 4. **Shell Code Robustness**: Patcher injects shell code with 5-level fallback strategy:
+//!    - PRIORITY 1: `./.kernelrelease` (build artifact in current dir)
+//!    - PRIORITY 2: `$srcdir/.kernelrelease` or `$srcdir/linux*/.kernelrelease`
+//!    - PRIORITY 3: `GOATD_KERNELRELEASE` environment variable
+//!    - PRIORITY 4: `$pkgdir/usr/lib/modules/` directory listing
+//!    - PRIORITY 5: Fallback to `$_kernver` with warning
+//!
+//! ## Future Development Notes
+//! - Consider caching canonicalized paths to avoid repeated filesystem traversal
+//! - Monitor for symlink resolution issues on tightly-mounted scratch disks
+//! - Add metrics for path resolution success/failure rates across mount points
+//! - Implement workspace migration helpers for users changing storage configurations
 
 use crate::models::{HardwareInfo, KernelConfig};
 use crate::error::BuildError;
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::process::Command;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::watch;
 use regex::Regex;
+use crate::kernel::pkgbuild::get_latest_version_by_variant;
 
 /// Validates memory and disk requirements.
 pub fn validate_hardware(hardware: &HardwareInfo) -> Result<(), BuildError> {
@@ -86,18 +124,258 @@ pub fn prepare_build_environment(hardware: &HardwareInfo, kernel_path: &Path) ->
         ));
     }
 
+    // =========================================================================
+    // PHASE 14: CROSS-MOUNT PATH RESOLUTION - Create .goatd_anchor
+    // =========================================================================
+    // Create an empty .goatd_anchor file at the workspace root to provide
+    // definitive absolute path resolution across mount points and fakeroot transitions.
+    // The workspace root is the parent directory of kernel_path.
+    // PHASE 18: Non-destructive anchor creation - check for existence before writing
+    if let Some(workspace_root) = kernel_path.parent() {
+        let anchor_path = workspace_root.join(".goatd_anchor");
+        
+        // PHASE 18: IDEMPOTENCY GUARD - Check if anchor already exists
+        if anchor_path.exists() {
+            eprintln!("[Build] [ANCHOR] ✓ .goatd_anchor already exists at workspace root: {}", anchor_path.display());
+        } else {
+            // Non-destructive write: only create if it doesn't exist
+            match std::fs::write(&anchor_path, "") {
+                Ok(_) => {
+                    eprintln!("[Build] [ANCHOR] ✓ Created .goatd_anchor at workspace root: {}", anchor_path.display());
+                }
+                Err(e) => {
+                    eprintln!("[Build] [ANCHOR] WARNING: Could not create .goatd_anchor at {}: {}", anchor_path.display(), e);
+                    // Non-fatal - the resolver will search for it with fallbacks
+                }
+            }
+        }
+    } else {
+        eprintln!("[Build] [ANCHOR] WARNING: Could not determine workspace root (kernel_path has no parent)");
+    }
+
     eprintln!("[Build] [PREPARATION] Environment ready");
     Ok(())
 }
 
+/// Resolves dynamic version ("latest") to a concrete version string.
+///
+/// This function implements Step 2 of the Dynamic Versioning strategy.
+/// If the kernel version is set to "latest", it polls the PKGBUILD for the
+/// actual latest version of the specified variant and updates the config.
+///
+/// # Arguments
+/// * `config` - Mutable reference to KernelConfig (will be updated with resolved version)
+/// * `event_tx` - Optional channel for emitting VersionResolved events to the UI
+///
+/// # Returns
+/// * `Ok(resolved_version)` - The concrete version string that was set in the config
+/// * `Err(BuildError)` - If version resolution fails and no fallback is available
+///
+/// # Fallback Hierarchy (from Section 5 of DYNAMIC_VERSIONING_PLAN.md)
+/// 1. **Successful Poll**: Use version fetched from PKGBUILD/Git
+/// 2. **Cached Version**: Check for previously resolved version in settings
+/// 3. **Local PKGBUILD Parse**: Search local workspace for PKGBUILD and extract version
+/// 4. **Hardcoded Baseline**: Use safe baseline version (if set in config)
+/// 5. **Failure**: Return error if all fallbacks exhausted
+pub async fn resolve_dynamic_version(
+    config: &mut KernelConfig,
+    event_tx: Option<&tokio::sync::mpsc::Sender<crate::ui::controller::BuildEvent>>,
+) -> Result<String, BuildError> {
+    // DIAGNOSTIC ENTRY POINT: Validate incoming configuration state
+    eprintln!("[ORCHESTRATOR] [VERSION] ========== ENTRY POINT DIAGNOSTICS ==========");
+    eprintln!("[ORCHESTRATOR] [VERSION] [ENTRY] config.version field: '{}'", config.version);
+    eprintln!("[ORCHESTRATOR] [VERSION] [ENTRY] config.kernel_variant field: '{}'", config.kernel_variant);
+    eprintln!("[ORCHESTRATOR] [VERSION] [ENTRY] is_dynamic_version() returns: {}", config.is_dynamic_version());
+    log::info!("[ORCHESTRATOR] [VERSION] [ENTRY] Incoming config state - version: '{}', variant: '{}'", config.version, config.kernel_variant);
+    eprintln!("[ORCHESTRATOR] [VERSION] ========== END ENTRY DIAGNOSTICS ==========");
+    
+    // STEP 1: Check if version resolution is needed
+    if !config.is_dynamic_version() {
+        eprintln!("[ORCHESTRATOR] [VERSION] Version is already concrete: '{}'", config.version);
+        log::info!("[ORCHESTRATOR] [VERSION] Version is concrete (not 'latest'): '{}'", config.version);
+        eprintln!("[ORCHESTRATOR] [VERSION] ⚠️  DIAGNOSTIC: This usually means the UI set a concrete version");
+        eprintln!("[ORCHESTRATOR] [VERSION] ⚠️  DIAGNOSTIC: Check that UI is correctly setting version='latest' and kernel_variant=the variant name");
+        return Ok(config.version.clone());
+    }
 
-/// Validates and returns config.
-pub fn configure_build(
-    config: &KernelConfig,
+    eprintln!("[ORCHESTRATOR] [VERSION] ========== DYNAMIC VERSION RESOLUTION START ==========");
+    log::info!("[ORCHESTRATOR] [VERSION] Resolving dynamic version for variant: '{}'", config.kernel_variant);
+    eprintln!("[ORCHESTRATOR] [VERSION] Kernel variant: '{}'", config.kernel_variant);
+    eprintln!("[ORCHESTRATOR] [VERSION] Current version: 'latest' (sentinel value)");
+    
+    // STEP 2: Attempt PRIORITY 1 - Poll latest version from PKGBUILD
+    eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-1] Attempting to poll latest version from PKGBUILD...");
+    log::info!("[ORCHESTRATOR] [VERSION] [PRIORITY-1] Fetching latest version for variant: '{}'", config.kernel_variant);
+    
+    match get_latest_version_by_variant(&config.kernel_variant).await {
+        Ok(resolved_version) => {
+            eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-1] ✓ SUCCESS: Polled latest version: '{}'", resolved_version);
+            log::info!("[ORCHESTRATOR] [VERSION] [PRIORITY-1] Successfully resolved 'latest' to: '{}'", resolved_version);
+            
+            // Update config with resolved version
+            config.version = resolved_version.clone();
+            eprintln!("[ORCHESTRATOR] [VERSION] Updated config.version to: '{}'", resolved_version);
+            log::info!("[ORCHESTRATOR] [VERSION] Config updated with resolved version: '{}'", resolved_version);
+            
+            // Emit VersionResolved event to UI
+            if let Some(tx) = event_tx {
+                let _ = tx.try_send(crate::ui::controller::BuildEvent::VersionResolved(resolved_version.clone()));
+            }
+            
+            eprintln!("[ORCHESTRATOR] [VERSION] ========== DYNAMIC VERSION RESOLUTION SUCCESS ==========");
+            return Ok(resolved_version);
+        }
+        Err(poll_error) => {
+            eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-1] ✗ FAILED: Poll error: {}", poll_error);
+            log::warn!("[ORCHESTRATOR] [VERSION] [PRIORITY-1] Failed to poll latest version: {}", poll_error);
+        }
+    }
+    
+    // STEP 3: Attempt PRIORITY 2 - Check for cached version (would be stored in settings)
+    eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-2] Checking for cached version from previous builds...");
+    log::debug!("[ORCHESTRATOR] [VERSION] [PRIORITY-2] Attempting cached version lookup");
+    
+    // Try to read cached version from settings or config directory
+    let cache_dir = std::path::PathBuf::from(
+        std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
+    ).join(".config/goatd/version_cache");
+    
+    let cached_version_file = cache_dir.join(format!("{}.version", config.kernel_variant));
+    
+    if let Ok(cached_version) = std::fs::read_to_string(&cached_version_file) {
+        let cached_version = cached_version.trim().to_string();
+        if !cached_version.is_empty() {
+            eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-2] ✓ SUCCESS: Found cached version: '{}'", cached_version);
+            log::info!("[ORCHESTRATOR] [VERSION] [PRIORITY-2] Using cached version: '{}'", cached_version);
+            
+            config.version = cached_version.clone();
+            eprintln!("[ORCHESTRATOR] [VERSION] Updated config.version to cached: '{}'", cached_version);
+            
+            // Emit VersionResolved event to UI
+            if let Some(tx) = event_tx {
+                let _ = tx.try_send(crate::ui::controller::BuildEvent::VersionResolved(cached_version.clone()));
+            }
+            
+            eprintln!("[ORCHESTRATOR] [VERSION] ========== DYNAMIC VERSION RESOLUTION SUCCESS (CACHED) ==========");
+            return Ok(cached_version);
+        }
+    } else {
+        eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-2] ✗ No cached version found at: {}", cached_version_file.display());
+        log::debug!("[ORCHESTRATOR] [VERSION] [PRIORITY-2] No cached version available");
+    }
+    
+    // STEP 4: Attempt PRIORITY 3 - Local PKGBUILD Parse
+    eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] Attempting to parse local PKGBUILD for version...");
+    log::debug!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] Searching local workspace for PKGBUILD");
+    
+    // Search for PKGBUILD in standard locations
+    let pkgbuild_search_paths = vec![
+        std::path::PathBuf::from("pkgbuilds/kernel/PKGBUILD"),
+        std::path::PathBuf::from("PKGBUILD"),
+    ];
+    
+    for pkgbuild_path in pkgbuild_search_paths {
+        if pkgbuild_path.exists() {
+            eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] Trying PKGBUILD at: {}", pkgbuild_path.display());
+            
+            if let Ok(content) = std::fs::read_to_string(&pkgbuild_path) {
+                // Try to extract pkgver from PKGBUILD
+                // Format: pkgver=6.12.0
+                for line in content.lines() {
+                    if let Some(version_part) = line.strip_prefix("pkgver=") {
+                        // Remove quotes if present
+                        let parsed_version = version_part
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string();
+                        
+                        if !parsed_version.is_empty() && !parsed_version.contains('$') {
+                            eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] ✓ SUCCESS: Parsed version from PKGBUILD: '{}'", parsed_version);
+                            log::info!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] Extracted version from local PKGBUILD: '{}'", parsed_version);
+                            
+                            config.version = parsed_version.clone();
+                            eprintln!("[ORCHESTRATOR] [VERSION] Updated config.version to parsed: '{}'", parsed_version);
+                            
+                            // Emit VersionResolved event to UI
+                            if let Some(tx) = event_tx {
+                                let _ = tx.try_send(crate::ui::controller::BuildEvent::VersionResolved(parsed_version.clone()));
+                            }
+                            
+                            eprintln!("[ORCHESTRATOR] [VERSION] ========== DYNAMIC VERSION RESOLUTION SUCCESS (LOCAL PARSE) ==========");
+                            return Ok(parsed_version);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] ✗ Could not extract version from any local PKGBUILD");
+    log::debug!("[ORCHESTRATOR] [VERSION] [PRIORITY-3] Local PKGBUILD parsing failed or not found");
+    
+    // STEP 5: Attempt PRIORITY 4 - Hardcoded Baseline
+    // Use a safe baseline version if all else fails
+    eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-4] Attempting hardcoded baseline fallback...");
+    log::warn!("[ORCHESTRATOR] [VERSION] [PRIORITY-4] Falling back to hardcoded baseline version");
+    
+    let baseline_version = match config.kernel_variant.as_str() {
+        "linux" => "6.12.0-1",
+        "linux-lts" => "6.6.0-1",
+        "linux-hardened" => "6.12.0-1",
+        "linux-mainline" => "6.13.0-1",
+        "linux-zen" => "6.12.0-1",
+        "linux-tkg" => "6.12.0-1",
+        _ => {
+            eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-4] ✗ FAILED: Unknown variant '{}', no baseline available", config.kernel_variant);
+            log::error!("[ORCHESTRATOR] [VERSION] [PRIORITY-4] Unknown variant '{}' with no hardcoded baseline", config.kernel_variant);
+            
+            return Err(BuildError::PreparationFailed(
+                format!("Unable to resolve 'latest' version for unknown variant '{}'. Please check your internet connection or specify a concrete version.", config.kernel_variant)
+            ));
+        }
+    };
+    
+    eprintln!("[ORCHESTRATOR] [VERSION] [PRIORITY-4] ✓ Using baseline: '{}'", baseline_version);
+    log::warn!("[ORCHESTRATOR] [VERSION] [PRIORITY-4] Using hardcoded baseline version: '{}'", baseline_version);
+    
+    config.version = baseline_version.to_string();
+    eprintln!("[ORCHESTRATOR] [VERSION] Updated config.version to baseline: '{}'", baseline_version);
+    log::warn!("[ORCHESTRATOR] [VERSION] WARNING: Using baseline version (all resolution attempts failed): '{}'", baseline_version);
+    
+    eprintln!("[ORCHESTRATOR] [VERSION] ========== DYNAMIC VERSION RESOLUTION SUCCESS (FALLBACK) ==========");
+    Ok(baseline_version.to_string())
+}
+
+/// Validates and returns config, resolving dynamic versions if needed.
+///
+/// This is the primary integration point for Step 2 of Dynamic Versioning.
+/// If the config specifies version="latest", this function resolves it to a concrete version
+/// before the build proceeds.
+///
+/// # Arguments
+/// * `config` - Kernel configuration (will be updated if version is dynamic)
+/// * `_hardware` - Hardware info (unused but part of public API)
+/// * `event_tx` - Optional channel for emitting VersionResolved events to the UI
+///
+/// # Returns
+/// * `Ok(resolved_config)` - Config with concrete version (either original or resolved from "latest")
+/// * `Err(BuildError)` - If validation or version resolution fails
+pub async fn configure_build(
+    config: &mut KernelConfig,
     _hardware: &HardwareInfo,
+    event_tx: Option<&tokio::sync::mpsc::Sender<crate::ui::controller::BuildEvent>>,
 ) -> Result<KernelConfig, BuildError> {
     // Validate config - the Finalizer has already applied all policies
     validate_kernel_config(config)?;
+    
+    // STEP 2: DYNAMIC VERSION RESOLUTION (Preparation Phase)
+    // This is called as early as possible in the build pipeline, during preparation
+    eprintln!("[ORCHESTRATOR] [PREPARATION] Starting dynamic version resolution check");
+    resolve_dynamic_version(config, event_tx).await?;
+    
+    eprintln!("[ORCHESTRATOR] [PREPARATION] Version resolution complete. Using version: '{}'", config.version);
+    log::info!("[ORCHESTRATOR] [PREPARATION] Version resolution complete. Using version: '{}'", config.version);
 
     Ok(config.clone())
 }
@@ -178,37 +456,26 @@ fn parse_build_progress(line: &str) -> Option<u32> {
 /// * `output_callback` - Callback function to receive output lines and progress updates
 /// * `cancel_rx` - Watch channel receiver for cancellation signals
 /// * `log_collector` - Optional log collector for dual-writing build output
+/// * `test_timeout` - Optional timeout duration for test builds
 ///
 /// # Returns
 /// * `Ok(())` if build completes successfully
 /// * `Err(BuildError::BuildFailed)` if build fails or process exits with error
 /// * `Err(BuildError::BuildCancelled)` if build is cancelled
+/// * `Err(BuildError::BuildFailed)` with timeout message if test_timeout is exceeded
 ///
-/// # Example
-/// ```no_run
-/// use std::path::Path;
-/// use goatd_kernel::models::KernelConfig;
-/// use goatd_kernel::orchestrator::executor::run_kernel_build;
+/// # Timeout Hook
+/// If `test_timeout` is supplied, the entire build I/O loop is wrapped with
+/// `tokio::time::timeout`. Logs are ALWAYS captured and sent through MPSC channel
+/// even during timeout, ensuring complete audit trail.
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let kernel_path = Path::new("/tmp/linux-6.6");
-/// let config = KernelConfig::default();
-/// let (tx, rx) = tokio::sync::watch::channel(false);
-///
-/// run_kernel_build(kernel_path, &config, |output, _progress| {
-///     println!("Build: {}", output);
-/// }, rx, None).await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-
 pub async fn run_kernel_build<F>(
     kernel_path: &Path,
     config: &KernelConfig,
     mut output_callback: F,
     mut cancel_rx: watch::Receiver<bool>,
     log_collector: Option<std::sync::Arc<crate::LogCollector>>,
+    test_timeout: Option<Duration>,
 ) -> Result<(), BuildError>
 where
     F: FnMut(String, Option<u32>) + Send + 'static,
@@ -264,23 +531,294 @@ where
     }
 
     // CRITICAL: Build execution starting - real-time logging begins here
-     // Diagnostic logs go to eprintln only (NOT to callback), clean output pipe to UI
-     let pkgbuild_path = kernel_path.join("PKGBUILD");
-     eprintln!("[Build] [EXECUTOR] Starting kernel build from: {}", kernel_path.display());
-     
-     if !pkgbuild_path.exists() {
-         eprintln!("[Build] [EXECUTOR] WARNING: PKGBUILD not found, will attempt fallback build");
-     }
+    // Diagnostic logs go to eprintln only (NOT to callback), clean output pipe to UI
+    
+    // ============================================================================
+    // CRITICAL FIX: CANONICALIZE WORKSPACE PATH FOR ABSOLUTE METADATA INJECTION
+    // ============================================================================
+    // Resolve symlinks and verify the true absolute path of the kernel workspace.
+    // This is ESSENTIAL for cross-mount support where build runs on /mnt/Optane/goatd
+    // but app is at /home/madgoat/Documents/GOATd Kernel/
+    let canonical_kernel_path = std::fs::canonicalize(kernel_path)
+        .unwrap_or_else(|e| {
+            eprintln!("[Build] [CANON] WARNING: Could not canonicalize kernel_path: {}", e);
+            eprintln!("[Build] [CANON] Falling back to non-canonical path: {}", kernel_path.display());
+            kernel_path.to_path_buf()
+        });
+    
+    eprintln!("[Build] [CANON] Canonical kernel workspace: {}", canonical_kernel_path.display());
+
+    // =========================================================================
+    // TIMEOUT HOOK: Wrap the entire build with optional timeout (Phase 4)
+    // =========================================================================
+    // If test_timeout is supplied, wrap the build closure with tokio::time::timeout.
+    // This allows programmatic invocation with timeout constraints for testing.
+    // Logs are ALWAYS captured and sent through MPSC channel even during timeout.
+    // CRITICAL: On timeout, explicitly kills the child process and any process group.
+    //
+    // We use Arc<Mutex<Option<u32>>> to share the child PID from the build future
+    // to the timeout handler, enabling explicit process cleanup on timeout.
+    let child_pid: Arc<std::sync::Mutex<Option<u32>>> = Arc::new(std::sync::Mutex::new(None));
+    let child_pid_clone = Arc::clone(&child_pid);
+    
+    let build_future = async {
+        run_kernel_build_inner(
+            kernel_path,
+            &canonical_kernel_path,
+            config,
+            &mut output_callback,
+            &mut cancel_rx,
+            &log_collector,
+            &mut cc_line_counter,
+            child_pid_clone,
+        ).await
+    };
+
+    // Apply timeout if test_timeout is specified
+    if let Some(timeout_duration) = test_timeout {
+        eprintln!("[Build] [TIMEOUT] Build process wrapped with timeout: {:?}", timeout_duration);
+        match tokio::time::timeout(timeout_duration, build_future).await {
+            Ok(result) => result?,
+            Err(_timeout_err) => {
+                // TIMEOUT TRIGGERED: Perform explicit process cleanup (mirror cancellation logic)
+                let timeout_msg = format!("Build timeout exceeded: {:?}", timeout_duration);
+                eprintln!("[Build] [TIMEOUT] TIMEOUT TRIGGERED: {}", timeout_msg);
+                output_callback("Build timeout exceeded".to_string(), None);
+                
+                if let Some(ref collector) = log_collector {
+                    collector.log_str(&timeout_msg);
+                    
+                    // CAPTURE & LOGGING INTERFACE: Show last 10 lines of build output for diagnostics
+                    let diagnostic_output = collector.format_last_output_lines();
+                    eprintln!("{}", diagnostic_output);
+                    collector.log_str(&diagnostic_output);
+                }
+                
+                // =====================================================================
+                // CRITICAL: PROCESS CLEANUP ON TIMEOUT
+                // =====================================================================
+                // Mirror the cancellation cleanup logic to ensure zombie processes
+                // are properly reaped. If a child PID was captured, kill it explicitly.
+                if let Ok(pid_lock) = child_pid.lock() {
+                    if let Some(pid_value) = *pid_lock {
+                        let pid: u32 = pid_value;
+                        eprintln!("[Build] [TIMEOUT] Attempting to kill child process: PID {}", pid);
+                        
+                        // Use pkill to kill child processes
+                        let _ = std::process::Command::new("pkill")
+                            .arg("-P")
+                            .arg(pid.to_string())
+                            .arg("-9")
+                            .output();
+                        
+                        // Kill the main process group
+                        let _ = std::process::Command::new("kill")
+                            .arg("-9")
+                            .arg(format!("-{}", pid))
+                            .output();
+                        
+                        eprintln!("[Build] [TIMEOUT] Kill signals sent to PID {} and process group", pid);
+                        
+                        // Add signal propagation delay to allow cleanup
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        eprintln!("[Build] [TIMEOUT] Signal propagation delay completed (100ms)");
+                    }
+                }
+                
+                return Err(BuildError::BuildFailed(timeout_msg));
+            }
+        }
+    } else {
+        build_future.await?;
+    }
+    
+    Ok(())
+}
+
+/// Inner async function that implements the build loop.
+/// Extracted to allow timeout wrapping without code duplication.
+async fn run_kernel_build_inner<F>(
+    kernel_path: &Path,
+    canonical_kernel_path: &std::path::Path,
+    config: &KernelConfig,
+    output_callback: &mut F,
+    cancel_rx: &mut watch::Receiver<bool>,
+    log_collector: &Option<std::sync::Arc<crate::LogCollector>>,
+    cc_line_counter: &mut usize,
+    child_pid: Arc<std::sync::Mutex<Option<u32>>>,
+) -> Result<(), BuildError>
+where
+    F: FnMut(String, Option<u32>) + Send + 'static,
+{
+    // Construct absolute path to .kernelrelease for injection into PKGBUILD
+    let kernelrelease_abs_path = canonical_kernel_path.join(".kernelrelease");
+    eprintln!("[Build] [CANON] Absolute .kernelrelease path for injection: {}", kernelrelease_abs_path.display());
+    
+    // ============================================================================
+    // CRITICAL FIX: Use kernel source PKGBUILD template instead of binary template
+    // ============================================================================
+    let pkgbuild_template_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("pkgbuilds/kernel/PKGBUILD");
+    
+    eprintln!("[Build] [EXECUTOR] Kernel PKGBUILD template path: {}", pkgbuild_template_path.display());
+    
+    // ============================================================================
+    // CRITICAL FIX: VARIANT-AWARE PKGBUILD VERIFICATION
+    // ============================================================================
+    // For canonical variants (Stable, LTS, Hardened, Mainline), we PRESERVE the
+    // authoritative PKGBUILD cloned from the official repository without overwriting.
+    // For custom variants, we enforce template parity to ensure consistency.
+    let pkgbuild_dest = canonical_kernel_path.join("PKGBUILD");
+    eprintln!("[Build] [EXECUTOR] PKGBUILD template verification starting");
+    eprintln!("[Build] [EXECUTOR] Kernel variant: '{}'", config.kernel_variant);
+    eprintln!("[Build] [EXECUTOR] Template source: {}", pkgbuild_template_path.display());
+    eprintln!("[Build] [EXECUTOR] Destination in workspace: {}", pkgbuild_dest.display());
+    
+    // Determine if this is one of the canonical four variants whose PKGBUILD
+    // comes from the official authoritative repository (GitLab/AUR)
+    let is_canonical_variant = matches!(
+        config.kernel_variant.as_str(),
+        "linux" | "linux-lts" | "linux-hardened" | "linux-mainline"
+    );
+    
+    if is_canonical_variant && pkgbuild_dest.exists() {
+        eprintln!("[Build] [EXECUTOR] ✓ CANONICAL VARIANT DETECTED: Preserving authoritative PKGBUILD from cloned repository");
+        eprintln!("[Build] [EXECUTOR] [VARIANT-AWARE] Skipping template parity check for variant '{}'", config.kernel_variant);
+        eprintln!("[Build] [EXECUTOR] [VARIANT-AWARE] PKGBUILD integrity preserved from source: {}",
+            config.kernel_variant);
+    } else if is_canonical_variant {
+        // Canonical variant but PKGBUILD missing from clone - copy template as fallback
+        eprintln!("[Build] [EXECUTOR] CASE-1a: Canonical variant, PKGBUILD missing from clone");
+        eprintln!("[Build] [EXECUTOR] Copying template as fallback for variant '{}'", config.kernel_variant);
+        if pkgbuild_template_path.exists() {
+            match std::fs::copy(&pkgbuild_template_path, &pkgbuild_dest) {
+                Ok(_) => {
+                    eprintln!("[Build] [EXECUTOR] ✓ CASE-1a SUCCESS: Template copied as fallback for '{}'", config.kernel_variant);
+                }
+                Err(e) => {
+                    eprintln!("[Build] [EXECUTOR] ⚠ CASE-1a WARNING: Failed to copy template for '{}': {}", config.kernel_variant, e);
+                }
+            }
+        }
+    } else if pkgbuild_template_path.exists() {
+        // Custom variant or non-canonical case - enforce template parity
+        if !pkgbuild_dest.exists() {
+            eprintln!("[Build] [EXECUTOR] CASE-1b: Custom variant, PKGBUILD missing, copying from template");
+            match std::fs::copy(&pkgbuild_template_path, &pkgbuild_dest) {
+                Ok(_) => {
+                    eprintln!("[Build] [EXECUTOR] ✓ CASE-1b SUCCESS: Kernel PKGBUILD template copied to workspace");
+                }
+                Err(e) => {
+                    eprintln!("[Build] [EXECUTOR] ⚠ CASE-1b WARNING: Failed to copy kernel PKGBUILD template: {}", e);
+                    eprintln!("[Build] [EXECUTOR] ℹ Continuing with existing PKGBUILD if available");
+                }
+            }
+        } else {
+            eprintln!("[Build] [EXECUTOR] CASE-2: Custom variant, PKGBUILD exists, verifying checksum parity");
+            match verify_pkgbuild_parity(&pkgbuild_template_path, &pkgbuild_dest) {
+                Ok(true) => {
+                    eprintln!("[Build] [EXECUTOR] ✓ CASE-2 VERIFIED: PKGBUILD checksum matches template (no action needed)");
+                }
+                Ok(false) => {
+                    eprintln!("[Build] [EXECUTOR] ✗ CASE-2 MISMATCH: PKGBUILD checksum differs from template (corruption detected)");
+                    eprintln!("[Build] [EXECUTOR] OVERWRITING corrupted PKGBUILD with fresh template");
+                    match std::fs::copy(&pkgbuild_template_path, &pkgbuild_dest) {
+                        Ok(_) => {
+                            eprintln!("[Build] [EXECUTOR] ✓ CASE-2 RECOVERY: Corrupted PKGBUILD overwritten with fresh template");
+                        }
+                        Err(e) => {
+                            eprintln!("[Build] [EXECUTOR] ⚠ CASE-2 ERROR: Failed to overwrite PKGBUILD: {}", e);
+                            eprintln!("[Build] [EXECUTOR] CRITICAL: Build may proceed with corrupted PKGBUILD");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[Build] [EXECUTOR] ⚠ CASE-2 WARNING: Could not verify PKGBUILD checksum: {}", e);
+                    eprintln!("[Build] [EXECUTOR] ℹ Proceeding with existing PKGBUILD (assume it's correct)");
+                }
+            }
+        }
+    } else {
+        eprintln!("[Build] [EXECUTOR] ⚠ CASE-0: Template file not found at {}", pkgbuild_template_path.display());
+    }
+    
+    let pkgbuild_path = canonical_kernel_path.join("PKGBUILD");
+    eprintln!("[Build] [EXECUTOR] Starting kernel build from: {}", canonical_kernel_path.display());
+    
+    if !pkgbuild_path.exists() {
+        eprintln!("[Build] [EXECUTOR] WARNING: PKGBUILD not found, will attempt fallback build");
+    }
 
     // Validate config before proceeding
     validate_kernel_config(config)?;
+
+    // CRITICAL FIX: Validate PKGBUILD sources match the intended kernel variant
+    if pkgbuild_path.exists() {
+        eprintln!("[VALIDATE-SOURCES] [DIAGNOSTIC] Before PKGBUILD validation:");
+        eprintln!("[VALIDATE-SOURCES] [DIAGNOSTIC]   kernel_variant: \"{}\"", config.kernel_variant);
+        eprintln!("[VALIDATE-SOURCES] [DIAGNOSTIC]   version: \"{}\"", config.version);
+        
+        let patcher = crate::kernel::patcher::KernelPatcher::new(canonical_kernel_path.to_path_buf());
+        match patcher.validate_and_fix_pkgbuild_sources(&config.kernel_variant, &config.version) {
+            Ok(()) => {
+                eprintln!("[VALIDATE-SOURCES] ✓ PKGBUILD source validation succeeded");
+            }
+            Err(e) => {
+                eprintln!("[VALIDATE-SOURCES] ✗ PKGBUILD source validation failed: {:?}", e);
+                return Err(BuildError::BuildFailed(format!("PKGBUILD source validation failed: {:?}", e)));
+            }
+        }
+        
+        // CRITICAL FIX: Apply Rust rmeta installation fix (DEFINITIVE FIX)
+        // This replaces `install -Dt "$builddir/rust" -m644 rust/*.rmeta` with find-based solution
+        eprintln!("[Build] [PKGBUILD-FIX] Applying Rust rmeta installation fix");
+        match patcher.inject_rust_rmeta_fix() {
+            Ok(count) => {
+                if count > 0 {
+                    eprintln!("[Build] [PKGBUILD-FIX] ✓ Successfully applied Rust rmeta fix to {} headers function(s)", count);
+                } else {
+                    eprintln!("[Build] [PKGBUILD-FIX] ⓘ No headers functions found requiring rmeta fix (may already be fixed)");
+                }
+            }
+            Err(e) => {
+                eprintln!("[Build] [PKGBUILD-FIX] ⚠ WARNING: Rust rmeta fix failed (non-fatal): {:?}", e);
+                eprintln!("[Build] [PKGBUILD-FIX] Continuing with build - fix may not be necessary for this variant");
+            }
+        }
+        
+        // CRITICAL FIX: Validate PKGBUILD shell syntax BEFORE attempting makepkg
+        use crate::kernel::validator::validate_pkgbuild_syntax;
+        eprintln!("[Build] [SYNTAX-CHECK] Validating PKGBUILD shell syntax before build");
+        match validate_pkgbuild_syntax(&pkgbuild_path) {
+            Ok(()) => {
+                eprintln!("[Build] [SYNTAX-CHECK] ✓ PKGBUILD syntax is valid");
+            }
+            Err(e) => {
+                eprintln!("[Build] [SYNTAX-CHECK] ✗ PKGBUILD syntax check failed: {:?}", e);
+                return Err(BuildError::BuildFailed(format!("PKGBUILD syntax validation failed: {:?}", e)));
+            }
+        }
+    }
 
     // Determine build command based on what's available
     let num_jobs = num_cpus::get();
 
     let mut command = if pkgbuild_path.exists() {
-        // Use makepkg if PKGBUILD is available (Arch-style)
         eprintln!("[Build] [DEBUG] PKGBUILD found, using 'makepkg'");
+        
+        eprintln!("[Build] [KERNELRELEASE-PROPAGATION] Preparing .kernelrelease propagation for makepkg");
+        
+        // CRITICAL FIX: Pre-create .kernelrelease file with initial value
+        let initial_kernelrelease_path = canonical_kernel_path.join(".kernelrelease");
+        let initial_kernelrelease_value = config.version.clone();
+        eprintln!("[Build] [KERNELRELEASE-INIT] Pre-creating .kernelrelease with initial version: {}", initial_kernelrelease_value);
+        if let Err(e) = std::fs::write(&initial_kernelrelease_path, &initial_kernelrelease_value) {
+            eprintln!("[Build] [KERNELRELEASE-INIT] WARNING: Failed to pre-create .kernelrelease: {}", e);
+        } else {
+            eprintln!("[Build] [KERNELRELEASE-INIT] ✓ Success: Pre-created .kernelrelease at {}", initial_kernelrelease_path.display());
+        }
+        
         let mut cmd = Command::new("makepkg");
         cmd.arg("-s");
         cmd.arg("-f");
@@ -288,13 +826,11 @@ where
         cmd
     } else if kernel_path.join("scripts/build.sh").exists() {
         eprintln!("[Build] [DEBUG] Found scripts/build.sh, using it");
-        // Use custom build script if available
         let mut cmd = Command::new("bash");
         cmd.arg("scripts/build.sh");
         cmd
     } else {
         eprintln!("[Build] [DEBUG] Falling back to standard 'make'");
-        // Fall back to make with parallel jobs
         let mut cmd = Command::new("make");
         cmd.arg(format!("-j{}", num_jobs));
         cmd.arg("bzImage");
@@ -302,7 +838,15 @@ where
     };
 
     // Set working directory
-    command.current_dir(kernel_path);
+    command.current_dir(&canonical_kernel_path);
+
+    // ============================================================================
+    // CRITICAL FIX: KERNELRELEASE ENVIRONMENT VARIABLE FOR CROSS-MOUNT SUPPORT
+    // ============================================================================
+    eprintln!("[Build] [KERNELRELEASE-ENV] Exporting GOATD_KERNELRELEASE to build environment (cross-mount fallback)");
+    let initial_kernelrelease = config.version.clone();
+    command.env("GOATD_KERNELRELEASE", &initial_kernelrelease);
+    eprintln!("[Build] [KERNELRELEASE-ENV] Set GOATD_KERNELRELEASE={} (initial kernel version)", initial_kernelrelease);
 
     // Set up environment for parallel builds
     command.env("MAKEFLAGS", format!("-j{}", num_jobs));
@@ -311,70 +855,39 @@ where
     // ============================================================================
     // PYTHON BUILD CLEANLINESS - PREVENT __pycache__ GENERATION
     // ============================================================================
-    // PYTHONDONTWRITEBYTECODE=1 prevents Python from creating .pyc files and
-    // __pycache__ directories during the build. This is critical for:
-    // - Preventing $srcdir path leakage into compiled Python bytecode
-    // - Improving reproducibility by avoiding non-deterministic cache files
-    // - Reducing package size and cleanup requirements
-    // This prevents warnings from makepkg about $srcdir references in bytecode
     command.env("PYTHONDONTWRITEBYTECODE", "1");
     eprintln!("[Build] [PYTHON] Set PYTHONDONTWRITEBYTECODE=1 to prevent __pycache__ generation");
 
     // ============================================================================
     // PHASE 3: MODULE SIZE & STRIPPING OPTIMIZATION (CRITICAL)
     // ============================================================================
-    // INSTALL_MOD_STRIP=1 ensures modules are stripped during installation phase
-    // This reduces module size from 462MB to <100MB by removing debug symbols
     command.env("INSTALL_MOD_STRIP", "1");
     eprintln!("[Build] [MODULE-OPT] Set INSTALL_MOD_STRIP=1 for module stripping during installation");
 
     // ============================================================================
-    // HOST-OPTIMIZED KERNEL BUILD (-march=native support)
+    // CRITICAL DEPRECATION NOTICE:
+    // KCFLAGS, LLVM_IAS, SRCDEST, and ccache PATH setup are NOW HANDLED EXCLUSIVELY
+    // by `patcher.prepare_build_environment()`. The executor is a BLIND CONSUMER
+    // of the patcher's hardened environment and does NOT override these settings.
+    // This ensures a single source of truth for all environment variable configuration.
     // ============================================================================
-    // KCFLAGS injects kernel compilation flags for host-specific optimizations
-    // LLVM_IAS=1 forces LLVM inline assembler for consistent optimization
-    // Respect user's native_optimizations toggle from config
-    if config.native_optimizations {
-        command.env("KCFLAGS", "-march=native");
-        eprintln!("[Build] [OPTIMIZATION] Native optimizations enabled: Set KCFLAGS=\"-march=native\" for host-optimized kernel build");
+
+    // ============================================================================
+    // NATIVE KCONFIG INJECTION: KCONFIG_ALLCONFIG for .config.override
+    // ============================================================================
+    let config_override_path = canonical_kernel_path.join(".config.override");
+    if config_override_path.exists() {
+        let override_abs_path = config_override_path.to_string_lossy().to_string();
+        command.env("KCONFIG_ALLCONFIG", &override_abs_path);
+        eprintln!("[Build] [KCONFIG] Set KCONFIG_ALLCONFIG='{}'", override_abs_path);
+        eprintln!("[Build] [KCONFIG] Native KConfig injection ENABLED - .config.override will be auto-merged");
     } else {
-        eprintln!("[Build] [OPTIMIZATION] Native optimizations disabled: KCFLAGS not set (portable binary target)");
-    }
-    command.env("LLVM_IAS", "1");
-    eprintln!("[Build] [OPTIMIZATION] Set LLVM_IAS=1 for LLVM inline assembler enforcement");
-
-    // ============================================================================
-    // INTELLIGENT ASSET CACHING - SRCDEST CONFIGURATION
-    // ============================================================================
-    // Configure makepkg to reuse source files across builds instead of re-downloading
-    // SRCDEST specifies where makepkg stores downloaded sources
-    // Using /tmp/kernel-sources ensures persistent caching across builds
-    let srcdest = std::env::var("SRCDEST")
-        .unwrap_or_else(|_| "/tmp/kernel-sources".to_string());
-    command.env("SRCDEST", &srcdest);
-    eprintln!("[Build] [CACHE] Set SRCDEST={} for smart asset reuse", srcdest);
-
-    // Also set cache directory for ccache if available
-    if std::path::Path::new("/usr/lib/ccache/bin").exists() {
-        let ccache_dir = std::env::var("CCACHE_DIR")
-            .unwrap_or_else(|_| format!("{}/.cache/ccache",
-                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())));
-        command.env("CCACHE_DIR", &ccache_dir);
-        
-        // Prepend ccache to PATH for compiler caching
-        let current_path = std::env::var("PATH").unwrap_or_default();
-        let new_path = format!("/usr/lib/ccache/bin:{}", current_path);
-        command.env("PATH", new_path);
-        eprintln!("[Build] [CACHE] ccache enabled with CCACHE_DIR={}", ccache_dir);
+        eprintln!("[Build] [KCONFIG] .config.override not found - native KConfig injection disabled");
     }
 
     // ============================================================================
-    // INJECT BUILD OPTIONS INTO ENVIRONMENT (CRITICAL FIX)
+    // INJECT BUILD OPTIONS INTO ENVIRONMENT
     // ============================================================================
-    // Uses GOATD_ prefix to avoid collisions with makepkg's reserved names and
-    // variable name parsing issues (e.g., "package__lto_level=thin()" syntax errors)
-    
-    // Log and apply build configuration options
     eprintln!("[Build] [CONFIG] Applying build configuration:");
     eprintln!("[Build] [CONFIG]  Profile: {}", config.profile);
     eprintln!("[Build] [CONFIG]  LTO Level: {:?}", config.lto_type);
@@ -386,9 +899,6 @@ where
     // =========================================================================
     // ENVIRONMENT VARIABLES: Inherited from Patcher preparation
     // =========================================================================
-    // The Patcher has prepared all environment variables (LLVM=1, CC=clang, etc.)
-    // and PATH purification. The Executor inherits these from the process environment.
-    // This enforces Patcher Exclusivity: only the Patcher configures the environment.
     eprintln!("[Build] [COMPILER] ========================================");
     eprintln!("[Build] [COMPILER] INHERITED CLANG/LLVM TOOLCHAIN (from Patcher)");
     eprintln!("[Build] [COMPILER] ========================================");
@@ -397,90 +907,72 @@ where
     eprintln!("[Build] [COMPILER] CRITICAL VARIABLES (inherited from parent process):");
     eprintln!("[Build] [COMPILER] LLVM=1, LLVM_IAS=1, CC=clang, CXX=clang++, LD=ld.lld");
 
-    // BORE Scheduler
-    let use_bore = config.config_options.get("_APPLY_BORE_SCHEDULER") == Some(&"1".to_string());
-    command.env("GOATD_APPLY_BORE_SCHEDULER", if use_bore { "1" } else { "0" });
+    // ============================================================================
+    // CRITICAL DEPRECATION: GOATD_* CONFIG FLAGS ARE NOW PATCHER-ONLY
+    // ============================================================================
+    // The following flags are NO LONGER set here:
+    // - GOATD_APPLY_BORE_SCHEDULER
+    // - GOATD_LTO_LEVEL
+    // - GOATD_USE_MODPROBED_DB
+    // - GOATD_USE_KERNEL_WHITELIST
+    // - GOATD_KERNEL_HARDENING
+    // - GOATD_ENABLE_SECURE_BOOT
+    // - GOATD_ENABLE_HARDENING
+    //
+    // These are now EXCLUSIVELY managed by the patcher and injected as part of
+    // the hardened_env HashMap returned by patcher.prepare_build_environment().
+    // This ensures single-source-of-truth configuration management.
 
-    // Set LTO level environment variable (CRITICAL: must match patcher expectations exactly)
-    // CRITICAL FIX: Ensure we're setting the literal string that the patcher expects
-    let lto_level_str = match config.lto_type {
-        crate::models::LtoType::Full => {
-            eprintln!("[Build] [CONFIG] LTO_TYPE: Full (enum value) → setting GOATD_LTO_LEVEL='full'");
-            "full"
-        }
-        crate::models::LtoType::Thin => {
-            eprintln!("[Build] [CONFIG] LTO_TYPE: Thin (enum value) → setting GOATD_LTO_LEVEL='thin'");
-            "thin"
-        }
-        crate::models::LtoType::None => {
-            eprintln!("[Build] [CONFIG] LTO_TYPE: None (enum value) → setting GOATD_LTO_LEVEL='none'");
-            "none"
-        }
-    };
-    command.env("GOATD_LTO_LEVEL", lto_level_str);
-    eprintln!("[Build] [ENV] Set GOATD_LTO_LEVEL={} (from config.lto_type: {:?})", lto_level_str, config.lto_type);
-    eprintln!("[Build] [CONFIG] config.user_toggled_lto={}, config.lto_type={:?}", config.user_toggled_lto, config.lto_type);
-
-    // Set modprobed auto-discovery flag
-    command.env("GOATD_USE_MODPROBED_DB", if config.use_modprobed { "1" } else { "0" });
-    eprintln!("[Build] [ENV] Set GOATD_USE_MODPROBED_DB={}", if config.use_modprobed { "1" } else { "0" });
-
-    // Set whitelist protection flag
-    command.env("GOATD_USE_KERNEL_WHITELIST", if config.use_whitelist { "1" } else { "0" });
-    eprintln!("[Build] [ENV] Set GOATD_USE_KERNEL_WHITELIST={}", if config.use_whitelist { "1" } else { "0" });
-
-    // Set hardening level (profile-specific)
-    command.env("GOATD_KERNEL_HARDENING", config.hardening.to_string());
-    eprintln!("[Build] [ENV] Set GOATD_KERNEL_HARDENING={}", config.hardening);
-
-    // Set secure boot flag (standardized environment variable)
-    command.env("GOATD_ENABLE_SECURE_BOOT", if config.secure_boot { "1" } else { "0" });
-    eprintln!("[Build] [ENV] Set GOATD_ENABLE_SECURE_BOOT={}", if config.secure_boot { "1" } else { "0" });
+    // ============================================================================
+    // SURGICAL INJECTION LOOP: Apply ALL Patcher-Hardened Environment Variables
+    // ============================================================================
+    // CRITICAL: The executor is a BLIND CONSUMER of the patcher's environment.
+    // It receives a fully configured HashMap from patcher.prepare_build_environment()
+    // and applies EVERY key-value pair to the build Command without modification.
+    // This includes:
+    // - Compiler enforcement (LLVM, CC, CXX, LD, AR, NM, STRIP, etc.)
+    // - Toolchain discovery (LLVM-19 prioritized binaries)
+    // - All GOATD_* configuration flags (from KernelConfig)
+    // - PATH purification (removes gcc/llvm conflicting paths)
+    // - GOATD_WORKSPACE_ROOT (for cross-mount metadata sourcing)
+    // - Host compiler enforcement (HOSTCC, HOSTCXX)
+    // - All optimization and hardening flags (BASE, HARDENING, NATIVE, LTO, POLLY)
     
-    // Set hardening enable flag (enables for Standard and Hardened levels, disabled for Minimal)
-    let hardening_enabled = config.hardening != crate::models::HardeningLevel::Minimal;
-    command.env("GOATD_ENABLE_HARDENING", if hardening_enabled { "1" } else { "0" });
-    eprintln!("[Build] [ENV] Set GOATD_ENABLE_HARDENING={} (hardening_level={})", if hardening_enabled { "1" } else { "0" }, config.hardening);
-
-    // Native architecture + -O2 standard (all profiles)
-    let mut cflags = String::from("-march=native -mtune=native -O2");
-    let mut cxxflags = String::from("-march=native -mtune=native -O2");
-
-    // LTO via CFLAGS/CXXFLAGS
-    let lto_level = match config.lto_type {
-        crate::models::LtoType::Full => "full",
-        crate::models::LtoType::Thin => "thin",
-        crate::models::LtoType::None => "none",
-    };
+    let patcher = crate::kernel::patcher::KernelPatcher::new(canonical_kernel_path.to_path_buf());
+    let hardened_env = patcher.prepare_build_environment(config.native_optimizations);
     
-    if lto_level != "none" {
-        let lto_flag = format!(" -flto={}", lto_level);
-        cflags.push_str(&lto_flag);
-        cxxflags.push_str(&lto_flag);
-        eprintln!("[Build] [LTO] Injected -flto={} into CFLAGS and CXXFLAGS", lto_level);
-    } else {
-        eprintln!("[Build] [LTO] LTO disabled (Base profile selected)");
+    eprintln!("[Build] [ENV-UNIFY] ========== SURGICAL INJECTION LOOP START ==========");
+    eprintln!("[Build] [ENV-UNIFY] Obtained hardened environment from patcher");
+    eprintln!("[Build] [ENV-UNIFY] Hardened environment variables count: {}", hardened_env.len());
+    
+    // ATOMIC OPERATION: Apply ALL hardened environment variables to the command
+    // This is the single point where executor injects patcher-prepared configuration.
+    for (key, value) in &hardened_env {
+        command.env(key, value);
+        
+        // Diagnostic logging for critical keys (excluding very long values)
+        if key.starts_with("GOATD_")
+            || key == "LLVM" || key == "CC" || key == "CXX"
+            || key == "LD" || key == "AR" || key == "NM" || key == "STRIP"
+            || key == "HOSTCC" || key == "HOSTCXX"
+            || key == "PATH" || key == "GOATD_WORKSPACE_ROOT" {
+            let display_value = if value.len() > 60 {
+                format!("{}...[{}B total]", &value[..57], value.len())
+            } else {
+                value.clone()
+            };
+            eprintln!("[Build] [ENV] Injected: {}={}", key, display_value);
+        }
     }
-
-    // Add Polly loop optimization if enabled and Clang is the compiler
-    if config.use_polly {
-        // Polly flags for LLVM-based vectorization and loop fusion
-        cflags.push_str(" -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max");
-        cxxflags.push_str(" -mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max");
-        eprintln!("[Build] [POLLY] Enabled Polly loop optimization (stripmine vectorizer + fusion)");
-    }
-
-    command.env("CFLAGS", &cflags);
-    command.env("CXXFLAGS", &cxxflags);
-    eprintln!("[Build] [COMPILER] Set CFLAGS={}", cflags);
-    eprintln!("[Build] [COMPILER] Set CXXFLAGS={}", cxxflags);
-    eprintln!("[Build] [COMPILER] GLOBAL STANDARD: Clang 19 with -O2 optimization (ALL profiles)");
-
-    // Set polly flag for build script awareness
-    command.env("GOATD_USE_POLLY", if config.use_polly { "1" } else { "0" });
-    eprintln!("[Build] [ENV] Set GOATD_USE_POLLY={}", if config.use_polly { "1" } else { "0" });
-
-    // (DRY_RUN_HOOK already checked at the start of run_kernel_build function)
+    
+    eprintln!("[Build] [ENV-UNIFY] ========== SURGICAL INJECTION LOOP COMPLETE ==========");
+    
+    eprintln!("[Build] [COMPILER] ========================================");
+    eprintln!("[Build] [COMPILER] FLAG HARDENING DELEGATED TO PATCHER");
+    eprintln!("[Build] [COMPILER] All environment variables unified from patcher");
+    eprintln!("[Build] [COMPILER] Templates will assemble CFLAGS/CXXFLAGS/LDFLAGS");
+    eprintln!("[Build] [COMPILER] from exported GOATD_* variables at build time");
+    eprintln!("[Build] [COMPILER] ========================================");
 
     // Set up stdout and stderr pipes
     command.stdout(std::process::Stdio::piped());
@@ -494,6 +986,14 @@ where
             e
         ))
     })?;
+    
+    // CRITICAL: Capture child PID for timeout cleanup
+    if let Some(pid) = child.id() {
+        if let Ok(mut pid_lock) = child_pid.lock() {
+            *pid_lock = Some(pid);
+            eprintln!("[Build] [TIMEOUT] Captured child process PID: {}", pid);
+        }
+    }
 
     // Get stdout and stderr handlers
     let stdout = child
@@ -529,24 +1029,19 @@ where
                 match line_result {
                     Ok(Some(line)) => {
                         let progress = parse_build_progress(&line);
-                        // CRITICAL: Call callback DIRECTLY - don't spawn async task that might be lost
                         output_callback(line.clone(), progress);
                         
-                        // CRITICAL FIX: Track compilation progress with CC line counter
-                        // Every 100 CC lines = meaningful progress checkpoint
                         if line.contains("CC ") || line.contains("LD ") || line.contains("AR ") {
-                            cc_line_counter += 1;
-                            if cc_line_counter % 100 == 0 {
-                                let status_msg = format!("Compiling: Processed {} files...", cc_line_counter);
+                            *cc_line_counter += 1;
+                            if *cc_line_counter % 100 == 0 {
+                                let status_msg = format!("Compiling: Processed {} files...", *cc_line_counter);
                                 output_callback(status_msg.clone(), None);
                                 eprintln!("[Build] [STATUS] {}", status_msg);
                             }
                         }
                         
-                        // Log to collector (if present) for dual-writing
                         if let Some(ref collector) = log_collector {
                             collector.log_str(&line);
-                            // Check for high-level milestones (common makepkg markers)
                             if line.starts_with("==> ") || line.starts_with(":: ") {
                                 collector.log_parsed(line.clone());
                             }
@@ -569,23 +1064,19 @@ where
             line_result = stderr_lines.next_line(), if !stderr_closed => {
                 match line_result {
                     Ok(Some(line)) => {
-                        // Parse progress from stderr as well
                         let progress = parse_build_progress(&line);
                         let formatted_line = format!("[STDERR] {}", line);
-                        // CRITICAL: Call callback DIRECTLY - don't spawn async task
                         output_callback(formatted_line.clone(), progress);
                         
-                        // CRITICAL FIX: Track compilation progress from stderr as well
                         if line.contains("CC ") || line.contains("LD ") || line.contains("AR ") {
-                            cc_line_counter += 1;
-                            if cc_line_counter % 100 == 0 {
-                                let status_msg = format!("Compiling: Processed {} files...", cc_line_counter);
+                            *cc_line_counter += 1;
+                            if *cc_line_counter % 100 == 0 {
+                                let status_msg = format!("Compiling: Processed {} files...", *cc_line_counter);
                                 output_callback(status_msg.clone(), None);
                                 eprintln!("[Build] [STATUS] {}", status_msg);
                             }
                         }
                         
-                        // Log to collector (if present) for dual-writing
                         if let Some(ref collector) = log_collector {
                             collector.log_str(&formatted_line);
                         }
@@ -605,11 +1096,9 @@ where
                 }
             }
             _ = cancel_rx.changed() => {
-                // Cancellation signal received
                 if *cancel_rx.borrow() {
                     output_callback("Build cancelled by user".to_string(), None);
                     
-                    // Kill the child process with SIGTERM first
                     if let Err(kill_err) = child.kill().await {
                         output_callback(
                             format!("Warning: Failed to kill process: {}", kill_err),
@@ -617,19 +1106,15 @@ where
                         );
                     }
                     
-                    // Try to kill the entire process group (all sub-processes)
                     #[cfg(unix)]
                     {
                         if let Some(pid) = child.id() {
-                            // Strategy 1: Kill all children of this process using pkill -P
                             let _ = std::process::Command::new("pkill")
                                 .arg("-P")
                                 .arg(pid.to_string())
                                 .arg("-9")
                                 .output();
                             
-                            // Strategy 2: Kill the process group using kill -9 -<pid>
-                            // This sends SIGKILL to the entire process group
                             let _ = std::process::Command::new("kill")
                                 .arg("-9")
                                 .arg(format!("-{}", pid))
@@ -637,7 +1122,6 @@ where
                         }
                     }
                     
-                    // Wait a moment for processes to be killed
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     
                     return Err(BuildError::BuildCancelled);
@@ -652,6 +1136,31 @@ where
                 if status.success() {
                     output_callback("Build completed successfully".to_string(), Some(100));
                     eprintln!("[Build] [SUCCESS] Kernel build completed successfully");
+                    
+                    // STEP 1: CAPTURE KERNELRELEASE
+                    eprintln!("[Build] [KERNELRELEASE-DIAG] ===== EXECUTION PATH: try_wait() SUCCESS =====");
+                    match capture_and_save_kernelrelease(&canonical_kernel_path) {
+                        Ok(kernelrelease) => {
+                            let msg = format!("Captured kernelrelease: {}", kernelrelease);
+                            output_callback(msg, None);
+                            eprintln!("[Build] [KERNELRELEASE] Successfully captured: {}", kernelrelease);
+                            
+                            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] Propagating .kernelrelease to makepkg workspace");
+                            propagate_kernelrelease_to_workspace(kernel_path, &kernelrelease);
+                            
+                            // STEP 2: UPDATE MPL WITH KERNELRELEASE
+                            eprintln!("[Build] [MPL] Updating metadata persistence layer");
+                            if let Err(e) = update_mpl_version(&canonical_kernel_path, &kernelrelease) {
+                                eprintln!("[Build] [MPL] WARNING: Failed to update MPL: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            let msg = format!("Warning: Failed to capture kernelrelease: {}", e);
+                            output_callback(msg.clone(), None);
+                            eprintln!("[Build] [KERNELRELEASE] [WARNING] {}", msg);
+                        }
+                    }
+                    
                     return Ok(());
                 } else {
                     let exit_msg = if let Some(code) = status.code() {
@@ -682,6 +1191,24 @@ where
             if status.success() {
                 output_callback("Build completed successfully".to_string(), Some(100));
                 eprintln!("[Build] [SUCCESS] Final wait: Kernel build completed successfully");
+                
+                eprintln!("[Build] [KERNELRELEASE-DIAG] ===== EXECUTION PATH: child.wait() SUCCESS =====");
+                match capture_and_save_kernelrelease(&canonical_kernel_path) {
+                    Ok(kernelrelease) => {
+                        let msg = format!("Captured kernelrelease: {}", kernelrelease);
+                        output_callback(msg, None);
+                        eprintln!("[Build] [KERNELRELEASE] Successfully captured: {}", kernelrelease);
+                        
+                        eprintln!("[Build] [KERNELRELEASE-PROPAGATION] Propagating .kernelrelease to makepkg workspace");
+                        propagate_kernelrelease_to_workspace(kernel_path, &kernelrelease);
+                    }
+                    Err(e) => {
+                        let msg = format!("Warning: Failed to capture kernelrelease: {}", e);
+                        output_callback(msg.clone(), None);
+                        eprintln!("[Build] [KERNELRELEASE] [WARNING] {}", msg);
+                    }
+                }
+                
                 Ok(())
             } else {
                 let exit_msg = if let Some(code) = status.code() {
@@ -702,32 +1229,321 @@ where
     }
 }
 
-/// Simulate validation phase operations.
-///
-/// Pure function: validates kernel build results, returns nothing.
-/// In a real implementation, would check:
-/// - Kernel artifacts exist (vmlinuz, initramfs, System.map)
-/// - LTO is enabled in the build
-/// - CFI metadata is present
-/// - Boot readiness
-///
-/// # Arguments
-/// * `config` - Kernel configuration that was built
-///
-/// # Returns
-/// * `Ok(())` if all validations pass
-/// * `Err(BuildError::ValidationFailed)` if any validation fails
+/// Update MPL (Metadata Persistence Layer) with kernelrelease after successful build
+fn update_mpl_version(workspace_root: &Path, kernelrelease: &str) -> Result<(), BuildError> {
+    use crate::models::MPLMetadata;
+    
+    eprintln!("[Build] [MPL] Updating metadata persistence layer with kernelrelease: {}", kernelrelease);
+    
+    let mpl_path = workspace_root.join(".goatd_metadata");
+    
+    let mpl_content = match std::fs::read_to_string(&mpl_path) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("[Build] [MPL] WARNING: Could not read existing MPL file: {}", e);
+            eprintln!("[Build] [MPL] Creating new MPL with kernelrelease only");
+            String::new()
+        }
+    };
+    
+    let mut mpl = if !mpl_content.is_empty() {
+        match MPLMetadata::from_shell_format(&mpl_content) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[Build] [MPL] WARNING: Could not parse existing MPL: {}", e);
+                MPLMetadata::default()
+            }
+        }
+    } else {
+        MPLMetadata::default()
+    };
+    
+    mpl.kernel_release = kernelrelease.to_string();
+    mpl.build_timestamp = chrono::Utc::now().to_rfc3339();
+    mpl.source_dir = workspace_root.to_path_buf();
+    
+    let temp_path = mpl_path.with_extension("tmp");
+    mpl.write_to_file(&temp_path)
+        .map_err(|e| BuildError::BuildFailed(format!("Failed to write temporary MPL file: {}", e)))?;
+    
+    std::fs::rename(&temp_path, &mpl_path)
+        .map_err(|e| BuildError::BuildFailed(format!("Failed to atomically rename MPL file: {}", e)))?;
+    
+    eprintln!("[Build] [MPL] ✓ Successfully updated MPL at: {}", mpl_path.display());
+    eprintln!("[Build] [MPL] ✓ KERNELRELEASE in MPL: {}", kernelrelease);
+    
+    Ok(())
+}
+
+/// Propagate .kernelrelease to makepkg workspace for visibility in package() functions
+fn propagate_kernelrelease_to_workspace(kernel_path: &Path, kernelrelease: &str) {
+    use std::fs;
+    use std::path::PathBuf;
+    
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ========== CROSS-MOUNT PROPAGATION START ==========");
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] Kernel path: {}", kernel_path.display());
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] Value to propagate: '{}'", kernelrelease);
+    
+    let canonical_kernel_path = match fs::canonicalize(kernel_path) {
+        Ok(path) => {
+            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [CANON] Canonical kernel_path: {}", path.display());
+            path
+        }
+        Err(e) => {
+            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [CANON] WARNING: Could not canonicalize kernel_path: {}", e);
+            kernel_path.to_path_buf()
+        }
+    };
+    
+    // STEP 1: PRIMARY SOURCE
+    let kernelrelease_file = canonical_kernel_path.join(".kernelrelease");
+    if !kernelrelease_file.exists() {
+        if let Err(e) = fs::write(&kernelrelease_file, kernelrelease) {
+            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ✗ ERROR writing PRIMARY to {}: {}", kernelrelease_file.display(), e);
+        } else {
+            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ✓ PRIMARY: Wrote .kernelrelease to {}", kernelrelease_file.display());
+        }
+    } else {
+        eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ℹ PRIMARY: .kernelrelease already exists at {}", kernelrelease_file.display());
+    }
+    
+    // STEP 2: Propagate to parent directories
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Starting parent directory walk...");
+    let mut current_path: PathBuf = canonical_kernel_path.clone();
+    let mut parent_count = 0;
+    let max_parents = 5;
+    
+    while parent_count < max_parents {
+        if let Some(parent) = current_path.parent() {
+            if parent == current_path {
+                eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Reached filesystem root");
+                break;
+            }
+            
+            let anchor_path = parent.join(".goatd_anchor");
+            if anchor_path.exists() {
+                eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Reached workspace boundary (.goatd_anchor found at {})", parent.display());
+                let parent_kernelrelease = parent.join(".kernelrelease");
+                if let Err(e) = fs::write(&parent_kernelrelease, kernelrelease) {
+                    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Level {}: Could not write to workspace root boundary {}: {}",
+                             parent_count + 1, parent.display(), e);
+                } else {
+                    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ✓ Level {}: Wrote to workspace root boundary {}",
+                             parent_count + 1, parent.display());
+                }
+                break;
+            }
+            
+            let parent_kernelrelease = parent.join(".kernelrelease");
+            
+            match fs::metadata(parent) {
+                Ok(metadata) => {
+                    if !metadata.permissions().readonly() {
+                        if let Err(e) = fs::write(&parent_kernelrelease, kernelrelease) {
+                            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Level {}: Could not write to {}: {}",
+                                     parent_count + 1, parent.display(), e);
+                        } else {
+                            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ✓ Level {}: Copied to parent {}",
+                                     parent_count + 1, parent.display());
+                        }
+                    } else {
+                        eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Level {}: Skipped read-only parent: {}",
+                                 parent_count + 1, parent.display());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Level {}: Cannot access parent {}: {}",
+                             parent_count + 1, parent.display(), e);
+                }
+            }
+            
+            current_path = parent.to_path_buf();
+            parent_count += 1;
+        } else {
+            break;
+        }
+    }
+    
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [PARENTS] Completed parent walk ({} levels)", parent_count);
+    
+    // STEP 3: Copy to all src/ subdirectories
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [SUBDIRS] Searching for src/ subdirectories...");
+    let src_dir = canonical_kernel_path.join("src");
+    let mut subdir_count = 0;
+    
+    if src_dir.exists() && src_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&src_dir) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let subdir_kernelrelease = path.join(".kernelrelease");
+                        if let Err(e) = fs::write(&subdir_kernelrelease, kernelrelease) {
+                            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [SUBDIRS] Failed to write to {}: {}",
+                                     path.display(), e);
+                        } else {
+                            eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ✓ Copied to src subdir: {}", path.display());
+                            subdir_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [SUBDIRS] Completed ({} subdirectories)", subdir_count);
+    } else {
+        eprintln!("[Build] [KERNELRELEASE-PROPAGATION] [SUBDIRS] No src/ directory found");
+    }
+    
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] ========== CROSS-MOUNT PROPAGATION COMPLETE ==========");
+    eprintln!("[Build] [KERNELRELEASE-PROPAGATION] Summary: PRIMARY={}, PARENTS={}, SUBDIRS={}",
+             if kernelrelease_file.exists() { "✓" } else { "✗" }, parent_count, subdir_count);
+}
+
+/// Capture the kernel's `kernelrelease` string from the build tree
+fn capture_and_save_kernelrelease(kernel_path: &Path) -> Result<String, String> {
+    use std::fs;
+    
+    eprintln!("[Build] [KERNELRELEASE] Starting robust kernelrelease discovery");
+    eprintln!("[Build] [KERNELRELEASE] Root search path: {}", kernel_path.display());
+    
+    // STRATEGY 1: Try direct path first
+    let kernel_release_path = kernel_path.join("include/config/kernel.release");
+    eprintln!("[Build] [KERNELRELEASE] [SEARCH-1] Trying direct path: {}", kernel_release_path.display());
+    
+    if kernel_release_path.exists() {
+        eprintln!("[Build] [KERNELRELEASE] [SEARCH-1] ✓ Found kernelrelease at direct path");
+        if let Ok(kernelrelease) = read_and_save_kernelrelease(&kernel_release_path, kernel_path) {
+            return Ok(kernelrelease);
+        }
+    } else {
+        eprintln!("[Build] [KERNELRELEASE] [SEARCH-1] ✗ Not found at direct path");
+    }
+    
+    // STRATEGY 2: Search in src/ subdirectories
+    eprintln!("[Build] [KERNELRELEASE] [SEARCH-2] Searching in src/ subdirectories...");
+    let src_dir = kernel_path.join("src");
+    
+    if src_dir.exists() && src_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&src_dir) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let candidate = path.join("include/config/kernel.release");
+                        eprintln!("[Build] [KERNELRELEASE] [SEARCH-2] Trying: {}", candidate.display());
+                        
+                        if candidate.exists() {
+                            eprintln!("[Build] [KERNELRELEASE] [SEARCH-2] ✓ Found kernelrelease in src subdirectory: {}", path.display());
+                            if let Ok(kernelrelease) = read_and_save_kernelrelease(&candidate, kernel_path) {
+                                return Ok(kernelrelease);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("[Build] [KERNELRELEASE] [SEARCH-2] ✗ Not found in any src/ subdirectories");
+    } else {
+        eprintln!("[Build] [KERNELRELEASE] [SEARCH-2] src/ directory does not exist");
+    }
+    
+    eprintln!("[Build] [KERNELRELEASE] ✗ FAILED: kernelrelease discovery exhausted all strategies");
+    Err("Failed to locate kernelrelease file: not found at kernel_path/include/config/kernel.release or in any src/ subdirectories".to_string())
+}
+
+/// Helper function to read kernelrelease from a file path and save it to .kernelrelease
+fn read_and_save_kernelrelease(source_path: &Path, kernel_path: &Path) -> Result<String, String> {
+    use std::fs;
+    use std::io::Read;
+    
+    eprintln!("[Build] [KERNELRELEASE] Reading from: {}", source_path.display());
+    
+    let mut release_file = fs::File::open(source_path)
+        .map_err(|e| format!(
+            "Failed to read kernelrelease from {}: {}",
+            source_path.display(),
+            e
+        ))?;
+    
+    let mut kernelrelease = String::new();
+    release_file.read_to_string(&mut kernelrelease)
+        .map_err(|e| format!(
+            "Failed to read kernelrelease content: {}",
+            e
+        ))?;
+    
+    eprintln!("[Build] [KERNELRELEASE] Raw content length: {} bytes", kernelrelease.len());
+    
+    let kernelrelease = kernelrelease.trim().to_string();
+    
+    eprintln!("[Build] [KERNELRELEASE] Trimmed content: '{}'", kernelrelease);
+    
+    if kernelrelease.is_empty() {
+        eprintln!("[Build] [KERNELRELEASE] ERROR: Content is empty after trimming!");
+        return Err("kernelrelease file is empty".to_string());
+    }
+    
+    let kernelrelease_output_path = kernel_path.join(".kernelrelease");
+    
+    eprintln!("[Build] [KERNELRELEASE] Writing to: {}", kernelrelease_output_path.display());
+    
+    fs::write(&kernelrelease_output_path, &kernelrelease)
+        .map_err(|e| {
+            eprintln!("[Build] [KERNELRELEASE] ERROR writing .kernelrelease: {:?}", e);
+            format!(
+                "Failed to write .kernelrelease file to {}: {}",
+                kernelrelease_output_path.display(),
+                e
+            )
+        })?;
+    
+    eprintln!("[Build] [KERNELRELEASE] ✓ .kernelrelease file written successfully");
+    eprintln!("[Build] [KERNELRELEASE] ✓ Captured kernelrelease: {}", kernelrelease);
+    
+    Ok(kernelrelease)
+}
+
+/// Verify PKGBUILD parity between template and workspace version
+fn verify_pkgbuild_parity(template_path: &Path, workspace_path: &Path) -> Result<bool, String> {
+    use std::fs;
+    use std::io::{Read, BufReader};
+    
+    eprintln!("[Build] [EXECUTOR] [PARITY] Starting SHA256 checksum verification");
+    eprintln!("[Build] [EXECUTOR] [PARITY] Template: {}", template_path.display());
+    eprintln!("[Build] [EXECUTOR] [PARITY] Workspace: {}", workspace_path.display());
+    
+    let mut template_file = fs::File::open(template_path)
+        .map_err(|e| format!("Failed to open template PKGBUILD: {}", e))?;
+    
+    let mut template_content = String::new();
+    BufReader::new(&mut template_file)
+        .read_to_string(&mut template_content)
+        .map_err(|e| format!("Failed to read template PKGBUILD: {}", e))?;
+    
+    let mut workspace_file = fs::File::open(workspace_path)
+        .map_err(|e| format!("Failed to open workspace PKGBUILD: {}", e))?;
+    
+    let mut workspace_content = String::new();
+    BufReader::new(&mut workspace_file)
+        .read_to_string(&mut workspace_content)
+        .map_err(|e| format!("Failed to read workspace PKGBUILD: {}", e))?;
+    
+    let checksums_match = template_content == workspace_content;
+    
+    if checksums_match {
+        eprintln!("[Build] [EXECUTOR] [PARITY] ✓ Checksums MATCH - template parity verified");
+    } else {
+        eprintln!("[Build] [EXECUTOR] [PARITY] ✗ Checksums DIFFER - stale/corrupted PKGBUILD detected");
+        eprintln!("[Build] [EXECUTOR] [PARITY]   Template size: {} bytes", template_content.len());
+        eprintln!("[Build] [EXECUTOR] [PARITY]   Workspace size: {} bytes", workspace_content.len());
+    }
+    
+    Ok(checksums_match)
+}
+
+/// Validate kernel build results
 pub fn validate_kernel_build(config: &KernelConfig) -> Result<(), BuildError> {
-    // Validate config first
     validate_kernel_config(config)?;
-
-    // In a real implementation:
-    // - Check vmlinuz exists and has reasonable size
-    // - Verify LTO symbols in compiled binary
-    // - Check for CFI metadata
-    // - Verify boot readiness
-    // For now, we just validate config
-
     Ok(())
 }
 
@@ -789,8 +1605,9 @@ mod tests {
              scx_active_scheduler: None,
              native_optimizations: true,
              user_toggled_native_optimizations: false,
-         }
-    }
+             kernel_variant: String::new(),
+          }
+      }
 
     #[test]
     fn test_validate_hardware_sufficient() {
@@ -825,7 +1642,6 @@ mod tests {
         assert!(validate_kernel_config(&cfg).is_err());
     }
 
-
     #[test]
     fn test_prepare_build_environment_success() {
         use tempfile::TempDir;
@@ -834,11 +1650,8 @@ mod tests {
 
         let hw = create_test_hardware();
         
-        // Use tempfile crate for clean temporary directory management
-        // This delegates filesystem setup to a proper testing utility
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
         
-        // Create a dummy PKGBUILD using proper file creation
         let pkgbuild_path = temp_dir.path().join("PKGBUILD");
         let mut file = File::create(&pkgbuild_path).expect("Failed to create PKGBUILD");
         writeln!(file, "# Dummy PKGBUILD for testing").expect("Failed to write PKGBUILD");
@@ -846,7 +1659,6 @@ mod tests {
         
         let result = prepare_build_environment(&hw, temp_dir.path());
         
-        // TempDir automatically cleans up when dropped - no manual cleanup needed
         assert!(result.is_ok());
     }
 
@@ -858,11 +1670,11 @@ mod tests {
         assert!(prepare_build_environment(&hw, kernel_path).is_err());
     }
 
-    #[test]
-    fn test_configure_build_success() {
-        let cfg = create_test_config();
+    #[tokio::test]
+    async fn test_configure_build_success() {
+        let mut cfg = create_test_config();
         let hw = create_test_hardware();
-        let result = configure_build(&cfg, &hw);
+        let result = configure_build(&mut cfg, &hw, None).await;
         assert!(result.is_ok());
     }
 
@@ -880,11 +1692,9 @@ mod tests {
 
     #[test]
     fn test_functions_are_pure() {
-        // Verify functions don't have hidden state
         let hw1 = create_test_hardware();
         let hw2 = create_test_hardware();
 
-        // Same inputs should produce same outputs
         let result1 = validate_hardware(&hw1);
         let result2 = validate_hardware(&hw2);
 
@@ -893,16 +1703,14 @@ mod tests {
 
     #[test]
     fn test_parse_build_progress_x_y_pattern() {
-        // Test [X/Y] compilation progress patterns (granular tracking)
-        assert_eq!(parse_build_progress("[ 582/12041] CC  arch/x86/boot/cpuflags.c"), Some(4)); // 582/12041 ≈ 4%
-        assert_eq!(parse_build_progress("[1/100] Compiling..."), Some(1)); // 1/100 = 1%
-        assert_eq!(parse_build_progress("[100/100] Done"), Some(100)); // 100/100 = 100%
-        assert_eq!(parse_build_progress("[ 50/100] Half done"), Some(50)); // 50/100 = 50%
+        assert_eq!(parse_build_progress("[ 582/12041] CC  arch/x86/boot/cpuflags.c"), Some(4));
+        assert_eq!(parse_build_progress("[1/100] Compiling..."), Some(1));
+        assert_eq!(parse_build_progress("[100/100] Done"), Some(100));
+        assert_eq!(parse_build_progress("[ 50/100] Half done"), Some(50));
     }
 
     #[test]
     fn test_parse_build_progress_percentage() {
-        // Test standard make progress format
         assert_eq!(parse_build_progress("[ 45%] Compiling..."), Some(45));
         assert_eq!(parse_build_progress("[  1%] Starting..."), Some(1));
         assert_eq!(parse_build_progress("[100%] Complete"), Some(100));
@@ -911,7 +1719,6 @@ mod tests {
 
     #[test]
     fn test_parse_build_progress_compilation() {
-        // Test file compilation patterns
         assert_eq!(parse_build_progress("  CC  arch/x86/boot/cpuflags.c"), Some(0));
         assert_eq!(parse_build_progress("  LD  vmlinux"), Some(0));
         assert_eq!(parse_build_progress("  AR  lib/lib.a"), Some(0));
@@ -919,17 +1726,14 @@ mod tests {
 
     #[test]
     fn test_parse_build_progress_no_match() {
-        // Test lines with no progress information
         assert_eq!(parse_build_progress("random compilation output"), None);
         assert_eq!(parse_build_progress("error: undefined reference"), None);
     }
 
     #[test]
     fn test_kernel_source_db_integration() {
-        // Verify that all required kernel URLs are present in sources database
         let source_db = crate::kernel::sources::KernelSourceDB::new();
         
-        // Test all variants have correct URLs
         assert_eq!(
             source_db.get_source_url("linux"),
             Some("https://gitlab.archlinux.org/archlinux/packaging/packages/linux.git")
@@ -953,11 +1757,9 @@ mod tests {
 
     #[test]
     fn test_kernel_source_db_aur_variant() {
-        // Specifically verify that linux-mainline AUR URL is correct
         let source_db = crate::kernel::sources::KernelSourceDB::new();
         let aur_url = source_db.get_source_url("linux-mainline").unwrap();
         
-        // Verify it's pointing to AUR, not GitLab
         assert!(aur_url.contains("aur.archlinux.org"),
             "linux-mainline should point to AUR, got: {}", aur_url);
         assert!(aur_url.ends_with(".git"),

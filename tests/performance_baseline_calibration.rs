@@ -188,6 +188,7 @@ fn run_calibration_mode(
 
 /// Result of a calibration run
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CalibrationResult {
     mode: CollectionMode,
     total_samples: u64,

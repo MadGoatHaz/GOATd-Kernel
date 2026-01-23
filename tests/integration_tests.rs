@@ -64,6 +64,7 @@ fn create_test_config() -> KernelConfig {
          scx_active_scheduler: None,
          native_optimizations: true,
          user_toggled_native_optimizations: false,
+         kernel_variant: String::new(),
     }
 }
 
@@ -82,7 +83,7 @@ async fn test_orchestrator_instantiation() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(1);
-    let result = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector)).await;
+    let result = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None).await;
     assert!(result.is_ok(), "AsyncOrchestrator creation should succeed");
     
     let orch = result.unwrap();
@@ -97,9 +98,9 @@ async fn test_phase_transition_preparation_to_configuration() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(2);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     assert_eq!(orch.current_phase().await, BuildPhaseState::Preparation);
     
@@ -115,9 +116,9 @@ async fn test_phase_transition_configuration_to_patching() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(3);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     orch.transition_phase(BuildPhaseState::Configuration)
         .await
@@ -135,9 +136,9 @@ async fn test_invalid_phase_transition() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(4);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     // Try to transition from Preparation directly to Validation (invalid)
     let result = orch.transition_phase(BuildPhaseState::Validation).await;
@@ -151,9 +152,9 @@ async fn test_complete_phase_sequence() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(5);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     // Sequence: Preparation -> Configuration -> Patching -> Building -> Validation -> Completed
     assert_eq!(orch.current_phase().await, BuildPhaseState::Preparation);
@@ -196,9 +197,9 @@ async fn test_state_snapshot_captures_progress() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(6);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     orch.set_progress(50).await;
     orch.transition_phase(BuildPhaseState::Configuration)
@@ -217,9 +218,9 @@ async fn test_patch_tracking() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(7);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     orch.record_patch_result(true).await;
     orch.record_patch_result(true).await;
@@ -237,9 +238,9 @@ async fn test_error_handling_and_failed_state() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(8);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     orch.transition_phase(BuildPhaseState::Configuration)
         .await
@@ -260,9 +261,9 @@ async fn test_recovery_from_failed_state() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(9);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     // Simulate failure
     orch.transition_phase(BuildPhaseState::Configuration)
@@ -285,9 +286,9 @@ async fn test_hardware_info_persisted_in_state() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(10);
-    let orch = AsyncOrchestrator::new(hw.clone(), config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw.clone(), config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     let snapshot = orch.state_snapshot().await;
     assert_eq!(snapshot.hardware.cpu_model, hw.cpu_model);
@@ -302,9 +303,9 @@ async fn test_config_persisted_in_state() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(11);
-    let orch = AsyncOrchestrator::new(hw, config.clone(), PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config.clone(), PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     let snapshot = orch.state_snapshot().await;
     assert_eq!(snapshot.config.version, config.version);
@@ -319,9 +320,9 @@ async fn test_progress_clamping() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(12);
-    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     orch.set_progress(150).await;
     assert_eq!(orch.current_progress().await, 100, "Progress should be clamped to 100");
@@ -337,9 +338,9 @@ async fn test_recovery_flag_management() {
     
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
     let log_collector = create_test_log_collector(13);
-    let mut orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector))
-        .await
-        .expect("Should create orchestrator");
+    let mut orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp/checkpoints"), PathBuf::from("/tmp/kernel"), None, cancel_rx, Some(log_collector), None)
+         .await
+         .expect("Should create orchestrator");
     
     assert!(orch.is_recovery_enabled(), "Recovery should be enabled by default");
     

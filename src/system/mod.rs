@@ -3,6 +3,7 @@
 pub mod scx;
 pub mod performance;
 pub mod health;
+pub mod verification;
 
 use std::path::Path;
 use regex::Regex;
@@ -111,6 +112,32 @@ impl SystemImpl {
     // Note: ensure_sudo_session() removed. Each privileged command is now wrapped
     // directly with pkexec, ensuring PolicyKit handles authentication in a single
     // GUI-driven flow without intermediate terminal prompts.
+}
+
+/// Check if DKMS is already running (race condition prevention)
+///
+/// Scans process list for active dkms processes to prevent concurrent
+/// DKMS invocations that could corrupt the module build state.
+///
+/// # Returns
+/// `true` if any dkms process is currently running, `false` otherwise
+fn is_dkms_running() -> bool {
+    // Simple check: look for dkms in running processes
+    match Command::new("pgrep")
+        .arg("-f")
+        .arg("dkms")
+        .output()
+    {
+        Ok(output) => {
+            // pgrep returns exit code 0 if process is found
+            output.status.success()
+        }
+        Err(_) => {
+            // If pgrep fails, assume it's safe to proceed
+            eprintln!("[DKMS] [RACE] Warning: Could not check for running DKMS processes");
+            false
+        }
+    }
 }
 
 /// Input Validation Contract (Phase 0 Requirements 1.1 & 1.2)
@@ -262,14 +289,70 @@ impl SystemWrapper for SystemImpl {
 
         log_info!("[SystemWrapper] Attempting DKMS install for kernel version: {}", kernel_version);
 
+        // RACE CONDITION PREVENTION: Check if DKMS is already running
+        if is_dkms_running() {
+            let error_msg = format!(
+                "DKMS is already running. Wait for the current build to complete before starting another. \
+                 Multiple concurrent DKMS sessions can corrupt the module state."
+            );
+            eprintln!("[DKMS] [RACE] {}", error_msg);
+            log_info!("[SystemWrapper] DKMS race condition detected: {}", error_msg);
+            return Err(error_msg);
+        }
+        eprintln!("[DKMS] [RACE] ✓ No concurrent DKMS processes detected");
+
+        // PRE-FLIGHT CHECK: Verify kernel headers are installed before DKMS build
+        // DKMS requires build, source symlinks and actual headers to be present
+        eprintln!("[DKMS] [GUARD] Running pre-flight kernel header verification for: {}", kernel_version);
+        
+        match verification::verify_kernel_installation(kernel_version) {
+            Ok(status) => {
+                if !status.ready_for_dkms {
+                    // Provide detailed diagnostic of what's missing
+                    let missing = vec![
+                        if !status.module_dir_exists { "module directory" } else { "" },
+                        if !status.build_symlink_exists { "build symlink" } else { "" },
+                        if !status.source_symlink_exists { "source symlink" } else { "" },
+                        if !status.headers_installed { "kernel headers" } else { "" },
+                    ]
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                    
+                    let error_msg = format!(
+                        "DKMS pre-flight check failed for kernel {}: missing or invalid [{}]. \
+                         DKMS cannot build without valid kernel headers and module directory. \
+                         Install kernel headers package first.",
+                        kernel_version, missing
+                    );
+                    eprintln!("[DKMS] [ERROR] {}", error_msg);
+                    log_info!("[SystemWrapper] DKMS guard check failed: {}", error_msg);
+                    return Err(error_msg);
+                }
+                eprintln!("[DKMS] [GUARD] ✓ Kernel headers verified and ready for DKMS");
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "DKMS pre-flight verification error for kernel {}: {}. \
+                     Cannot proceed with DKMS build.",
+                    kernel_version, e
+                );
+                eprintln!("[DKMS] [ERROR] {}", error_msg);
+                log_info!("[SystemWrapper] DKMS guard check error: {}", error_msg);
+                return Err(error_msg);
+            }
+        }
+
         // DKMS allows building kernel modules for a specific kernel version
         // Command: dkms autoinstall -k <kernel_version>
         // Use pkexec to wrap the entire command for GUI-driven authentication
+        // Configure with LLVM=1 and LLVM_IAS=1 for CLANG-based kernel builds
+        eprintln!("[DKMS] Building with full LLVM/Clang toolchain: LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld");
         match Command::new("pkexec")
-            .arg("dkms")
-            .arg("autoinstall")
-            .arg("-k")
-            .arg(kernel_version)
+            .arg("sh")
+            .arg("-c")
+            .arg(format!("LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld dkms autoinstall -k {}", kernel_version))
             .output()  // CAPTURE stdout and stderr instead of inheriting
         {
             Ok(output) => {
@@ -315,8 +398,8 @@ impl SystemWrapper for SystemImpl {
     /// * `commands` - Vector of command strings to execute in sequence
     ///
     /// # Returns
-    /// `Ok(())` if all commands succeed, otherwise `Err` with error message
-    fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<(), String> {
+    /// `Ok(stdout)` if all commands succeed with captured stdout, otherwise `Err` with error message
+    fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<String, String> {
         if commands.is_empty() {
             return Err("No commands provided for batch execution".to_string());
         }
@@ -334,7 +417,7 @@ impl SystemWrapper for SystemImpl {
         {
             Ok(output) => {
                 // Capture and log stdout
-                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 if !stdout.is_empty() {
                     log::info!("[batch privileged] stdout: {}", stdout);
                 }
@@ -347,7 +430,7 @@ impl SystemWrapper for SystemImpl {
                 
                 if output.status.success() {
                     log_info!("[SystemWrapper] Batch execution succeeded");
-                    Ok(())
+                    Ok(stdout)
                 } else {
                     let err_msg = format!("Batch privileged execution failed with status: {:?}", output.status.code());
                     log_info!("[SystemWrapper] {}", err_msg);
@@ -421,6 +504,123 @@ impl SystemWrapper for SystemImpl {
             }
         }
     }
+
+   /// Ensure DKMS Safety Net for GOATd kernels
+   ///
+   /// This method creates a global DKMS framework configuration file (`/etc/dkms/framework.conf.d/goatd.conf`)
+   /// that enforces the LLVM/Clang toolchain for all GOATd kernel module builds.
+   ///
+   /// # Purpose
+   /// When DKMS runs out-of-tree module builds (e.g., nvidia-dkms, virtualbox-dkms) for GOATd kernels,
+   /// it must use the same LLVM/Clang toolchain that built the kernel. This safety net configuration
+   /// ensures cross-compilation consistency by:
+   /// - Detecting GOATd kernels (version strings containing "-goatd-")
+   /// - Enforcing LLVM=1, LLVM_IAS=1, CC=clang, LD=ld.lld environment variables
+   /// - Preventing compilation errors from mismatched toolchains
+   ///
+   /// # Execution Context
+   /// This is called as part of the unified batch_privileged_commands flow in AppController::install_kernel_async(),
+   /// bundled with kernel installation and DKMS autoinstall to minimize Polkit authentication prompts (1 prompt total).
+   ///
+   /// # Returns
+   /// `Ok(())` if configuration was successfully created/updated, or `Err` with diagnostic message
+   fn ensure_dkms_safety_net(&self) -> Result<(), String> {
+       eprintln!("[DKMS] [SAFETY-NET] Creating global DKMS framework configuration for GOATd kernels");
+
+       // The DKMS framework.conf.d configuration content
+       // This will be sourced by DKMS and apply to all GOATd kernel module builds
+       // Use raw string to preserve content literally
+       let dkms_config_content = r#"# GOATd Kernel DKMS Configuration
+# This configuration file ensures that DKMS module builds use the LLVM/Clang toolchain
+# for all GOATd rebranded kernels, even when invoked outside the normal kernel build flow.
+#
+# DKMS will source this file from /etc/dkms/framework.conf.d/goatd.conf
+# and apply these settings to all out-of-tree module builds.
+
+# Target GOATd kernels (match version strings containing "-goatd-")
+# Handles formats: 6.19.0-rc6-goatd, 6.19.0-rc6-goatd-gaming, etc.
+if [[ "$kernelver" == *"-goatd-"* ]]; then
+   # ======================================================================
+   # DKMS TOOLCHAIN ENFORCEMENT FOR GOATD KERNELS
+   # ======================================================================
+   # CRITICAL: These variables must be set for DKMS to use LLVM/Clang
+   # when building kernel modules (nvidia-dkms, etc.)
+   
+   # Force LLVM compiler (version 19+ if available)
+   export LLVM=1
+   export LLVM_IAS=1
+   
+   # Force Clang as the primary C compiler (DKMS uses FORCE_CC/FORCE_CXX for module builds)
+   # Setting both CC and FORCE_CC ensures compatibility with different DKMS versions
+   export CC=clang
+   export FORCE_CC=clang
+   export CXX=clang++
+   export FORCE_CXX=clang++
+   
+   # Force LLVM linker
+   export LD=ld.lld
+   
+   # Additional LLVM toolchain tools
+   export AR=llvm-ar
+   export NM=llvm-nm
+   export OBJCOPY=llvm-objcopy
+   export STRIP=llvm-strip
+   
+   # Log enforcement message to stderr for diagnostics
+   printf "[DKMS-SAFETY-NET] GOATd kernel detected: %s\n" "$kernelver" >&2
+   printf "[DKMS-SAFETY-NET] ✓ LLVM/Clang toolchain enforced (CC=clang, LD=ld.lld, LLVM=1)\n" >&2
+fi
+"#;
+
+       // ====================================================================
+       // CRITICAL: Shell Escaping Strategy for DKMS Configuration
+       // ====================================================================
+       // The configuration content includes shell variable references like $kernelver
+       // that MUST be interpreted by bash when the config file is sourced by DKMS,
+       // NOT when printf creates the file.
+       //
+       // Strategy:
+       // 1. Replace single quotes in content with '\'' (shell escape sequence)
+       // 2. Wrap entire printf argument in single quotes to prevent all expansions
+       // 3. This ensures $kernelver is written literally, then expanded by sourcing script
+       //
+       // Example: 'content with $var' becomes 'content with $var'
+       //          and bash interpreter expands $var when file is sourced
+       // ====================================================================
+       let escaped_content = dkms_config_content.replace("'", "'\\''");
+       
+       // Build printf command with escaped content wrapped in single quotes
+       // This prevents shell interpretation during file creation while preserving
+       // the $kernelver variable so DKMS can expand it when sourcing the config
+       let config_write_cmd = format!("printf '%s' '{}' > /etc/dkms/framework.conf.d/goatd.conf", escaped_content);
+
+       // Commands to create the configuration (all &str references have stable lifetimes)
+       let commands = vec![
+           // Step 1: Create the DKMS framework.conf.d directory if it doesn't exist
+           "mkdir -p /etc/dkms/framework.conf.d",
+           // Step 2: Write the GOATd configuration to framework.conf.d using printf
+           //         Uses single-quote escaping to preserve $kernelver for later expansion
+           config_write_cmd.as_str(),
+           // Step 3: Set proper permissions (readable by all, writable by root only)
+           "chmod 644 /etc/dkms/framework.conf.d/goatd.conf",
+       ];
+
+       eprintln!("[DKMS] [SAFETY-NET] Creating /etc/dkms/framework.conf.d/goatd.conf with toolchain enforcement");
+
+       // Execute the configuration creation via batch_privileged_commands (chains with &&)
+       match self.batch_privileged_commands(commands) {
+           Ok(_stdout) => {
+               eprintln!("[DKMS] [SAFETY-NET] ✓ SUCCESS: DKMS safety net configuration created");
+               log_info!("[DKMS] [SAFETY-NET] Successfully created global DKMS framework configuration for GOATd kernels");
+               Ok(())
+           }
+           Err(e) => {
+               eprintln!("[DKMS] [SAFETY-NET] ✗ FAILED: {}", e);
+               log_info!("[DKMS] [SAFETY-NET] Failed to create DKMS safety net: {}", e);
+               Err(format!("Failed to create DKMS safety net configuration: {}", e))
+           }
+       }
+   }
 }
 
 #[cfg(test)]

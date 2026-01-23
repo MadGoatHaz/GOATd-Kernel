@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_create_default_config() {
         let config = create_default_config();
-        assert_eq!(config.version, "6.6.0");
+        assert_eq!(config.version, "latest");
         assert_eq!(config.lto_type, LtoType::Thin);
         assert!(!config.use_modprobed);
         assert!(!config.use_whitelist);

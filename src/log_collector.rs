@@ -37,6 +37,20 @@ use chrono::Local;
 use std::collections::HashMap;
 use std::sync::Arc;
 use log::{Log, Metadata, Record};
+use tokio::sync::oneshot;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for unique LogCollector IDs
+static COLLECTOR_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Global dispatcher registry mapping collector IDs to their message channels
+static GLOBAL_LOG_DISPATCHER: std::sync::OnceLock<Arc<std::sync::Mutex<HashMap<u64, Sender<LogMessage>>>>> = std::sync::OnceLock::new();
+
+fn get_global_dispatcher() -> Arc<std::sync::Mutex<HashMap<u64, Sender<LogMessage>>>> {
+    GLOBAL_LOG_DISPATCHER
+        .get_or_init(|| Arc::new(std::sync::Mutex::new(HashMap::new())))
+        .clone()
+}
 
 /// Internal log line or special marker
 enum LogMessage {
@@ -44,6 +58,8 @@ enum LogMessage {
     Line(LogLine),
     /// Flush marker with channel sender to signal completion
     Flush(std::sync::mpsc::Sender<()>),
+    /// New session creation with oneshot ack from background thread
+    NewSession(String, oneshot::Sender<Result<PathBuf, String>>),
 }
 
 /// Session state with generation tracking for detecting session changes
@@ -111,6 +127,8 @@ impl LogLine {
 
 /// Unified logger that handles disk and UI dispatch
 pub struct LogCollector {
+    /// Unique ID for this collector in the global dispatcher registry
+    id: u64,
     /// Channel sender for log lines (internal) - crossbeam unbounded for cross-runtime reliability
     tx: Sender<LogMessage>,
     /// Current log directory
@@ -119,6 +137,9 @@ pub struct LogCollector {
     ui_tx: tokio::sync::mpsc::Sender<LogLine>,
     /// Current session state with generation tracking for detecting changes
     session_state: Arc<std::sync::Mutex<SessionState>>,
+    /// Last N output lines captured for timeout diagnostics
+    /// Stores up to 10 most recent output lines for "last 10 lines" interface
+    last_output_lines: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
 }
 
 impl LogCollector {
@@ -135,10 +156,22 @@ impl LogCollector {
         std::fs::create_dir_all(&parsed_log_dir)
             .map_err(|e| format!("Failed to create parsed log dir: {}", e))?;
 
+        // Allocate unique ID for this collector
+        let id = COLLECTOR_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+
         // Create unbounded crossbeam channel for log messages (both regular logs and flush markers)
         // CRITICAL: crossbeam unbounded channels are thread-safe and work across ANY runtime,
         // even nested tokio runtimes. This prevents logs from being lost in executor threads.
         let (tx, rx) = unbounded::<LogMessage>();
+
+        // Register this collector in the global dispatcher
+        {
+            let dispatcher = get_global_dispatcher();
+            if let Ok(mut registry) = dispatcher.lock() {
+                registry.insert(id, tx.clone());
+                println!("[Log] [DISPATCHER] Registered LogCollector {} in global dispatcher", id);
+            };
+        }
 
         let log_dir_clone = log_dir.clone();
         let ui_tx_clone = ui_tx.clone();
@@ -150,6 +183,11 @@ impl LogCollector {
             generation: 0,
         }));
         let session_path_arc_clone = Arc::clone(&session_path_arc);
+        
+        // Create arc for last output lines (for timeout diagnostics)
+        let last_output_lines_arc: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
+            Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(10)));
+        let last_output_lines_clone = Arc::clone(&last_output_lines_arc);
         
         // Spawn background thread (NOT tokio task) for disk persister + UI dispatcher
         // This thread will run in OS-level thread pool, independent of any tokio runtime.
@@ -163,6 +201,10 @@ impl LogCollector {
             // Cache file handles for performance with generation tracking
             let mut file_handles: HashMap<String, File> = HashMap::new();
             let mut last_session_generation: u64 = 0;
+            
+            // Capture last output lines for timeout diagnostics
+            let mut last_lines_buffer: std::collections::VecDeque<String> =
+                std::collections::VecDeque::with_capacity(10);
             
             // Create log files immediately on startup to ensure they exist
             // This ensures logs are available even before the first log message
@@ -190,6 +232,19 @@ impl LogCollector {
             while let Ok(msg) = rx.recv() {
                 match msg {
                     LogMessage::Line(log_line) => {
+                        // CAPTURE LAST OUTPUT FOR TIMEOUT DIAGNOSTICS
+                        // Keep track of the last 10 lines of output for "timeout context"
+                        // This allows tests to see what was happening when the build timed out
+                        if last_lines_buffer.len() >= 10 {
+                            last_lines_buffer.pop_front();
+                        }
+                        last_lines_buffer.push_back(log_line.message.clone());
+                        
+                        // Update shared buffer for external access
+                        if let Ok(mut last_lines_arc) = last_output_lines_clone.lock() {
+                            *last_lines_arc = last_lines_buffer.clone();
+                        }
+                        
                         // CRITICAL: Always write to disk, regardless of UI status
                         // First, check if session has changed and invalidate file handle if needed
                         // CHECK SESSION STATE BEFORE EVERY WRITE
@@ -277,43 +332,69 @@ impl LogCollector {
                         // Signal that flush is complete
                         let _ = tx.send(());
                     }
+                    LogMessage::NewSession(filename, ack_tx) => {
+                        // NEW SESSION CREATION: Set path and send ack back to caller
+                        let full_log_dir = log_dir_clone.join("full");
+                        let log_path = full_log_dir.join(&filename);
+                        
+                        // Increment generation to invalidate cached file handles
+                        if let Ok(mut session) = session_path_arc_clone.lock() {
+                            session.path = Some(log_path.clone());
+                            session.generation = session.generation.wrapping_add(1);
+                            eprintln!("[Log] [SESSION] Generation incremented to: {} (from background thread)", session.generation);
+                        }
+                        
+                        // Send ack back to caller with the path
+                        let _ = ack_tx.send(Ok(log_path));
+                    }
                 }
             }
             eprintln!("[Log] Disk persister thread shutting down");
         });
 
         Ok(LogCollector {
+            id,
             tx,
             log_dir: log_dir.clone(),
             ui_tx,
             session_state: session_path_arc,
+            last_output_lines: last_output_lines_arc,
         })
     }
 
-    /// Start a new session with an explicit log file path
+    /// Start a new session with an explicit log file path (async)
+    ///
     /// This bypasses the "latest log" heuristic and ensures this build session
     /// has a dedicated, full log file on disk.
     ///
-    /// CRITICAL: Increments generation counter to force background task to
-    /// invalidate cached file handles, ensuring logs go to the new session file.
-    pub fn start_new_session(&self, filename: &str) -> Result<PathBuf, String> {
-        let full_log_dir = self.log_dir.join("full");
-        let log_path = full_log_dir.join(filename);
+    /// CRITICAL: Sends NewSession message to background thread via oneshot,
+    /// which will increment generation counter and invalidate cached file handles,
+    /// ensuring logs go to the new session file. Awaits acknowledgment from the
+    /// background thread to guarantee synchronization.
+    ///
+    /// # Returns
+    /// Contains the path to the new session log file if successful
+    pub async fn start_new_session(&self, filename: &str) -> Result<PathBuf, String> {
+        let (ack_tx, ack_rx) = oneshot::channel::<Result<PathBuf, String>>();
         
-        // Set the session path AND increment generation
-        {
-            let mut session = self.session_state
-                .lock()
-                .map_err(|e| format!("Failed to lock session state: {}", e))?;
-            session.path = Some(log_path.clone());
-            session.generation = session.generation.wrapping_add(1);
-            eprintln!("[Log] [SESSION] Generation incremented to: {}", session.generation);
-            println!("[Log] [SESSION] Generation incremented to: {}", session.generation);
+        // Send NewSession message to background thread
+        self.tx.send(LogMessage::NewSession(filename.to_string(), ack_tx))
+            .map_err(|e| format!("Failed to send NewSession message: {}", e))?;
+        
+        // Await acknowledgment from background thread
+        let result = ack_rx.await
+            .map_err(|e| format!("NewSession ack channel closed: {}", e))?;
+        
+        match result {
+            Ok(log_path) => {
+                eprintln!("[Log] [SESSION] New session started with dedicated log file: {}", log_path.display());
+                println!("[Log] [SESSION] New session started with dedicated log file: {}", log_path.display());
+                Ok(log_path)
+            }
+            Err(e) => {
+                Err(format!("[Log] [SESSION] Failed to start new session: {}", e))
+            }
         }
-        
-        eprintln!("[Log] [SESSION] New session started with dedicated log file: {}", log_path.display());
-        println!("[Log] [SESSION] New session started with dedicated log file: {}", log_path.display());
-        Ok(log_path)
     }
 
     /// Get the current session log file path
@@ -374,16 +455,112 @@ impl LogCollector {
         println!("[Log] [FLUSH] wait_for_empty() completed - all logs synced to disk");
         Ok(())
     }
+    
+    /// Capture & Logging Interface: Retrieve the last N lines of build output
+    ///
+    /// This is used for timeout diagnostics to provide context about what the build
+    /// was doing when it timed out. Returns up to 10 most recent output lines.
+    ///
+    /// # Returns
+    /// Vector of the last output lines (up to 10), in chronological order
+    /// Empty vector if no output has been logged yet
+    pub fn get_last_output_lines(&self, n: usize) -> Vec<String> {
+        if let Ok(lines) = self.last_output_lines.lock() {
+            lines
+                .iter()
+                .rev()
+                .take(n)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Format the last output lines for display in test/diagnostic output
+    ///
+    /// Returns a formatted string showing:
+    /// "[LOG-CAPTURE] === LAST 10 LINES OF BUILD OUTPUT ==="
+    /// "[LOG-CAPTURE] Line 1..."
+    /// "[LOG-CAPTURE] Line 2..."
+    /// ...etc
+    pub fn format_last_output_lines(&self) -> String {
+        let lines = self.get_last_output_lines(10);
+        if lines.is_empty() {
+            return "[LOG-CAPTURE] === NO BUILD OUTPUT CAPTURED ===".to_string();
+        }
+        
+        let mut formatted = "[LOG-CAPTURE] === LAST 10 LINES OF BUILD OUTPUT ===\n".to_string();
+        for (idx, line) in lines.iter().enumerate() {
+            formatted.push_str(&format!("[LOG-CAPTURE] [{}] {}\n", idx + 1, line));
+        }
+        formatted
+    }
+    
+    /// Initialize LogCollector as the global logger for this process
+    ///
+    /// This registers LogCollector as the implementation of the log crate's Log trait,
+    /// enabling all log::info!(), log::warn!(), log::error!() calls to be captured
+    /// and persisted to disk.
+    ///
+    /// # Arguments
+    /// * `self` - Arc<LogCollector> instance to use as the global logger
+    /// * `level_filter` - Maximum log level to capture (typically log::LevelFilter::Info)
+    ///
+    /// # Returns
+    /// `Ok(())` if initialization succeeds, `Err` if a logger is already set globally
+    ///
+    /// # Critical for Lifecycle Tests
+    /// When calling KernelManager or AppController programmatically outside of main.rs,
+    /// you MUST call this method before any KernelManager/AppController operations
+    /// to ensure the log_info!() and log_parsed!() macros are wired to LogCollector.
+    pub fn init_global_logger(self: Arc<Self>, level_filter: log::LevelFilter) -> Result<(), String> {
+        match log::set_boxed_logger(Box::new(self.clone())) {
+            Ok(()) => {
+                log::set_max_level(level_filter);
+                println!("[Log] [INIT] LogCollector registered as global logger with level: {:?}", level_filter);
+                Ok(())
+            }
+            Err(e) => {
+                Err(format!("Failed to set global logger: {}", e))
+            }
+        }
+    }
 }
 
 impl Clone for LogCollector {
     fn clone(&self) -> Self {
         LogCollector {
+            id: self.id,
             tx: self.tx.clone(),
             log_dir: self.log_dir.clone(),
             ui_tx: self.ui_tx.clone(),
             session_state: Arc::clone(&self.session_state),
+            last_output_lines: Arc::clone(&self.last_output_lines),
         }
+    }
+}
+
+impl Drop for LogCollector {
+    fn drop(&mut self) {
+        // Unregister from global dispatcher when collector is dropped
+        let dispatcher = get_global_dispatcher();
+        if let Ok(mut registry) = dispatcher.lock() {
+            if registry.remove(&self.id).is_some() {
+                println!("[Log] [DISPATCHER] Unregistered LogCollector {} from global dispatcher", self.id);
+            }
+        };
+    }
+}
+
+impl std::fmt::Debug for LogCollector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogCollector")
+            .field("log_dir", &self.log_dir)
+            .finish()
     }
 }
 

@@ -26,7 +26,7 @@ mod performance_battle_tests {
         eprintln!("\n=== TEST: Nanosecond Precision Verification ===");
 
         // Reference baseline using Instant (wall-clock)
-        let baseline_start = Instant::now();
+        let _baseline_start = Instant::now();
         let target_samples = 10_000; // 10,000 samples at 1ms = ~10 seconds
         let interval_ms = 1;
         let expected_duration_ms = target_samples * interval_ms;

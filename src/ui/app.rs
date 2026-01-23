@@ -435,10 +435,17 @@ impl AppUI {
                         log::debug!("[UI] Artifact deleted event received, refreshing Kernels Ready for Installation list");
                         self.ui_state.needs_repaint = true;
                     }
+                    crate::ui::controller::BuildEvent::VersionResolved(version) => {
+                        // Dynamic version was successfully resolved to a concrete version string
+                        log::debug!("[UI] Version resolved: {}", version);
+                        // Note: This is informational - the actual resolved version is used in the config
+                        // The build log will also show this resolution, so we just trigger a repaint
+                        self.ui_state.needs_repaint = true;
+                    }
                 }
             }
         }
-    }
+   }
     
     /// Clear transient messages after displaying
     fn clear_transient_messages(&mut self, _ctx: &egui::Context) {

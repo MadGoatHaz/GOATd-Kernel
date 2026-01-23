@@ -93,7 +93,7 @@ async fn test_logging_integration_full_cycle() {
 
     // Test 3: Session change invalidates file handle
     eprintln!("[TEST] Starting new session");
-    let session_result = collector.start_new_session("session_test.log");
+    let session_result = collector.start_new_session("session_test.log").await;
     assert!(session_result.is_ok(), "Session initialization should succeed");
     
     let session_path = collector.get_session_log_path();
@@ -194,7 +194,7 @@ async fn test_rapid_session_changes() {
     // Key test: verify that requesting a new session creates a new file
     for i in 0..3 {
         let filename = format!("session_{}.log", i);
-        let result = collector.start_new_session(&filename);
+        let result = collector.start_new_session(&filename).await;
         assert!(result.is_ok(), "Session initialization should succeed");
 
         // Send logs

@@ -103,7 +103,7 @@ build() {
     }
     
     // Apply Polly injection
-    match patcher.inject_polly_flags(options.clone()) {
+    match patcher.inject_polly_flags() {
         Ok(_) => {
             println!("[TEST]   ✓ Polly injection successful");
         }

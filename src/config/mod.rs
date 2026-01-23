@@ -162,30 +162,12 @@ impl SettingsManager {
         match std::fs::read_to_string(config_path) {
             Ok(content) => {
                 match serde_json::from_str::<AppState>(&content) {
-                    Ok(mut state) => {
-                        // STRICT SANITIZATION: Validate and reset workspace_path if absolute and non-existent
-                        if !state.workspace_path.is_empty() {
-                            let path = std::path::PathBuf::from(&state.workspace_path);
-                            if path.is_absolute() && !path.exists() {
-                                eprintln!("[Config] [CRITICAL] STALE PATH DETECTED - workspace_path: {}", state.workspace_path);
-                                eprintln!("[Config] [CRITICAL] Path is absolute but DOES NOT EXIST");
-                                eprintln!("[Config] [CRITICAL] ACTIVELY RESETTING to relative CWD: '.'");
-                                state.workspace_path = ".".to_string();
-                            }
-                        }
-                        
-                        // STRICT SANITIZATION: Validate and reset kernel_source_path if absolute and non-existent
-                        if !state.kernel_source_path.is_empty() {
-                            let path = std::path::PathBuf::from(&state.kernel_source_path);
-                            if path.is_absolute() && !path.exists() {
-                                eprintln!("[Config] [CRITICAL] STALE PATH DETECTED - kernel_source_path: {}", state.kernel_source_path);
-                                eprintln!("[Config] [CRITICAL] Path is absolute but DOES NOT EXIST");
-                                eprintln!("[Config] [CRITICAL] ACTIVELY RESETTING to relative CWD: '.'");
-                                state.kernel_source_path = ".".to_string();
-                            }
-                        }
-                        
-                        Ok(state)
+                    Ok(state) => {
+                         // REMOVED: Brittle absolute path sanitization that reset valid external build paths to '.'
+                         // This logic was causing "Failed to resolve kernel version" errors when kernels were built
+                         // in external directories (e.g., /mnt/Optane/goatd).
+                         // Path resolution is now proximity-first and uses .kernelrelease discovery.
+                         Ok(state)
                     }
                     Err(e) => {
                         // Graceful fallback: Log warning and return defaults instead of panicking
@@ -202,6 +184,9 @@ impl SettingsManager {
     pub fn save(state: &AppState) -> Result<(), ConfigError> {
         let config_path = "config/settings.json";
         
+        eprintln!("[CONFIG] [SETTINGS_SAVE] Persisting AppState to {}", config_path);
+        eprintln!("[CONFIG] [SETTINGS_SAVE]   selected_variant: '{}'", state.selected_variant);
+        
         // Ensure config directory exists
         let config_dir = std::path::Path::new("config");
         if !config_dir.exists() {
@@ -216,6 +201,7 @@ impl SettingsManager {
         std::fs::write(config_path, content)
             .map_err(ConfigError::IoError)?;
         
+        eprintln!("[CONFIG] [SETTINGS_SAVE] ✓ Successfully persisted AppState with variant: '{}'", state.selected_variant);
         Ok(())
     }
 
@@ -418,8 +404,14 @@ impl ConfigManager {
     /// # Returns
     ///
     /// Result indicating success or ConfigError
+    ///
+    /// # Critical Behavior
+    ///
+    /// Explicitly setting LTO also flips the `user_toggled_lto` flag to true.
+    /// This prevents the finalizer from overriding user choices with profile defaults.
     pub fn set_lto(&mut self, lto_type: LtoType) -> Result<(), ConfigError> {
         self.config.lto_type = lto_type;
+        self.config.user_toggled_lto = true;
         Ok(())
     }
 

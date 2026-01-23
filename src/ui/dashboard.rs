@@ -411,7 +411,7 @@ pub fn render_dashboard(ui: &mut egui::Ui, controller: &Arc<RwLock<AppController
                                 eprintln!("[DASHBOARD] [HEALTH] [STEP 1] Command: {}", install_cmd);
                                 let controller_guard = controller_clone.read().await;
                                 match controller_guard.system.batch_privileged_commands(vec![&install_cmd]) {
-                                    Ok(()) => {
+                                    Ok(_stdout) => {
                                         eprintln!("[DASHBOARD] [HEALTH] [STEP 1] ✓ Packages installed successfully");
                                     }
                                     Err(e) => {
