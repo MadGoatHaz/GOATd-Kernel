@@ -1295,6 +1295,22 @@ impl AppController {
     /// Uses `KernelArtifactRegistry` to safely correlate kernel, headers, and docs,
     /// ensuring all artifacts are from the same build before bundling into installation.
     ///
+    /// # PROFILE-AWARE PATH DISCOVERY (Specification Implementation)
+    /// The registry uses intelligent discovery heuristics to find headers and docs:
+    /// 1. **Standardized Identity Strategy**: Tries format `{pkgbase}-{suffix}-{pkgver}-{pkgrel}`
+    ///    - This matches the PKGBUILD spec: `/usr/src/${pkgbase}-${pkgver}-${pkgrel}`
+    ///    - Example: `linux-zen-goatd-gaming-headers-6.18.0-1` discovered
+    /// 2. **Primary Pattern**: `{kernel_variant}{suffix}-{kernel_release}`
+    ///    - Handles direct version match with internal version format
+    /// 3. **Filename Version Fallback**: Uses version extracted from package filename
+    ///    - Bridges gap between internal version (6.19.0-rc6) and external (6.19rc6-1)
+    /// 4. **Alternate Prefix Matching**: Tries `linux-{suffix}-{variant_core}-*`
+    ///    - Handles rebranded kernels like `linux-zen-goatd-gaming`
+    /// 5. **GOATd-Aware Pivot**: Detects `-goatd-` in variant for profile matching
+    ///    - Supports dynamic profiles: `goatd-gaming`, `goatd-server`, etc.
+    /// 6. **Fuzzy Component Matching**: Contains variant AND suffix AND version_core
+    /// 7. **Final Fallback**: Any `{kernel_variant}{suffix}-*` with ANY version
+    ///
     /// CRITICAL: Uses resolved kernel version from .kernelrelease (Step 3 of DKMS fix).
     pub fn install_kernel_async(&self, path: PathBuf) {
         self.log_event("KERNEL", &format!("Starting async kernel installation from: {}", path.display()));

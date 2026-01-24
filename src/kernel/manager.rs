@@ -344,7 +344,27 @@ impl KernelArtifactRegistry {
         // Build list of permutations to try
         let mut permutations: Vec<(String, &str)> = vec![];
         
-        // Permutation 1: Primary pattern: {variant}{suffix}-{kernel_release}
+        // Permutation 1: STANDARDIZED IDENTITY STRATEGY - {pkgbase}-{suffix}-{pkgver}-{pkgrel}
+        // This matches the specification format: /usr/src/${pkgbase}-${pkgver}-${pkgrel}
+        // where headers are installed as {pkgbase}-headers-{pkgver}-{pkgrel}
+        // Extract pkgver and pkgrel from kernel_release (split at last hyphen)
+        if let Some(last_hyphen_pos) = kernel_release.rfind('-') {
+            let pkgver_with_rel = &kernel_release[..last_hyphen_pos];
+            let pkgrel = &kernel_release[last_hyphen_pos + 1..];
+            // Sanitize pkgver by replacing hyphens with dots (Arch Linux convention)
+            let pkgver = pkgver_with_rel.replace('-', ".");
+            permutations.push((
+                format!("{}{}-{}-{}", kernel_variant, suffix, pkgver, pkgrel),
+                "standardized identity (sanitized pkgver)"
+            ));
+            // Also try without sanitization in case it's already sanitized
+            permutations.push((
+                format!("{}{}-{}-{}", kernel_variant, suffix, pkgver_with_rel, pkgrel),
+                "standardized identity (unsanitized pkgver)"
+            ));
+        }
+        
+        // Permutation 1.5: Primary pattern: {variant}{suffix}-{kernel_release}
         permutations.push((
             format!("{}{}-{}", kernel_variant, suffix, kernel_release),
             "primary version match"

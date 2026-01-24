@@ -813,12 +813,17 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
         // HARDENED: Only replace variant AFTER the 'package_' prefix using strict dual-pattern approach
         // Prevents corruption like: pkgrel=1-goatd-gaming() {
         if line.starts_with("package_") && line.contains("() {") {
-            // Strict regex pattern with anchors: ^(package_)([a-z0-9-]+)(VARIANT)([a-z0-9_-]*)\(\)\s*\{
-            // This ensures proper parsing of the function signature with word boundaries
+            // Robust regex pattern for function renaming that handles:
+            // 1. Hyphenated variants: linux-zen, linux-lts, linux-mainline, etc.
+            // 2. Multi-level variants: linux-zen-goatd-gaming (already branded)
+            // 3. Prefix combinations: package_linux-zen, custom_linux-zen, etc.
+            // The variant may contain hyphens which are literal in the regex when escaped.
             
             let mut replaced = false;
             
-            // Try hyphenated variant first: e.g., package_linux-mainline
+            // Try hyphenated variant first: e.g., package_linux-zen
+            // Pattern: ^(package_)([a-z0-9-]*)(VARIANT)([a-z0-9_-]*)\(\)\s*\{
+            // This correctly handles the variant name with hyphens included
             let escaped_variant = regex::escape(&variant);
             let pattern_str = format!("^(package_)([a-z0-9-]*)({})([a-z0-9_-]*)\\(\\)\\s*\\{{", escaped_variant);
             
@@ -842,6 +847,7 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
             }
             
             // If hyphenated replacement didn't work, try underscored variant: e.g., package_linux_zen
+            // Pattern converts hyphens to underscores for compatibility with Bash function names
             if !replaced {
                 let underscore_variant = variant.replace("-", "_");
                 let escaped_variant = regex::escape(&underscore_variant);

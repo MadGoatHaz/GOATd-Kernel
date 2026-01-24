@@ -150,9 +150,10 @@ pub struct SettingsManager;
 impl SettingsManager {
     /// Load AppState from config/settings.json, or return defaults if file doesn't exist
     ///
-    /// STRICT SANITIZATION: Validates paths to ensure they're not stale absolute paths.
-    /// If a path is absolute and doesn't exist, it's ACTIVELY RESET to `.` (relative CWD).
-    /// This prevents outdated mount points or removed paths from breaking builds.
+    /// STARTUP VALIDATION: Validates `workspace_path` upon loading to ensure:
+    /// - Path exists and is a directory
+    /// - If invalid, resets `workspace_path` to empty string for fallback to CWD
+    /// This prevents stale paths from blocking builds while respecting user selections.
     ///
     /// ERROR HANDLING: If deserialization fails, logs a warning and returns defaults
     /// instead of panicking. This provides graceful fallback when config format changes.
@@ -162,11 +163,16 @@ impl SettingsManager {
         match std::fs::read_to_string(config_path) {
             Ok(content) => {
                 match serde_json::from_str::<AppState>(&content) {
-                    Ok(state) => {
-                         // REMOVED: Brittle absolute path sanitization that reset valid external build paths to '.'
-                         // This logic was causing "Failed to resolve kernel version" errors when kernels were built
-                         // in external directories (e.g., /mnt/Optane/goatd).
-                         // Path resolution is now proximity-first and uses .kernelrelease discovery.
+                    Ok(mut state) => {
+                         // VALIDATION: Check if workspace_path exists and is a directory
+                         if !state.workspace_path.is_empty() {
+                             let path = std::path::Path::new(&state.workspace_path);
+                             if !path.exists() || !path.is_dir() {
+                                 eprintln!("[Config] [VALIDATION] workspace_path is invalid (doesn't exist or not a directory): '{}'", state.workspace_path);
+                                 eprintln!("[Config] [VALIDATION] Resetting workspace_path to empty string for CWD fallback");
+                                 state.workspace_path = String::new();
+                             }
+                         }
                          Ok(state)
                     }
                     Err(e) => {
