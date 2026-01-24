@@ -39,7 +39,7 @@ async fn main() -> goatd_kernel::Result<()> {
             return Err(format!("Failed to determine logs directory: {}", e).into());
         }
     };
-    let (log_ui_tx, mut log_ui_rx) = mpsc::channel::<LogLine>(1024);
+    let (log_ui_tx, log_ui_rx) = mpsc::channel::<LogLine>(1024);
     let log_collector = match LogCollector::new(log_dir, log_ui_tx) {
         Ok(collector) => {
             eprintln!("[Main] ✓ LogCollector initialized (decoupled, non-blocking)");
@@ -69,35 +69,10 @@ async fn main() -> goatd_kernel::Result<()> {
     // =========================================================================
     let (build_tx, build_rx) = tokio::sync::mpsc::channel::<BuildEvent>(65536);
     
-    // =========================================================================
-    // LOG UI DRAINING TASK - FORWARD LOGS TO BUILD EVENT CHANNEL
-    // =========================================================================
-    // Spawn an async task to drain log_ui_rx and forward to build_tx as BuildEvent
-    let build_tx_clone = build_tx.clone();
-    tokio::spawn(async move {
-        let mut log_count = 0u32;
-        while let Some(log_line) = log_ui_rx.recv().await {
-            log_count += 1;
-            
-            // Route based on log type
-            match log_line.log_type.as_str() {
-                "parsed" => {
-                    // High-level status updates
-                    let _ = build_tx_clone.send(BuildEvent::StatusUpdate(log_line.message.clone())).await;
-                }
-                _ => {
-                    // Regular detailed logs
-                    let _ = build_tx_clone.send(BuildEvent::Log(log_line.message.clone())).await;
-                }
-            }
-            
-            // Throttle logging to prevent channel overwhelm
-            if log_count % 1000 == 0 {
-                eprintln!("[Main] Log drain task: processed {} messages", log_count);
-            }
-        }
-        eprintln!("[Main] Log drain task: shutting down (log_ui_rx closed)");
-    });
+    // NOTE: Log UI draining task removed - redundant with LogCollector direct logging
+    // Drop unused log_ui_rx to prevent channel panics
+    drop(log_ui_rx);
+    
     let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
     
     let controller = AppController::new_production(build_tx.clone(), cancel_tx.clone(), Some(log_collector.clone())).await;

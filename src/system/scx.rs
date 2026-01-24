@@ -258,7 +258,7 @@ impl SCXManager {
 
         // Step 1: Verify /proc/config.gz exists
         if !Path::new(PROC_CONFIG_PATH).exists() {
-            log_info!("[SCXManager] /proc/config.gz not found");
+            log::debug!("[SCXManager] /proc/config.gz not found");
             return false;
         }
 
@@ -273,20 +273,20 @@ impl SCXManager {
                     Ok(_) => {
                         // Step 4: Search for CONFIG_SCHED_CLASS_EXT=y
                         let supported = contents.lines().any(|line| line == SCX_CONFIG_KEY);
-                        log_info!(
+                        log::debug!(
                             "[SCXManager] SCX support check: {}",
                             if supported { "SUPPORTED" } else { "NOT SUPPORTED" }
                         );
                         supported
                     }
                     Err(e) => {
-                        log_info!("[SCXManager] Failed to decompress /proc/config.gz: {}", e);
+                        log::debug!("[SCXManager] Failed to decompress /proc/config.gz: {}", e);
                         false
                     }
                 }
             }
             Err(e) => {
-                log_info!("[SCXManager] Failed to open /proc/config.gz: {}", e);
+                log::debug!("[SCXManager] Failed to open /proc/config.gz: {}", e);
                 false
             }
         }
@@ -333,14 +333,14 @@ impl SCXManager {
         for (name, path) in scheduler_bins {
             if Path::new(path).exists() {
                 available.push(name.to_string());
-                log_info!("[SCXManager] Found scheduler: {}", name);
+                log::debug!("[SCXManager] Found scheduler: {}", name);
             }
         }
 
         if available.is_empty() {
-            log_info!("[SCXManager] No SCX schedulers found");
+            log::debug!("[SCXManager] No SCX schedulers found");
         } else {
-            log_info!("[SCXManager] Available schedulers: {:?}", available);
+            log::debug!("[SCXManager] Available schedulers: {:?}", available);
         }
 
         // Update cache
@@ -472,12 +472,12 @@ impl SCXManager {
 
         for (path, service_name) in &service_candidates {
             if Path::new(path).exists() {
-                log_info!("[SCXManager] Found SCX service: {} at {}", service_name, path);
+                log::debug!("[SCXManager] Found SCX service: {} at {}", service_name, path);
                 return Some(service_name.to_string());
             }
         }
 
-        log_info!("[SCXManager] No SCX service found (checked both scx_loader.service and scx.service)");
+        log::debug!("[SCXManager] No SCX service found (checked both scx_loader.service and scx.service)");
         None
     }
 

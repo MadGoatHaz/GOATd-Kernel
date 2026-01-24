@@ -175,6 +175,10 @@ pub struct UIState {
     /// Prevents repeated expensive /proc/config.gz reads during frame rendering
     pub cached_scx_readiness: crate::system::scx::SCXReadiness,
     
+    /// Last time SCX readiness was checked (for frame-throttling)
+    /// Ensures get_scx_readiness() is called at most once per second
+    pub last_scx_readiness_check: Option<Instant>,
+    
     /// Active SCX metadata for current scheduler/mode selection
     /// Contains description, best-for use cases, CLI flags, and recommendation level
     pub active_scx_metadata: Option<crate::system::scx::ScxMetadata>,
@@ -267,6 +271,7 @@ impl Default for UIState {
             scx_task_completion_flag: None,
             scx_task_start_time: None,
             cached_scx_readiness: SCXReadiness::Ready,
+            last_scx_readiness_check: None,
             active_scx_metadata: None,
             scx_initial_sync_done: false,
             cached_theme_idx: None,
@@ -698,12 +703,30 @@ impl eframe::App for AppUI {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
         
-        // HEAVY LOGIC OUT OF RENDER LOOP (FIX 4)
-        // Compute SCX readiness in update() (app logic thread) instead of render (every frame)
-        // SCXManager::get_scx_readiness() internally caches for 60 seconds anyway
-        // Cache it in UIState to avoid the function call during every render
+        // HEAVY LOGIC OUT OF RENDER LOOP (FIX 4) - TAB-GATED AND FRAME-THROTTLED
+        // Compute SCX readiness only when on Dashboard or KernelManager tabs
+        // Throttle to once per second to avoid redundant /proc/config.gz reads + internal cache hits
+        // SCXManager::get_scx_readiness() internally caches for 60 seconds, but we throttle UI calls
         use crate::system::scx::SCXManager;
-        self.ui_state.cached_scx_readiness = SCXManager::get_scx_readiness();
+        
+        let is_scx_check_active_tab = matches!(self.ui_state.active_tab, Tab::Dashboard | Tab::KernelManager);
+        let should_update_scx_readiness = if is_scx_check_active_tab {
+            // Only when on relevant tabs: check if >= 1 second has elapsed since last check
+            if let Some(last_check) = self.ui_state.last_scx_readiness_check {
+                last_check.elapsed().as_secs_f64() >= 1.0
+            } else {
+                // First time checking on this tab session
+                true
+            }
+        } else {
+            // Not on Dashboard or KernelManager, skip check
+            false
+        };
+        
+        if should_update_scx_readiness {
+            self.ui_state.cached_scx_readiness = SCXManager::get_scx_readiness();
+            self.ui_state.last_scx_readiness_check = Some(Instant::now());
+        }
         
         // CACHE MISSING AUR PACKAGES for UI blocking (from cached health report)
         // This allows UI elements tied to missing dependencies to be disabled/greyed out

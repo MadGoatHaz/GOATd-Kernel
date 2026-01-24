@@ -29,367 +29,172 @@ Disk (/): 16.98 GiB / 406.10 GiB (4%) - btrfs
 
 
 ------
-[17:25:10.755] [INFO] [AppController] [BUILD] Full build log: /home/testgoat/Documents/GOATd-Kernel-master/logs/full/build_20260123_172510.755.log
-[17:25:10.755] [INFO] [BUILD] Configuration synchronized: variant=linux, profile=Workstation, lto=full, hardening=Minimal
-[17:25:10.931] [INFO] [BUILD] Failed to canonicalize workspace path: No such file or directory (os error 2)
-[17:25:10.931] [INFO] [BUILD] Failed to create workspace directory: Permission denied (os error 13), falling back to CWD
-[17:25:10.931] [INFO] [BUILD] [CONFIG_VALIDATION] version field: 'latest' (should be 'latest' for dynamic resolution)
-[17:25:10.931] [INFO] [BUILD] [CONFIG_VALIDATION] kernel_variant field: 'linux' (identifies which variant to fetch)
-[17:25:10.931] [INFO] [BUILD] Config: variant=latest, lto=Full, profile=Workstation
-[17:25:15.094] PHASE TRANSITION: Configuration
-[17:25:15.094] [INFO] [ORCHESTRATOR] [VERSION] [ENTRY] Incoming config state - version: 'latest', variant: 'linux'
-[17:25:15.094] [INFO] [ORCHESTRATOR] [VERSION] Resolving dynamic version for variant: 'linux'
-[17:25:15.094] [INFO] [ORCHESTRATOR] [VERSION] [PRIORITY-1] Fetching latest version for variant: 'linux'
-[17:25:15.094] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux'
-[17:25:15.608] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux': '6.18.6.arch1-1'
-[17:25:15.608] [INFO] [ORCHESTRATOR] [VERSION] [PRIORITY-1] Successfully resolved 'latest' to: '6.18.6.arch1-1'
-[17:25:15.608] [INFO] [ORCHESTRATOR] [VERSION] Config updated with resolved version: '6.18.6.arch1-1'
-[17:25:15.608] [INFO] [ORCHESTRATOR] [PREPARATION] Version resolution complete. Using version: '6.18.6.arch1-1'
-[17:25:15.608] PHASE TRANSITION: Patching
-[17:25:15.619] PHASE TRANSITION: Building
-[17:25:15.620] [INFO] [Patcher] [SOURCE-REPAIR] Validating PKGBUILD for variant: 'linux' with version: '6.18.6.arch1-1'
-[17:25:15.620] [WARN] [Patcher] [SOURCE-REPAIR] Repairing PKGBUILD: variant_mismatch=false, version_mismatch=true
-[17:25:17.443] ==> Making package: linux-goatd-workstation 6.18.6.arch1-1 (Fri 23 Jan 2026 05:25:17 PM MST)
-[17:25:17.443] ==> Making package: linux-goatd-workstation 6.18.6.arch1-1 (Fri 23 Jan 2026 05:25:17 PM MST)
-[17:25:17.444] ==> Checking runtime dependencies...
-[17:25:17.444] ==> Checking runtime dependencies...
-[17:25:17.445] ==> Checking buildtime dependencies...
-[17:25:17.445] ==> Checking buildtime dependencies...
-[17:25:17.462] ==> Retrieving sources...
-[17:25:17.462] ==> Retrieving sources...
-[17:25:17.468]   -> Downloading linux-6.18.6.tar.xz...
-[17:25:17.472] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
-[17:25:17.472] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
-[17:25:54.521] [STDERR]
-  0      0   0      0   0      0      0      0                              0
-  0 147.1M   0   4212   0      0   3264      0 13h 08m   00:01 13h 08m   3265
-  0 147.1M   0 847.9k   0      0 370.4k      0   06:46   00:02   06:44 370.4k
-  2 147.1M   2  4.03M   0      0  1.22M      0   02:00   00:03   01:57  1.22M
-  5 147.1M   5  7.88M   0      0  1.83M      0   01:20   00:04   01:16  1.83M
-  8 147.1M   8 12.12M   0      0  2.29M      0   01:04   00:05   00:59  2.29M
- 11 147.1M  11 16.87M   0      0  2.68M      0   00:54   00:06   00:48  3.37M
- 14 147.1M  14 21.73M   0      0  2.97M      0   00:49   00:07   00:42  4.17M
- 18 147.1M  18 26.65M   0      0  3.21M      0   00:45   00:08   00:37  4.52M
- 21 147.1M  21 31.40M   0      0  3.37M      0   00:43   00:09   00:34  4.70M
- 24 147.1M  24 35.95M   0      0  3.49M      0   00:42   00:10   00:32  4.76M
- 27 147.1M  27 40.85M   0      0  3.61M      0   00:40   00:11   00:29  4.79M
- 31 147.1M  31 46.09M   0      0  3.74M      0   00:39   00:12   00:27  4.86M
- 34 147.1M  34 51.37M   0      0  3.86M      0   00:38   00:13   00:25  4.93M
- 37 147.1M  37 55.70M   0      0  3.89M      0   00:37   00:14   00:23  4.84M
- 41 147.1M  41 60.70M   0      0  3.96M      0   00:37   00:15   00:22  4.93M
- 44 147.1M  44 65.85M   0      0  4.03M      0   00:36   00:16   00:20  4.99M
- 48 147.1M  48 71.15M   0      0  4.11M      0   00:35   00:17   00:18  5.00M
- 52 147.1M  52 76.71M   0      0  4.18M      0   00:35   00:18   00:17  5.06M
- 55 147.1M  55 82.13M   0      0  4.25M      0   00:34   00:19   00:15  5.27M
- 59 147.1M  59 87.55M   0      0  4.31M      0   00:34   00:20   00:14  5.36M
- 62 147.1M  62 92.60M   0      0  4.34M      0   00:33   00:21   00:12  5.34M
- 66 147.1M  66 98.02M   0      0  4.39M      0   00:33   00:22   00:11  5.37M
- 70 147.1M  70 104.0M   0      0  4.46M      0   00:32   00:23   00:09  5.46M
- 74 147.1M  74 109.5M   0      0  4.50M      0   00:32   00:24   00:08  5.49M
- 76 147.1M  76 112.7M   0      0  4.45M      0   00:33   00:25   00:08  5.03M
- 79 147.1M  79 116.2M   0      0  4.41M      0   00:33   00:26   00:07  4.73M
- 81 147.1M  81 119.7M   0      0  4.37M      0   00:33   00:27   00:06  4.32M
- 83 147.1M  83 122.1M   0      0  4.31M      0   00:34   00:28   00:06  3.60M
- 84 147.1M  84 124.6M   0      0  4.24M      0   00:34   00:29   00:05  2.98M
- 86 147.1M  86 127.2M   0      0  4.19M      0   00:35   00:30   00:05  2.88M
- 88 147.1M  88 129.9M   0      0  4.14M      0   00:35   00:31   00:04  2.71M
- 90 147.1M  90 132.8M   0      0  4.10M      0   00:35   00:32   00:03  2.61M
- 92 147.1M  92 135.6M   0      0  4.06M      0   00:36   00:33   00:03  2.69M
- 93 147.1M  93 138.3M   0      0  4.02M      0   00:36   00:34   00:02  2.73M
- 96 147.1M  96 141.4M   0      0  4.00M      0   00:36   00:35   00:01  2.83M
- 98 147.1M  98 144.8M   0      0  3.98M      0   00:36   00:36          2.97M
-100 147.1M 100 147.1M   0      0  3.97M      0   00:37   00:37          2.97M
-100 147.1M 100 147.1M   0      0  3.97M      0   00:37   00:37          2.97M
-100 147.1M 100 147.1M   0      0  3.97M      0   00:37   00:37          2.97M
-[17:25:54.533]   -> Downloading linux-6.18.6.tar.sign...
-[17:25:54.537] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
-[17:25:54.537] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
-[17:25:54.899] [STDERR]
-  0      0   0      0   0      0      0      0                              0
-100    989 100    989   0      0   2729      0                              0
-100    989 100    989   0      0   2729      0                              0
-100    989 100    989   0      0   2728      0                              0
-[17:25:54.908]   -> Downloading linux-v6.18.6-arch1.patch.zst...
-[17:25:54.911] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
-[17:25:54.911] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
-[17:25:55.257] [STDERR]
-  0      0   0      0   0      0      0      0                              0
-  0      0   0      0   0      0      0      0                              0
-  0      0   0      0   0      0      0      0                              0
-[17:25:55.497] [STDERR]
-  0      0   0      0   0      0      0      0                              0
-100   4737 100   4737   0      0   8097      0                              0
-100   4737 100   4737   0      0   8096      0                              0
-100   4737 100   4737   0      0   8096      0                              0
-[17:25:55.506]   -> Downloading linux-v6.18.6-arch1.patch.zst.sig...
-[17:25:55.509] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
-[17:25:55.509] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
-[17:25:55.835] [STDERR]
-  0      0   0      0   0      0      0      0                              0
-  0      0   0      0   0      0      0      0                              0
-  0      0   0      0   0      0      0      0                              0
-[17:25:56.014] [STDERR]
-  0      0   0      0   0      0      0      0                              0
-100    228 100    228   0      0    451      0                              0
-100    228 100    228   0      0    451      0                              0
-100    228 100    228   0      0    451      0                              0
-[17:25:56.020]   -> Found config
-[17:25:56.023] ==> Validating source files with sha256sums...
-[17:25:56.023] ==> Validating source files with sha256sums...
-[17:25:56.372] [STDERR]     linux-6.18.6.tar.xz ... Passed
-[17:25:56.374] [STDERR]     linux-6.18.6.tar.sign ... Skipped
-[17:25:56.379] [STDERR]     linux-v6.18.6-arch1.patch.zst ... Passed
-[17:25:56.381] [STDERR]     linux-v6.18.6-arch1.patch.zst.sig ... Skipped
-[17:25:56.387] [STDERR]     config ... Passed
-[17:25:56.388] ==> Validating source files with b2sums...
-[17:25:56.388] ==> Validating source files with b2sums...
-[17:25:56.557] [STDERR]     linux-6.18.6.tar.xz ... Passed
-[17:25:56.559] [STDERR]     linux-6.18.6.tar.sign ... Skipped
-[17:25:56.564] [STDERR]     linux-v6.18.6-arch1.patch.zst ... Passed
-[17:25:56.566] [STDERR]     linux-v6.18.6-arch1.patch.zst.sig ... Skipped
-[17:25:56.571] [STDERR]     config ... Passed
-[17:25:56.574] ==> Verifying source file signatures with gpg...
-[17:25:56.574] ==> Verifying source file signatures with gpg...
-[17:25:58.426] [STDERR]     linux-6.18.6.tar ... Passed
-[17:25:58.439] [STDERR]     linux-v6.18.6-arch1.patch.zst ... Passed
-[17:25:58.442] ==> Extracting sources...
-[17:25:58.442] ==> Extracting sources...
-[17:25:58.487]   -> Extracting linux-6.18.6.tar.xz with bsdtar
-[17:26:06.975]   -> Extracting linux-v6.18.6-arch1.patch.zst with zstd
-[17:26:07.002] ==> Starting prepare()...
-[17:26:07.002] ==> Starting prepare()...
-[17:26:07.002] [STDERR] [MODPROBED] [PATH-DETECTION] HOME env var: $HOME
-[17:26:07.002] [STDERR] [MODPROBED] [PATH-DETECTION] Resolved modprobed.db path: /home/testgoat/.config/modprobed.db
-[17:26:07.002] [STDERR] [MODPROBED] [PATH-DETECTION] Checked: $HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db
-[17:26:07.002] [STDERR] [MODPROBED] Found modprobed-db at /home/testgoat/.config/modprobed.db
-[17:26:07.002] [STDERR] [MODPROBED] Running localmodconfig to filter kernel modules...
-[17:26:07.003] [STDERR] [MODPROBED] This will automatically filter kernel modules to those in use
-[17:26:07.003] [STDERR] [MODPROBED] Using modprobed database: /home/testgoat/.config/modprobed.db
-[17:26:07.004] [STDERR] [MODPROBED] Found kernel source directory: /home/testgoat/Documents/GOATd-Kernel-master/linux/src/linux-6.18.6
-[17:26:07.004] [STDERR] [MODPROBED] Changed to kernel source directory
-[17:26:07.004] [STDERR] [MODPROBED] Running: yes "" | make LLVM=1 LLVM_IAS=1 LSMOD=/home/testgoat/.config/modprobed.db localmodconfig
-[17:26:07.372]   HOSTCC  scripts/basic/fixdep
-[17:26:07.661]   HOSTCC  scripts/kconfig/conf.o
-[17:26:07.661]   HOSTCC  scripts/kconfig/confdata.o
-[17:26:07.661]   HOSTCC  scripts/kconfig/expr.o
-[17:26:07.662]   LEX     scripts/kconfig/lexer.lex.c
-[17:26:07.662]   YACC    scripts/kconfig/parser.tab.[ch]
-[17:26:07.662]   HOSTCC  scripts/kconfig/preprocess.o
-[17:26:07.662]   HOSTCC  scripts/kconfig/symbol.o
-[17:26:07.662]   HOSTCC  scripts/kconfig/menu.o
-[17:26:07.663]   HOSTCC  scripts/kconfig/util.o
-[17:26:07.752]   HOSTCC  scripts/kconfig/lexer.lex.o
-[17:26:07.752]   HOSTCC  scripts/kconfig/parser.tab.o
-[17:26:07.954]   HOSTLD  scripts/kconfig/conf
-[17:26:07.998] using config: '/proc/config.gz'
-[17:26:10.941] #
-[17:26:10.941] # configuration written to .config
-[17:26:10.941] #
-[17:26:10.943] [STDERR] [MODPROBED] SUCCESS: Kernel configuration filtered for used modules
-[17:26:10.945] [STDERR] [MODPROBED] Module count after localmodconfig: 132
-[17:26:10.945] [STDERR] [MODPROBED] Modprobed-db discovery complete - PHASE G2 enforcer will protect filtered modules
-[17:26:10.945] Setting version...
-[17:26:10.945] Applying patch linux-v6.18.6-arch1.patch...
-[17:26:10.947] patching file Makefile
-[17:26:10.947] patching file drivers/android/binder/thread.rs
-[17:26:10.947] patching file drivers/gpu/drm/amd/amdgpu/amdgpu_ids.c
-[17:26:10.947] patching file drivers/gpu/drm/amd/amdgpu/amdgpu_vm.c
-[17:26:10.947] patching file drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
-[17:26:10.948] patching file drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
-[17:26:10.948] patching file kernel/fork.c
-[17:26:10.948] patching file net/ipv4/esp4_offload.c
-[17:26:10.948] patching file net/ipv6/esp6_offload.c
-[17:26:10.950] Setting config...
-[17:26:10.967] [STDERR] [PHASE-G2.5] Module count after 'Setting config...': 6199
-[17:26:10.967] [STDERR] [PHASE-G2.5] [PATH-DETECTION] Found modprobed.db at: /home/testgoat/.config/modprobed.db
-[17:26:10.967] [STDERR] [PHASE-G2.5] Re-running: yes "" | make LLVM=1 LLVM_IAS=1 LSMOD=/home/testgoat/.config/modprobed.db localmodconfig
-[17:26:14.143] [STDERR] [PHASE-G2.5] Module count after re-filtering: 132
-[17:26:14.143] [STDERR] [PHASE-G2.5] [LTO-RE-ENFORCEMENT] Checking for LTO restoration...
-[17:26:14.143] [STDERR] [PHASE-G2.5] [LTO-RE-ENFORCEMENT] Detected LTO type: full
-[17:26:14.146] [STDERR] [PHASE-G2.5] [LTO-RE-ENFORCEMENT] Surgically removed all LTO config lines
-[17:26:14.148] [STDERR] [PHASE-G2.5] [LTO-RE-ENFORCEMENT] RE-ENFORCED CONFIG_LTO_CLANG_FULL=y (FULL LTO)
-[17:26:14.148] [STDERR] [PHASE-G2.5] SUCCESS: Modprobed filtering, CMDLINE parameters, MGLRU, and LTO settings restored
-[17:26:16.611] #
-[17:26:16.611] # configuration written to .config
-[17:26:16.611] #
-[17:26:16.615] --- ../config	2026-01-23 17:25:14.548825305 -0700
-[17:26:16.615] +++ .config	2026-01-23 17:26:16.609004289 -0700
-[17:26:16.616] @@ -2,15 +2,15 @@
-[17:26:16.616]  # Automatically generated file; DO NOT EDIT.
-[17:26:16.616]  # Linux/x86 6.18.6-arch1 Kernel Configuration
-[17:26:16.616]  #
--------
-[17:26:18.139]  #
-[17:26:18.139]  # Rust hacking
-[17:26:18.139]  #
-[17:26:18.139] -# CONFIG_RUST_DEBUG_ASSERTIONS is not set
-[17:26:18.139] -CONFIG_RUST_OVERFLOW_CHECKS=y
-[17:26:18.139] -# CONFIG_RUST_BUILD_ASSERT_ALLOW is not set
-[17:26:18.139]  # end of Rust hacking
-[17:26:18.139]  # end of Kernel hacking
-[17:26:18.139]
-[17:26:18.140] Prepared linux-goatd-workstation version 6.18.6-arch1-1-goatd-workstation
-[17:26:18.140] ==> Starting build()...
-[17:26:18.140] ==> Starting build()...
--------
-[elf64-x86-64]
-[17:46:46.334] Adding symlink...
-[17:46:46.337] ==> Tidying install...
-[17:46:46.337] ==> Tidying install...
-[17:46:46.338]   -> Removing libtool files...
-[17:46:46.412]   -> Removing static library files...
-[17:46:46.485]   -> Purging unwanted files...
-[17:46:46.631]   -> Compressing man and info pages...
-[17:46:46.634] ==> Checking for packaging issues...
-[17:46:46.634] ==> Checking for packaging issues...
-[17:46:47.432] [STDERR] ==> WARNING: Package contains reference to $srcdir
-[17:46:47.432] [STDERR] usr/lib/modules/6.18.6-arch1-1-goatd-workstation/vdso/vdso32.so
-[17:46:47.432] [STDERR] usr/lib/modules/6.18.6-arch1-1-goatd-workstation/vdso/vdso64.so
-[17:46:47.845] ==> Creating package "linux-goatd-workstation-headers"...
-[17:46:47.845] ==> Creating package "linux-goatd-workstation-headers"...
-[17:46:47.846]   -> Generating .PKGINFO file...
-[17:46:48.595]   -> Generating .BUILDINFO file...
-[17:46:48.884]   -> Generating .MTREE file...
-[17:46:49.934]   -> Compressing package...
-[17:46:50.933] ==> Starting package_linux-goatd-workstation-docs()...
-[17:46:50.933] ==> Starting package_linux-goatd-workstation-docs()...
-[17:46:50.933] Installing documentation...
-[17:46:55.111] [INFO] [SCXManager] SCX support check: SUPPORTED
-[17:46:55.111] [INFO] [SCXManager] Found SCX service: scx_loader.service at /usr/lib/systemd/system/scx_loader.service
-[17:47:07.206] Adding symlink...
-[17:47:07.209] ==> Tidying install...
-[17:47:07.209] ==> Tidying install...
-[17:47:07.210]   -> Removing libtool files...
-[17:47:07.259]   -> Removing static library files...
-[17:47:07.309]   -> Purging unwanted files...
-[17:47:07.405]   -> Compressing man and info pages...
-[17:47:07.408] ==> Checking for packaging issues...
-[17:47:07.408] ==> Checking for packaging issues...
-[17:47:09.355] ==> Creating package "linux-goatd-workstation-docs"...
-[17:47:09.355] ==> Creating package "linux-goatd-workstation-docs"...
-[17:47:09.357]   -> Generating .PKGINFO file...
-[17:47:10.428]   -> Generating .BUILDINFO file...
-[17:47:10.717]   -> Generating .MTREE file...
-[17:47:12.332]   -> Compressing package...
-[17:47:13.721] ==> Leaving fakeroot environment.
-[17:47:13.721] ==> Leaving fakeroot environment.
-[17:47:13.724] ==> Finished making: linux-goatd-workstation 6.18.6.arch1-1 (Fri 23 Jan 2026 05:47:13 PM MST)
-[17:47:13.724] ==> Finished making: linux-goatd-workstation 6.18.6.arch1-1 (Fri 23 Jan 2026 05:47:13 PM MST)
-[17:47:13.725] PHASE TRANSITION: Validation
-[17:47:13.725] PHASE TRANSITION: Completed
-[17:47:19.589] [INFO] [KernelManager] Kernel scan complete: 2 installed kernels found
-[17:47:19.589] [INFO] [KernelManager] Workspace path does not exist: /mnt/Optane/goatd
-[17:48:01.608] [INFO] GOATd Kernel logging initialized
-[17:48:01.608] [INFO] [AppController] Initializing AppController
-[17:48:01.608] [INFO] [AppController] Settings loaded successfully
-[17:48:01.608] [INFO] [AppController] All modules initialized (system, kernel_manager, audit)
-[17:48:01.608] [INFO] [AppController] AppController ready for production
-[17:48:01.608] [INFO] [AppController] INIT: audit_on_startup flag is set, running initial deep audit
-[17:48:01.609] [INFO] [KernelAudit] Auditing booted kernel: 6.18.6-arch1-1-goatd-gaming
-[17:48:01.612] [INFO] [KernelAudit] Successfully read kernel config from /proc/config.gz
-[17:48:01.612] [INFO] [KernelAudit] LTO status detected: Full
-[17:48:01.612] [INFO] [KernelAudit] Standard modules (modules.order): 126
-[17:48:01.612] [INFO] [KernelAudit] DKMS update modules: 5
-[17:48:01.612] [INFO] [KernelAudit] Total module count (modules.order + DKMS): 131
-[17:48:01.652] [INFO] [CPUAudit] Detected CPU family: AMD Ryzen 5 5500
-[17:48:01.652] [INFO] [CPUAudit] x86-64-v3 detected (AVX2 found)
-[17:48:01.652] [INFO] [CPUAudit] Detected x86-64 level: x86-64-v3
-[17:48:01.652] [INFO] [CPUAudit] ISA features detected: AVX2 SSE4.2
-[17:48:01.652] [INFO] [CPUAudit] Detected ISA features: AVX2 SSE4.2
-[17:48:01.657] [INFO] [KernelAudit] Successfully read kernel config from /proc/config.gz
-[17:48:01.657] [INFO] [KernelAudit] Timer frequency detected: 1000 Hz
-[17:48:01.660] [INFO] [KernelAudit] Successfully read kernel config from /proc/config.gz
-[17:48:01.660] [INFO] [KernelAudit] Preemption model detected: Full
-[17:48:01.661] [INFO] [KernelAudit] Root filesystem device (raw): /dev/nvme0n1p2[/@]
-[17:48:01.661] [INFO] [KernelAudit] Extracting base device from: /dev/nvme0n1p2[/@]
-[17:48:01.661] [INFO] [KernelAudit] Base device extracted: 'nvme0n1'
-[17:48:01.661] [INFO] [KernelAudit] Base block device extracted: nvme0n1
-[17:48:01.661] [INFO] [KernelAudit] NVMe root device found with hardware queue-based I/O handling
-[17:48:01.661] [INFO] [KernelAudit] Starting CPU scheduler detection
-[17:48:01.661] [INFO] [KernelAudit] Active SCX scheduler from sysfs: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
-[17:48:01.661] [INFO] [KernelAudit] SCX scheduler detected at kernel layer: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
-[17:48:01.663] [INFO] [KernelAudit] scxctl output parsed but Mode line not found
-[17:48:01.663] [INFO] [KernelAudit] CPU scheduler: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
-[17:48:01.663] [INFO] [KernelAudit] Attempting MGLRU sysfs read from /sys/kernel/mm/lru_gen/enabled
-[17:48:01.663] [INFO] [KernelAudit] MGLRU sysfs read successful, raw value: '0x0007'
-[17:48:01.663] [INFO] [KernelAudit] Cleaned MGLRU value for parsing: '0007'
-[17:48:01.663] [INFO] [KernelAudit] MGLRU successfully parsed as hex integer: 7
-[17:48:01.663] [INFO] [KernelAudit] MGLRU status: Full (Tier+Ref+Thr)
-[17:48:01.663] [INFO] [AppController] INIT: Done: Initial audit complete, dashboard cache populated
-[17:48:01.663] [INFO] [AppController] INIT:   Kernel: 6.18.6-arch1-1-goatd-gaming
-[17:48:01.663] [INFO] [AppController] INIT:   CPU Scheduler: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
-[17:48:01.663] [INFO] [AppController] INIT:   LTO: Full
-[17:48:01.734] [INFO] perform;
-[17:48:01.734] [INFO] write_command; command=Auth(Some(External), Some([49, 48, 48, 48]))
-[17:48:01.734] [TRACE] -- write_command;
-[17:48:01.734] [INFO] read_command;
-[17:48:01.734] [TRACE] -- read_command;
-[17:48:01.734] [INFO] write_command; command=NegotiateUnixFD
-[17:48:01.734] [TRACE] -- write_command;
-[17:48:01.734] [INFO] read_command;
-[17:48:01.734] [TRACE] -- read_command;
-[17:48:01.734] [INFO] write_command; command=Begin
-[17:48:01.734] [TRACE] -- write_command;
-[17:48:01.734] [TRACE] -- perform;
-[17:48:01.734] [INFO] socket reader;
-[17:48:01.735] [INFO] perform;
-[17:48:01.735] [INFO] write_command; command=Auth(Some(External), Some([49, 48, 48, 48]))
-[17:48:01.735] [TRACE] -- socket reader;
-[17:48:01.735] [TRACE] -- write_command;
-[17:48:01.735] [INFO] read_command;
-[17:48:01.735] [TRACE] -- read_command;
-[17:48:01.735] [INFO] write_command; command=NegotiateUnixFD
-[17:48:01.735] [TRACE] -- write_command;
-[17:48:01.735] [INFO] read_command;
-[17:48:01.735] [TRACE] -- read_command;
-[17:48:01.735] [INFO] write_command; command=Begin
-[17:48:01.735] [TRACE] -- write_command;
-[17:48:01.735] [TRACE] -- perform;
-[17:48:01.735] [INFO] socket reader;
-[17:48:01.735] [INFO] start_object_server; started_event=None
-[17:48:01.735] [TRACE] -> start_object_server;
-[17:48:01.735] [INFO] {}; obj_server_task_name="ObjectServer task"
-[17:48:01.735] [TRACE] <- start_object_server;
-[17:48:01.735] [TRACE] -- start_object_server;
-[17:48:01.735] [TRACE] -> {};
-[17:48:01.735] [TRACE] <- {};
-[17:48:01.735] [TRACE] -> {};
-[17:48:01.735] [TRACE] <- {};
-[17:48:01.735] [INFO] dispatch_message; msg=Msg { type: MethodCall, sender: UniqueName(Str(Borrowed(":1.1"))), path: ObjectPath("/org/a11y/atspi/accessible/root"), iface: InterfaceName(Str(Borrowed("org.freedesktop.DBus.Properties"))), member: MemberName(Str(Borrowed("Set"))), body: Signature("ssv") }
-[17:48:01.735] [INFO] dispatch_method_call; msg=Msg { type: MethodCall, sender: UniqueName(Str(Borrowed(":1.1"))), path: ObjectPath("/org/a11y/atspi/accessible/root"), iface: InterfaceName(Str(Borrowed("org.freedesktop.DBus.Properties"))), member: MemberName(Str(Borrowed("Set"))), body: Signature("ssv") }
-[17:48:01.735] [INFO] dispatch_method_call_try; msg=Msg { type: MethodCall, sender: UniqueName(Str(Borrowed(":1.1"))), path: ObjectPath("/org/a11y/atspi/accessible/root"), iface: InterfaceName(Str(Borrowed("org.freedesktop.DBus.Properties"))), member: MemberName(Str(Borrowed("Set"))), body: Signature("ssv") }
-[17:48:01.735] [TRACE] -- dispatch_method_call_try;
-[17:48:01.735] [TRACE] -- dispatch_method_call;
-[17:48:01.735] [TRACE] -- dispatch_message;
-[17:48:01.736] [INFO] [SCXManager] SCX support check: SUPPORTED
-[17:48:01.736] [INFO] [SCXManager] Found scheduler: scx_bpfland
-[17:48:01.736] [INFO] [SCXManager] Found scheduler: scx_lavd
-[17:48:01.736] [INFO] [SCXManager] Found scheduler: scx_rusty
-[17:48:01.736] [INFO] [SCXManager] Available schedulers: ["scx_bpfland", "scx_lavd", "scx_rusty"]
-[17:48:01.736] [INFO] [SCXManager] Found SCX service: scx_loader.service at /usr/lib/systemd/system/scx_loader.service
-[17:48:01.736] [INFO] [SCXManager] SCX environment ready
-[17:48:03.852] [INFO] [KernelManager] Kernel scan complete: 2 installed kernels found
-[17:48:04.183] [INFO] [KernelManager] Found 1 built kernels in workspace
-[17:48:07.984] [INFO] [AppController] [KERNEL] Starting async kernel installation from: ./linux/linux-goatd-workstation-6.18.6.arch1-1-x86_64.pkg.tar.zst
-[17:48:07.984] [INFO] [KERNEL] [RESOLVE] Starting kernel version resolution
-[17:48:07.984] [INFO] [KERNEL] [RESOLVE] Found .kernelrelease in package directory: 6.18.6-arch1-1-goatd-workstation
-[17:48:07.984] [INFO] [KernelArtifactRegistry] Extracted filename version: 6.18.6.arch1-1 from linux-goatd-workstation-6.18.6.arch1-1-x86_64.pkg.tar.zst
-[17:48:07.984] [INFO] [KernelArtifactRegistry] Kernel Identity: variant='linux-goatd-workstation', internal_version='6.18.6-arch1-1-goatd-workstation', filename_version=Some("6.18.6.arch1-1")
-[17:48:07.984] [INFO] [KernelArtifactRegistry] ✓ Found -headers via filename version fallback: linux-goatd-workstation-headers-6.18.6.arch1-1-x86_64.pkg.tar.zst
-[17:48:07.985] [INFO] [KernelArtifactRegistry] ✓ Found -docs via filename version fallback: linux-goatd-workstation-docs-6.18.6.arch1-1-x86_64.pkg.tar.zst
-[17:48:08.119] [INFO] [KernelArtifactRegistry] ✓ Critical file found in tarball: include/linux/memremap.h (including deeply nested paths)
-[17:48:08.119] [INFO] [KernelArtifactRegistry] ✓ Deep validation PASSED: All critical files found in headers tarball
-[17:48:08.119] [INFO] [SystemWrapper] Executing batch privileged commands (7 steps)
-[17:48:12.567] [INFO] [batch privileged] stdout: loading packages...
+[19:29:43.691] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/vdso/vdso32.so
+[19:29:43.691] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/vdso/vdso64.so
+[19:29:44.143] ==> Creating package "linux-goatd-workstation-headers"...
+[19:29:44.143] ==> Creating package "linux-goatd-workstation-headers"...
+[19:29:44.145]   -> Generating .PKGINFO file...
+[19:29:44.992]   -> Generating .BUILDINFO file...
+[19:29:45.301]   -> Generating .MTREE file...
+[19:29:46.484]   -> Compressing package...
+[19:29:47.603] ==> Starting package_linux-goatd-workstation-docs()...
+[19:29:47.603] ==> Starting package_linux-goatd-workstation-docs()...
+[19:29:47.603] Installing documentation...
+[19:30:06.655] Adding symlink...
+[19:30:06.658] ==> Tidying install...
+[19:30:06.658] ==> Tidying install...
+[19:30:06.659]   -> Removing libtool files...
+[19:30:06.712]   -> Removing static library files...
+[19:30:06.765]   -> Purging unwanted files...
+[19:30:06.870]   -> Compressing man and info pages...
+[19:30:06.873] ==> Checking for packaging issues...
+[19:30:06.873] ==> Checking for packaging issues...
+[19:30:09.057] ==> Creating package "linux-goatd-workstation-docs"...
+[19:30:09.057] ==> Creating package "linux-goatd-workstation-docs"...
+[19:30:09.059]   -> Generating .PKGINFO file...
+[19:30:10.240]   -> Generating .BUILDINFO file...
+[19:30:10.536]   -> Generating .MTREE file...
+[19:30:12.240]   -> Compressing package...
+[19:30:13.737] ==> Leaving fakeroot environment.
+[19:30:13.737] ==> Leaving fakeroot environment.
+[19:30:13.740] ==> Finished making: linux-goatd-workstation 6.18.7.arch1-1 (Fri 23 Jan 2026 07:30:13 PM MST)
+[19:30:13.740] ==> Finished making: linux-goatd-workstation 6.18.7.arch1-1 (Fri 23 Jan 2026 07:30:13 PM MST)
+[19:30:13.741] PHASE TRANSITION: Validation
+[19:30:13.741] PHASE TRANSITION: Completed
+[19:39:00.999] [INFO] [SCXManager] SCX support check: SUPPORTED
+[19:39:00.999] [INFO] [SCXManager] Found scheduler: scx_bpfland
+[19:39:00.999] [INFO] [SCXManager] Found scheduler: scx_lavd
+[19:39:00.999] [INFO] [SCXManager] Found scheduler: scx_rusty
+[19:39:00.999] [INFO] [SCXManager] Available schedulers: ["scx_bpfland", "scx_lavd", "scx_rusty"]
+[19:39:00.999] [INFO] [SCXManager] Found SCX service: scx_loader.service at /usr/lib/systemd/system/scx_loader.service
+[19:39:01.189] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-lts'
+[19:39:01.189] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux'
+[19:39:01.189] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-hardened'
+[19:39:01.189] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-tkg'
+[19:39:01.190] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-zen'
+[19:39:01.190] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-mainline'
+[19:39:02.193] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-tkg': '${_basekernel}-273'
+[19:39:02.194] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux': '6.18.7.arch1-1'
+[19:39:02.195] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-zen': '6.18.7.zen1-1'
+[19:39:02.195] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-hardened': '6.17.13.hardened1-2'
+[19:39:02.195] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-mainline': '6.19rc6-1'
+[19:39:02.460] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-lts': '6.12.67-1'
+[19:39:03.283] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[19:39:03.283] [INFO] [KernelManager] Workspace path does not exist: /mnt/Optane/goatd
+[19:39:26.859] [INFO] GOATd Kernel logging initialized
+[19:39:26.859] [INFO] [AppController] Initializing AppController
+[19:39:26.859] [INFO] [AppController] Settings loaded successfully
+[19:39:26.859] [INFO] [AppController] All modules initialized (system, kernel_manager, audit)
+[19:39:26.859] [INFO] [AppController] AppController ready for production
+[19:39:26.859] [INFO] [AppController] INIT: audit_on_startup flag is set, running initial deep audit
+[19:39:26.860] [INFO] [KernelAudit] Auditing booted kernel: 6.18.5-arch1-1
+[19:39:26.863] [INFO] [KernelAudit] Successfully read kernel config from /proc/config.gz
+[19:39:26.863] [INFO] [KernelAudit] LTO status detected: None
+[19:39:26.864] [INFO] [KernelAudit] Standard modules (modules.order): 6406
+[19:39:26.864] [INFO] [KernelAudit] DKMS update modules: 5
+[19:39:26.864] [INFO] [KernelAudit] Total module count (modules.order + DKMS): 6411
+[19:39:26.936] [INFO] [CPUAudit] Detected CPU family: AMD Ryzen 5 5500
+[19:39:26.936] [INFO] [CPUAudit] x86-64-v3 detected (AVX2 found)
+[19:39:26.936] [INFO] [CPUAudit] Detected x86-64 level: x86-64-v3
+[19:39:26.936] [INFO] [CPUAudit] ISA features detected: AVX2 SSE4.2
+[19:39:26.936] [INFO] [CPUAudit] Detected ISA features: AVX2 SSE4.2
+[19:39:26.942] [INFO] [KernelAudit] Successfully read kernel config from /proc/config.gz
+[19:39:26.942] [INFO] [KernelAudit] Timer frequency detected: 1000 Hz
+[19:39:26.945] [INFO] [KernelAudit] Successfully read kernel config from /proc/config.gz
+[19:39:26.945] [INFO] [KernelAudit] Preemption model detected: Full
+[19:39:26.946] [INFO] [KernelAudit] Root filesystem device (raw): /dev/nvme0n1p2[/@]
+[19:39:26.946] [INFO] [KernelAudit] Extracting base device from: /dev/nvme0n1p2[/@]
+[19:39:26.946] [INFO] [KernelAudit] Base device extracted: 'nvme0n1'
+[19:39:26.946] [INFO] [KernelAudit] Base block device extracted: nvme0n1
+[19:39:26.946] [INFO] [KernelAudit] NVMe root device found with hardware queue-based I/O handling
+[19:39:26.946] [INFO] [KernelAudit] Starting CPU scheduler detection
+[19:39:26.946] [INFO] [KernelAudit] Active SCX scheduler from sysfs: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
+[19:39:26.946] [INFO] [KernelAudit] SCX scheduler detected at kernel layer: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
+[19:39:26.948] [INFO] [KernelAudit] scxctl output parsed but Mode line not found
+[19:39:26.948] [INFO] [KernelAudit] CPU scheduler: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
+[19:39:26.948] [INFO] [KernelAudit] Attempting MGLRU sysfs read from /sys/kernel/mm/lru_gen/enabled
+[19:39:26.948] [INFO] [KernelAudit] MGLRU sysfs read successful, raw value: '0x0007'
+[19:39:26.948] [INFO] [KernelAudit] Cleaned MGLRU value for parsing: '0007'
+[19:39:26.948] [INFO] [KernelAudit] MGLRU successfully parsed as hex integer: 7
+[19:39:26.948] [INFO] [KernelAudit] MGLRU status: Full (Tier+Ref+Thr)
+[19:39:26.948] [INFO] [AppController] INIT: Done: Initial audit complete, dashboard cache populated
+[19:39:26.948] [INFO] [AppController] INIT:   Kernel: 6.18.5-arch1-1
+[19:39:26.948] [INFO] [AppController] INIT:   CPU Scheduler: bpfland_1.0.19_g85f140fd_x86_64_unknown_linux_gnu
+[19:39:26.948] [INFO] [AppController] INIT:   LTO: None
+[19:39:26.981] [INFO] perform;
+[19:39:26.981] [INFO] write_command; command=Auth(Some(External), Some([49, 48, 48, 48]))
+[19:39:26.981] [TRACE] -- write_command;
+[19:39:26.981] [INFO] read_command;
+[19:39:26.981] [TRACE] -- read_command;
+[19:39:26.981] [INFO] write_command; command=NegotiateUnixFD
+[19:39:26.981] [TRACE] -- write_command;
+[19:39:26.981] [INFO] read_command;
+[19:39:26.981] [TRACE] -- read_command;
+[19:39:26.981] [INFO] write_command; command=Begin
+[19:39:26.981] [TRACE] -- write_command;
+[19:39:26.981] [TRACE] -- perform;
+[19:39:26.981] [INFO] socket reader;
+[19:39:26.982] [INFO] perform;
+[19:39:26.982] [TRACE] -- socket reader;
+[19:39:26.982] [INFO] write_command; command=Auth(Some(External), Some([49, 48, 48, 48]))
+[19:39:26.982] [TRACE] -- write_command;
+[19:39:26.982] [INFO] read_command;
+[19:39:26.982] [TRACE] -- read_command;
+[19:39:26.982] [INFO] write_command; command=NegotiateUnixFD
+[19:39:26.982] [TRACE] -- write_command;
+[19:39:26.982] [INFO] read_command;
+[19:39:26.982] [TRACE] -- read_command;
+[19:39:26.982] [INFO] write_command; command=Begin
+[19:39:26.982] [TRACE] -- write_command;
+[19:39:26.982] [TRACE] -- perform;
+[19:39:26.982] [INFO] socket reader;
+[19:39:26.982] [INFO] start_object_server; started_event=None
+[19:39:26.982] [TRACE] -> start_object_server;
+[19:39:26.982] [INFO] {}; obj_server_task_name="ObjectServer task"
+[19:39:26.982] [TRACE] <- start_object_server;
+[19:39:26.982] [TRACE] -- start_object_server;
+[19:39:26.982] [TRACE] -> {};
+[19:39:26.982] [TRACE] <- {};
+[19:39:26.982] [TRACE] -> {};
+[19:39:26.982] [TRACE] <- {};
+[19:39:26.982] [INFO] dispatch_message; msg=Msg { type: MethodCall, sender: UniqueName(Str(Borrowed(":1.1"))), path: ObjectPath("/org/a11y/atspi/accessible/root"), iface: InterfaceName(Str(Borrowed("org.freedesktop.DBus.Properties"))), member: MemberName(Str(Borrowed("Set"))), body: Signature("ssv") }
+[19:39:26.982] [INFO] dispatch_method_call; msg=Msg { type: MethodCall, sender: UniqueName(Str(Borrowed(":1.1"))), path: ObjectPath("/org/a11y/atspi/accessible/root"), iface: InterfaceName(Str(Borrowed("org.freedesktop.DBus.Properties"))), member: MemberName(Str(Borrowed("Set"))), body: Signature("ssv") }
+[19:39:26.982] [INFO] dispatch_method_call_try; msg=Msg { type: MethodCall, sender: UniqueName(Str(Borrowed(":1.1"))), path: ObjectPath("/org/a11y/atspi/accessible/root"), iface: InterfaceName(Str(Borrowed("org.freedesktop.DBus.Properties"))), member: MemberName(Str(Borrowed("Set"))), body: Signature("ssv") }
+[19:39:26.982] [TRACE] -- dispatch_method_call_try;
+[19:39:26.982] [TRACE] -- dispatch_method_call;
+[19:39:26.982] [TRACE] -- dispatch_message;
+[19:39:26.984] [INFO] [SCXManager] SCX support check: SUPPORTED
+[19:39:26.984] [INFO] [SCXManager] Found scheduler: scx_bpfland
+[19:39:26.984] [INFO] [SCXManager] Found scheduler: scx_lavd
+[19:39:26.984] [INFO] [SCXManager] Found scheduler: scx_rusty
+[19:39:26.984] [INFO] [SCXManager] Available schedulers: ["scx_bpfland", "scx_lavd", "scx_rusty"]
+[19:39:26.984] [INFO] [SCXManager] Found SCX service: scx_loader.service at /usr/lib/systemd/system/scx_loader.service
+[19:39:26.984] [INFO] [SCXManager] SCX environment ready
+[19:39:28.802] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[19:39:29.154] [INFO] [KernelManager] Found 1 built kernels in workspace
+[19:39:34.733] [INFO] [AppController] [KERNEL] Starting async kernel installation from: ./linux/linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[19:39:34.733] [INFO] [KERNEL] [RESOLVE] Starting kernel version resolution
+[19:39:34.733] [INFO] [KERNEL] [RESOLVE] Found .kernelrelease in package directory: 6.18.7-arch1-1-goatd-workstation
+[19:39:34.734] [INFO] [KernelArtifactRegistry] Extracted filename version: 6.18.7.arch1-1 from linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[19:39:34.734] [INFO] [KernelArtifactRegistry] Kernel Identity: variant='linux-goatd-workstation', internal_version='6.18.7-arch1-1-goatd-workstation', filename_version=Some("6.18.7.arch1-1")
+[19:39:34.734] [INFO] [KernelArtifactRegistry] ✓ Found -headers via filename version fallback: linux-goatd-workstation-headers-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[19:39:34.734] [INFO] [KernelArtifactRegistry] ✓ Found -docs via filename version fallback: linux-goatd-workstation-docs-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[19:39:34.870] [INFO] [KernelArtifactRegistry] ✓ Critical file found in tarball: include/linux/memremap.h (including deeply nested paths)
+[19:39:34.870] [INFO] [KernelArtifactRegistry] ✓ Deep validation PASSED: All critical files found in headers tarball
+[19:39:34.870] [INFO] [SystemWrapper] Executing batch privileged commands (7 steps)
+[19:39:38.274] [INFO] [batch privileged] stdout: loading packages...
 DKMS_FAILED_SYMLINKS
 DKMS_FAILED_MODULES
 
-[17:48:12.567] [INFO] [batch privileged] stderr: error: './linux/linux-goatd-workstation-6.18.6.arch1-1-x86_64.pkg.tar.zst': could not find or read package
-error: './linux/linux-goatd-workstation-headers-6.18.6.arch1-1-x86_64.pkg.tar.zst': could not find or read package
-error: './linux/linux-goatd-workstation-docs-6.18.6.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+[19:39:38.274] [INFO] [batch privileged] stderr: error: './linux/linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+error: './linux/linux-goatd-workstation-headers-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+error: './linux/linux-goatd-workstation-docs-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
 
-Error! Your kernel headers for kernel 6.18.6-arch1-1-goatd-workstation cannot be found at /usr/lib/modules/6.18.6-arch1-1-goatd-workstation/build or /usr/lib/modules/6.18.6-arch1-1-goatd-workstation/source.
-Please install the linux-headers-6.18.6-arch1-1-goatd-workstation package or use the --kernelsourcedir option to tell DKMS where it's located.
+Error! Your kernel headers for kernel 6.18.7-arch1-1-goatd-workstation cannot be found at /usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build or /usr/lib/modules/6.18.7-arch1-1-goatd-workstation/source.
+Please install the linux-headers-6.18.7-arch1-1-goatd-workstation package or use the --kernelsourcedir option to tell DKMS where it's located.
 
-[17:48:12.567] [INFO] [SystemWrapper] Batch execution succeeded
-[17:48:12.583] [INFO] [KernelManager] Kernel scan complete: 2 installed kernels found
+[19:39:38.274] [INFO] [SystemWrapper] Batch execution succeeded
+[19:39:38.289] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[19:39:38.639] [INFO] [KernelManager] Found 1 built kernels in workspace
+[19:39:40.421] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[19:39:40.773] [INFO] [KernelManager] Found 1 built kernels in workspace
