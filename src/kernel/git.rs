@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use git2::{Repository, build::RepoBuilder};
 use thiserror::Error;
+use crate::kernel::pkgbuild::{extract_pkgver, extract_pkgrel};
 
 /// Errors that can occur during git operations
 #[derive(Debug, Error)]
@@ -201,6 +202,63 @@ fn extract_version_number(tag: &str) -> (u32, u32, u32) {
     }
     
     (major, minor, patch)
+}
+
+/// Validates the version of a cloned kernel source against an expected version.
+///
+/// Reads the PKGBUILD file from the source directory, extracts pkgver and pkgrel,
+/// and compares them against the expected version string in format "X.Y.Z-N".
+///
+/// # Arguments
+/// * `path` - The path to the kernel source directory containing PKGBUILD
+/// * `expected_version` - The expected version string in format "pkgver-pkgrel" (e.g., "6.18.3-1")
+///
+/// # Returns
+/// * `Ok(true)` if versions match
+/// * `Ok(false)` if versions do not match (mismatch detected)
+/// * `Err(GitError)` if PKGBUILD cannot be read or parsed
+///
+/// # Example
+/// ```ignore
+/// let matches = validate_source_version(Path::new("/path/to/kernel"), "6.18.3-1")?;
+/// if !matches {
+///     eprintln!("Version mismatch: source has different version");
+/// }
+/// ```
+pub fn validate_source_version(path: &Path, expected_version: &str) -> GitResult<bool> {
+    eprintln!("[GIT] [VALIDATE] Checking source version at: {:?}", path);
+    eprintln!("[GIT] [VALIDATE] Expected version: {}", expected_version);
+    
+    // Read PKGBUILD file
+    let pkgbuild_path = path.join("PKGBUILD");
+    let content = std::fs::read_to_string(&pkgbuild_path)
+        .map_err(|e| GitError::Io(e))?;
+    
+    // Extract pkgver and pkgrel using reused functions from pkgbuild module
+    let pkgver = extract_pkgver(&content)
+        .map_err(|e| GitError::Repository(format!(
+            "Failed to extract pkgver from PKGBUILD: {}",
+            e
+        )))?;
+    
+    let pkgrel = extract_pkgrel(&content)
+        .map_err(|e| GitError::Repository(format!(
+            "Failed to extract pkgrel from PKGBUILD: {}",
+            e
+        )))?;
+    
+    let actual_version = format!("{}-{}", pkgver, pkgrel);
+    eprintln!("[GIT] [VALIDATE] Extracted version from source: {}", actual_version);
+    
+    // Compare versions
+    let matches = actual_version == expected_version;
+    if matches {
+        eprintln!("[GIT] [VALIDATE] ✓ Version match: {} == {}", actual_version, expected_version);
+    } else {
+        eprintln!("[GIT] [VALIDATE] ✗ Version mismatch: {} != {}", actual_version, expected_version);
+    }
+    
+    Ok(matches)
 }
 
 /// Manages kernel source repository operations using native git bindings

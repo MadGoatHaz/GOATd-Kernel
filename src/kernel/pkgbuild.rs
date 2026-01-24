@@ -66,7 +66,7 @@ pub async fn get_latest_version_from_pkgbuild(url: &str) -> Result<String, Strin
 /// - `pkgver="6.18.3"` (double quotes)
 /// - `pkgver='6.18.3'` (single quotes)
 /// Version extraction stops at whitespace or comment (#)
-fn extract_pkgver(content: &str) -> Result<String, String> {
+pub fn extract_pkgver(content: &str) -> Result<String, String> {
     // Match pkgver= followed by optional quotes and capture the version value
     // This pattern handles all three cases: unquoted, single-quoted, or double-quoted
     let regex = Regex::new(r#"pkgver\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))"#)
@@ -93,7 +93,7 @@ fn extract_pkgver(content: &str) -> Result<String, String> {
 /// - `pkgrel="2"` (double quotes)
 /// - `pkgrel='2'` (single quotes)
 /// Release extraction stops at whitespace or comment (#)
-fn extract_pkgrel(content: &str) -> Result<String, String> {
+pub fn extract_pkgrel(content: &str) -> Result<String, String> {
     // Match pkgrel= followed by optional quotes and capture the release value
     // This pattern handles all three cases: unquoted, single-quoted, or double-quoted
     let regex = Regex::new(r#"pkgrel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))"#)

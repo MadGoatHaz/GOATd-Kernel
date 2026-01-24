@@ -254,6 +254,90 @@ impl AsyncOrchestrator {
             }
         } else {
             eprintln!("[Build] [PREPARATION] PKGBUILD found at: {:?}", pkgbuild_path);
+            
+            // =========================================================================
+            // PURGE ON VERSION MISMATCH - Validate source version against expected
+            // =========================================================================
+            // If PKGBUILD exists, validate its version matches expected variant version
+            // If mismatch detected, purge the directory and force re-clone
+            eprintln!("[Build] [PREPARATION] Validating source version for variant: {}", kernel_variant);
+            self.send_status("Validation: Checking if source version matches expected version...".to_string()).await;
+            
+            // Fetch expected version from remote (latest version for the variant)
+            let expected_version = match crate::kernel::pkgbuild::get_latest_version_by_variant(&kernel_variant).await {
+                Ok(version) => {
+                    eprintln!("[Build] [PREPARATION] ✓ Fetched expected version for '{}': {}", kernel_variant, version);
+                    version
+                }
+                Err(e) => {
+                    eprintln!("[Build] [PREPARATION] ⚠ Failed to fetch expected version: {}", e);
+                    self.send_log_event(format!("Warning: Could not fetch expected version - proceeding with caution: {}", e)).await;
+                    // Continue without version check if fetch fails (non-fatal)
+                    String::new()
+                }
+            };
+            
+            // Validate source version against expected
+            if !expected_version.is_empty() {
+                use crate::kernel::git::validate_source_version;
+                
+                match validate_source_version(&self.kernel_path, &expected_version) {
+                    Ok(true) => {
+                        eprintln!("[Build] [PREPARATION] ✓ Source version matches expected version");
+                        self.send_log_event("Source version validated successfully.".to_string()).await;
+                    }
+                    Ok(false) => {
+                        // Version mismatch detected - purge and re-clone
+                        eprintln!("[Build] [PREPARATION] ✗ Version mismatch detected! Purging old source and re-cloning...");
+                        self.send_log_event("Version mismatch detected. Purging old kernel sources and re-cloning...".to_string()).await;
+                        
+                        // Remove old kernel source directory
+                        match std::fs::remove_dir_all(&self.kernel_path) {
+                            Ok(()) => {
+                                eprintln!("[Build] [PREPARATION] ✓ Removed old kernel source directory");
+                                self.send_log_event("Removed old kernel sources.".to_string()).await;
+                            }
+                            Err(e) => {
+                                eprintln!("[Build] [PREPARATION] ⚠ Failed to remove old directory: {}", e);
+                                self.send_log_event(format!("Warning: Failed to remove old sources: {}", e)).await;
+                                // Attempt to continue anyway
+                            }
+                        }
+                        
+                        // Recreate the directory for fresh clone
+                        std::fs::create_dir_all(&self.kernel_path)
+                            .map_err(|e| format!("Failed to recreate kernel directory: {}", e))?;
+                        
+                        // Perform fresh clone
+                        use crate::kernel::sources::KernelSourceDB;
+                        let source_db = KernelSourceDB::new();
+                        let source_url = source_db.get_source_url(&kernel_variant)
+                            .ok_or_else(|| format!("Unknown kernel variant: {}", kernel_variant))?;
+                        
+                        eprintln!("[Build] [PREPARATION] Re-cloning kernel source from: {}", source_url);
+                        self.send_log_event(format!("Re-cloning from: {}", source_url)).await;
+                        
+                        use crate::kernel::git::GitManager;
+                        match GitManager::clone(source_url, &self.kernel_path) {
+                            Ok(_) => {
+                                self.send_log_event("Fresh kernel sources acquired.".to_string()).await;
+                                eprintln!("[Build] [PREPARATION] ✓ Kernel sources re-cloned successfully");
+                            }
+                            Err(e) => {
+                                let err_msg = format!("Failed to re-clone kernel sources: {:?}", e);
+                                eprintln!("[Build] [PREPARATION] ✗ {}", err_msg);
+                                return Err(err_msg.into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Validation failed (I/O or parsing error) - log warning and continue
+                        eprintln!("[Build] [PREPARATION] ⚠ Version validation failed: {:?}", e);
+                        self.send_log_event(format!("Warning: Could not validate source version: {:?}. Proceeding with caution.", e)).await;
+                        // Non-fatal: continue with build
+                    }
+                }
+            }
         }
 
         // =========================================================================

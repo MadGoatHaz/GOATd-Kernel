@@ -544,16 +544,40 @@ impl KernelArtifactRegistry {
     ///
     /// Returns a Vec of absolute paths in the order they should be installed:
     /// 1. Main kernel package
-    /// 2. Headers (if found)
-    /// 3. Docs (if found)
+    /// 2. Headers (if found and existing)
+    /// 3. Docs (if found and existing)
+    ///
+    /// # Safety
+    /// This method performs existence checks on all collected paths before returning them.
+    /// If a path doesn't exist, it's skipped with a warning log.
     pub fn collect_all_paths(&self) -> Vec<PathBuf> {
-        let mut paths = vec![self.kernel_path.clone()];
+        let mut paths = vec![];
+        
+        // Always include main kernel package (existence was verified in new())
+        if self.kernel_path.exists() {
+            paths.push(self.kernel_path.clone());
+        } else {
+            log_info!("[KernelArtifactRegistry] [WARNING] Main kernel package does not exist: {}", self.kernel_path.display());
+        }
+        
+        // Add headers if found and existing
         if let Some(ref headers) = self.headers_path {
-            paths.push(headers.clone());
+            if headers.exists() {
+                paths.push(headers.clone());
+            } else {
+                log_info!("[KernelArtifactRegistry] [WARNING] Headers package path references non-existent file: {}", headers.display());
+            }
         }
+        
+        // Add docs if found and existing
         if let Some(ref docs) = self.docs_path {
-            paths.push(docs.clone());
+            if docs.exists() {
+                paths.push(docs.clone());
+            } else {
+                log_info!("[KernelArtifactRegistry] [WARNING] Docs package path references non-existent file: {}", docs.display());
+            }
         }
+        
         paths
     }
 
