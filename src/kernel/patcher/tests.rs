@@ -717,3 +717,192 @@ package_linux-zen-headers() {
    
    eprintln!("[TEST] rebranding_idempotency: ✓ PASSED - Rebranding is idempotent, no double-branding");
 }
+
+/// Test 9: Rebranding with workstation profile
+///
+/// Verifies that the dynamic `linux-{variant}-goatd-{profile}` naming scheme
+/// works correctly for non-gaming profiles (e.g., "workstation").
+///
+/// This test ensures:
+/// 1. Vanilla linux with workstation profile → linux-goatd-workstation
+/// 2. linux-zen with workstation profile → linux-zen-goatd-workstation
+/// 3. linux-mainline with workstation profile → linux-mainline-goatd-workstation
+#[test]
+fn test_rebranding_workstation_profile() {
+   use crate::kernel::patcher::pkgbuild::patch_pkgbuild_for_rebranding;
+   use std::fs;
+   
+   let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+   let src_dir = temp_dir.path();
+   let pkgbuild_path = src_dir.join("PKGBUILD");
+   
+   // Test Case 1: Vanilla linux with workstation profile
+   eprintln!("[TEST] workstation_profile: Test 1 - vanilla linux + workstation");
+   let original_linux = r#"pkgbase='linux'
+pkgname=('linux' 'linux-headers')
+pkgver=6.18
+pkgrel=1
+
+package_linux() {
+   echo "packaging linux"
+}
+
+package_linux-headers() {
+   echo "packaging headers"
+}
+"#;
+   fs::write(&pkgbuild_path, original_linux).expect("Failed to write PKGBUILD");
+   
+   patch_pkgbuild_for_rebranding(src_dir, "workstation")
+       .expect("Rebranding with workstation profile failed");
+   
+   let rebranded = fs::read_to_string(&pkgbuild_path)
+       .expect("Failed to read rebranded PKGBUILD");
+   
+   assert!(rebranded.contains("pkgbase='linux-goatd-workstation'"),
+       "Expected pkgbase='linux-goatd-workstation' for vanilla linux");
+   assert!(rebranded.contains("'linux-goatd-workstation'"),
+       "Expected branding in pkgname for vanilla linux");
+   assert!(rebranded.contains("'linux-goatd-workstation-headers'"),
+       "Expected headers branding for vanilla linux");
+   eprintln!("[TEST] workstation_profile: ✓ Test 1 PASSED - vanilla linux branded correctly");
+   
+   // Test Case 2: linux-zen with workstation profile
+   eprintln!("[TEST] workstation_profile: Test 2 - linux-zen + workstation");
+   let original_zen = r#"pkgbase='linux-zen'
+pkgname=('linux-zen' 'linux-zen-headers')
+pkgver=6.18
+pkgrel=1
+
+package_linux-zen() {
+   echo "packaging zen"
+}
+
+package_linux-zen-headers() {
+   echo "packaging headers"
+}
+"#;
+   fs::write(&pkgbuild_path, original_zen).expect("Failed to write PKGBUILD");
+   
+   patch_pkgbuild_for_rebranding(src_dir, "workstation")
+       .expect("Rebranding zen with workstation profile failed");
+   
+   let rebranded = fs::read_to_string(&pkgbuild_path)
+       .expect("Failed to read rebranded PKGBUILD");
+   
+   assert!(rebranded.contains("pkgbase='linux-zen-goatd-workstation'"),
+       "Expected pkgbase='linux-zen-goatd-workstation' for zen variant");
+   assert!(rebranded.contains("'linux-zen-goatd-workstation'"),
+       "Expected branding in pkgname for zen");
+   assert!(rebranded.contains("'linux-zen-goatd-workstation-headers'"),
+       "Expected headers branding for zen");
+   eprintln!("[TEST] workstation_profile: ✓ Test 2 PASSED - linux-zen branded correctly");
+   
+   // Test Case 3: linux-mainline with workstation profile
+   eprintln!("[TEST] workstation_profile: Test 3 - linux-mainline + workstation");
+   let original_mainline = r#"pkgbase='linux-mainline'
+pkgname=('linux-mainline' 'linux-mainline-headers')
+pkgver=6.18
+pkgrel=1
+
+package_linux-mainline() {
+   echo "packaging mainline"
+}
+
+package_linux-mainline-headers() {
+   echo "packaging headers"
+}
+"#;
+   fs::write(&pkgbuild_path, original_mainline).expect("Failed to write PKGBUILD");
+   
+   patch_pkgbuild_for_rebranding(src_dir, "workstation")
+       .expect("Rebranding mainline with workstation profile failed");
+   
+   let rebranded = fs::read_to_string(&pkgbuild_path)
+       .expect("Failed to read rebranded PKGBUILD");
+   
+   assert!(rebranded.contains("pkgbase='linux-mainline-goatd-workstation'"),
+       "Expected pkgbase='linux-mainline-goatd-workstation' for mainline");
+   assert!(rebranded.contains("'linux-mainline-goatd-workstation'"),
+       "Expected branding in pkgname for mainline");
+   assert!(rebranded.contains("'linux-mainline-goatd-workstation-headers'"),
+       "Expected headers branding for mainline");
+   eprintln!("[TEST] workstation_profile: ✓ Test 3 PASSED - linux-mainline branded correctly");
+   
+   eprintln!("[TEST] workstation_profile: ✓ PASSED - Dynamic naming works for workstation profile");
+}
+
+/// Test 10: Multi-profile coexistence validation
+///
+/// Verifies that multiple profiles can coexist on the same system without
+/// collision by validating that different profiles produce unique identities.
+///
+/// This test:
+/// 1. Brands the same PKGBUILD with "gaming" profile → linux-zen-goatd-gaming
+/// 2. Brands fresh PKGBUILD with "workstation" profile → linux-zen-goatd-workstation
+/// 3. Verifies the identities are unique and don't overlap
+#[test]
+fn test_multi_profile_coexistence() {
+   use crate::kernel::patcher::pkgbuild::patch_pkgbuild_for_rebranding;
+   use std::fs;
+   
+   let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+   let src_dir = temp_dir.path();
+   let pkgbuild_path = src_dir.join("PKGBUILD");
+   
+   let original_content = r#"pkgbase='linux-zen'
+pkgname=('linux-zen' 'linux-zen-headers')
+pkgver=6.18
+pkgrel=1
+
+package_linux-zen() {
+   echo "packaging zen"
+}
+
+package_linux-zen-headers() {
+   echo "packaging headers"
+}
+"#;
+   
+   // Brand with gaming profile
+   eprintln!("[TEST] multi_profile_coexistence: Branding with gaming profile");
+   fs::write(&pkgbuild_path, original_content).expect("Failed to write original");
+   
+   patch_pkgbuild_for_rebranding(src_dir, "gaming")
+       .expect("Gaming profile branding failed");
+   
+   let gaming_branded = fs::read_to_string(&pkgbuild_path)
+       .expect("Failed to read gaming-branded PKGBUILD");
+   
+   assert!(gaming_branded.contains("pkgbase='linux-zen-goatd-gaming'"),
+       "Gaming profile branding failed");
+   
+   eprintln!("[TEST] multi_profile_coexistence: Gaming profile identity: linux-zen-goatd-gaming");
+   
+   // Reset and brand with workstation profile
+   eprintln!("[TEST] multi_profile_coexistence: Branding with workstation profile");
+   fs::write(&pkgbuild_path, original_content).expect("Failed to write original again");
+   
+   patch_pkgbuild_for_rebranding(src_dir, "workstation")
+       .expect("Workstation profile branding failed");
+   
+   let workstation_branded = fs::read_to_string(&pkgbuild_path)
+       .expect("Failed to read workstation-branded PKGBUILD");
+   
+   assert!(workstation_branded.contains("pkgbase='linux-zen-goatd-workstation'"),
+       "Workstation profile branding failed");
+   
+   eprintln!("[TEST] multi_profile_coexistence: Workstation profile identity: linux-zen-goatd-workstation");
+   
+   // Verify the identities are different
+   assert!(gaming_branded != workstation_branded,
+       "Gaming and workstation profiles must produce different PKGBUILDs");
+   
+   // Verify no cross-contamination
+   assert!(!workstation_branded.contains("gaming"),
+       "Workstation profile contains gaming reference (contamination)");
+   assert!(!gaming_branded.contains("workstation"),
+       "Gaming profile contains workstation reference (contamination)");
+   
+   eprintln!("[TEST] multi_profile_coexistence: ✓ PASSED - Multiple profiles coexist without collision");
+}

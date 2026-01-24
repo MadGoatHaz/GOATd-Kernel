@@ -1,0 +1,321 @@
+This log's system specs:
+minigoat@minigoat
+-----------------
+This machine has been GOAT'd
+
+// HARDWARE_LINK
+//  >> Host  => B550M-ITX/ac
+//  >> CPU   => AMD Ryzen 5 5600X (12) @ 4.88 GHz
+//  >> GPU   => Intel Arc B580 @ 2.85 GHz [Discrete]
+//  >> Disk  => 717.70 GiB / 1.78 TiB (39%) - btrfs
+//  >> RAM   => 3.66 GiB / 31.27 GiB (12%)
+//  >> Swap  => 976.68 MiB / 34.40 GiB (3%)
+//  >> Disp  => 2560x1440 in 32", 60 Hz [External]
+//  >> Snd   => Starship/Matisse HD Audio Controller Analog Stereo (50%)
+
+// SYSTEM_core
+//  >> OS    => EndeavourOS x86_64
+//  >> Kern  => Linux 6.18.5-arch1-1
+//  >> Up    => 40 mins
+//  >> Proc  => 467
+//  >> Pkgs  => 1248 (pacman)
+//  >> Sh    => bash 5.3.9
+//  >> DE    => KDE Plasma 6.5.5
+//  >> WM    => KWin (Wayland)
+//  >> WThm  => Breeze
+//  >> Theme => Breeze (Dark) [Qt], Breeze-Dark [GTK2], Breeze [GTK3]
+//  >> Icon  => breeze-dark [Qt], breeze-dark [GTK2/3/4]
+//  >> Font  => Noto Sans (10pt) [Qt], Noto Sans (10pt) [GTK2/3/4]
+//  >> Curs  => breeze (24px)
+//  >> Term  => konsole 25.12.1
+//  >> Vulk  => 1.4.328 - Intel open-source Mesa driver [Mesa 25.3.3-arch1.2]
+//  >> GL    => 4.6 (Compatibility Profile) Mesa 25.3.3-arch1.2
+
+-----
+[17:35:54.149] [INFO] [AppController] [BUILD] Full build log: /home/minigoat/Documents/GOATd-Kernel/GOATd-Kernel-master/logs/full/build_20260123_173554.149.log
+[17:35:54.149] [INFO] [BUILD] Configuration synchronized: variant=linux, profile=Gaming, lto=full, hardening=Minimal
+[17:35:54.287] [INFO] [BUILD] [CONFIG_VALIDATION] version field: 'latest' (should be 'latest' for dynamic resolution)
+[17:35:54.287] [INFO] [BUILD] [CONFIG_VALIDATION] kernel_variant field: 'linux' (identifies which variant to fetch)
+[17:35:54.287] [INFO] [BUILD] Config: variant=latest, lto=Full, profile=Gaming
+[17:35:57.022] PHASE TRANSITION: Configuration
+[17:35:57.022] [INFO] [ORCHESTRATOR] [VERSION] [ENTRY] Incoming config state - version: 'latest', variant: 'linux'
+[17:35:57.022] [INFO] [ORCHESTRATOR] [VERSION] Resolving dynamic version for variant: 'linux'
+[17:35:57.022] [INFO] [ORCHESTRATOR] [VERSION] [PRIORITY-1] Fetching latest version for variant: 'linux'
+[17:35:57.022] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux'
+[17:35:57.563] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux': '6.18.6.arch1-1'
+[17:35:57.563] [INFO] [ORCHESTRATOR] [VERSION] [PRIORITY-1] Successfully resolved 'latest' to: '6.18.6.arch1-1'
+[17:35:57.563] [INFO] [ORCHESTRATOR] [VERSION] Config updated with resolved version: '6.18.6.arch1-1'
+[17:35:57.563] [INFO] [ORCHESTRATOR] [PREPARATION] Version resolution complete. Using version: '6.18.6.arch1-1'
+[17:35:57.564] PHASE TRANSITION: Patching
+[17:35:57.579] PHASE TRANSITION: Building
+[17:35:57.579] [INFO] [Patcher] [SOURCE-REPAIR] Validating PKGBUILD for variant: 'linux' with version: '6.18.6.arch1-1'
+[17:35:57.579] [WARN] [Patcher] [SOURCE-REPAIR] Repairing PKGBUILD: variant_mismatch=false, version_mismatch=true
+[17:35:59.318] ==> Making package: linux-goatd-gaming 6.18.6.arch1-1 (Fri 23 Jan 2026 05:35:59 PM MST)
+[17:35:59.318] ==> Making package: linux-goatd-gaming 6.18.6.arch1-1 (Fri 23 Jan 2026 05:35:59 PM MST)
+[17:35:59.319] ==> Checking runtime dependencies...
+[17:35:59.319] ==> Checking runtime dependencies...
+[17:35:59.321] ==> Checking buildtime dependencies...
+[17:35:59.321] ==> Checking buildtime dependencies...
+[17:35:59.341] ==> Retrieving sources...
+[17:35:59.341] ==> Retrieving sources...
+[17:35:59.348]   -> Downloading linux-6.18.6.tar.xz...
+[17:35:59.354] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[17:35:59.354] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[17:36:15.171] [INFO] [SCXManager] SCX support check: SUPPORTED
+[17:36:15.171] [INFO] [SCXManager] Found SCX service: scx_loader.service at /usr/lib/systemd/system/scx_loader.service
+[17:36:39.615] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+  4 147.1M   4  6.73M   0      0  6.72M      0   00:21   00:01   00:20  6.73M
+  9 147.1M   9 14.46M   0      0  7.21M      0   00:20   00:02   00:18  7.21M
+ 12 147.1M  12 18.74M   0      0  6.22M      0   00:23   00:03   00:20  6.22M
+ 14 147.1M  14 21.77M   0      0  5.43M      0   00:27   00:04   00:23  5.43M
+ 16 147.1M  16 24.51M   0      0  4.88M      0   00:30   00:05   00:25  4.88M
+ 17 147.1M  17 26.33M   0      0  4.37M      0   00:33   00:06   00:27  3.90M
+ 19 147.1M  19 28.02M   0      0  3.99M      0   00:36   00:07   00:29  2.70M
+ 20 147.1M  20 29.93M   0      0  3.72M      0   00:39   00:08   00:31  2.22M
+ 21 147.1M  21 32.15M   0      0  3.56M      0   00:41   00:09   00:32  2.06M
+ 23 147.1M  23 34.05M   0      0  3.39M      0   00:43   00:10   00:33  1.90M
+ 24 147.1M  24 35.60M   0      0  3.22M      0   00:45   00:11   00:34  1.84M
+ 25 147.1M  25 37.63M   0      0  3.12M      0   00:47   00:12   00:35  1.91M
+ 26 147.1M  26 39.04M   0      0  2.99M      0   00:49   00:13   00:36  1.82M
+ 27 147.1M  27 40.79M   0      0  2.90M      0   00:50   00:14   00:36  1.72M
+ 29 147.1M  29 43.01M   0      0  2.86M      0   00:51   00:15   00:36  1.79M
+ 30 147.1M  30 45.62M   0      0  2.84M      0   00:51   00:16   00:35  2.00M
+ 33 147.1M  33 48.66M   0      0  2.85M      0   00:51   00:17   00:34  2.20M
+ 35 147.1M  35 52.13M   0      0  2.89M      0   00:50   00:18   00:32  2.61M
+ 38 147.1M  38 56.07M   0      0  2.94M      0   00:49   00:19   00:30  3.05M
+ 40 147.1M  40 60.24M   0      0  3.00M      0   00:48   00:20   00:28  3.44M
+ 42 147.1M  42 62.79M   0      0  2.98M      0   00:49   00:21   00:28  3.43M
+ 44 147.1M  44 65.73M   0      0  2.98M      0   00:49   00:22   00:27  3.41M
+ 46 147.1M  46 69.12M   0      0  3.00M      0   00:49   00:23   00:26  3.39M
+ 49 147.1M  49 72.88M   0      0  3.03M      0   00:48   00:24   00:24  3.36M
+ 52 147.1M  52 76.96M   0      0  3.07M      0   00:47   00:25   00:22  3.34M
+ 54 147.1M  54 80.83M   0      0  3.10M      0   00:47   00:26   00:21  3.60M
+ 57 147.1M  57 84.82M   0      0  3.13M      0   00:46   00:27   00:19  3.81M
+ 59 147.1M  59 88.18M   0      0  3.14M      0   00:46   00:28   00:18  3.81M
+ 61 147.1M  61 91.21M   0      0  3.14M      0   00:46   00:29   00:17  3.66M
+ 64 147.1M  64 94.60M   0      0  3.14M      0   00:46   00:30   00:16  3.52M
+ 66 147.1M  66 98.37M   0      0  3.16M      0   00:46   00:31   00:15  3.50M
+ 69 147.1M  69 102.4M   0      0  3.19M      0   00:46   00:32   00:14  3.51M
+ 72 147.1M  72 106.7M   0      0  3.22M      0   00:45   00:33   00:12  3.69M
+ 75 147.1M  75 111.4M   0      0  3.27M      0   00:44   00:34   00:10  4.03M
+ 79 147.1M  79 116.3M   0      0  3.31M      0   00:44   00:35   00:09  4.33M
+ 82 147.1M  82 121.2M   0      0  3.36M      0   00:43   00:36   00:07  4.57M
+ 86 147.1M  86 126.7M   0      0  3.42M      0   00:43   00:37   00:06  4.85M
+ 90 147.1M  90 132.4M   0      0  3.48M      0   00:42   00:38   00:04  5.15M
+ 94 147.1M  94 139.4M   0      0  3.57M      0   00:41   00:39   00:02  5.60M
+ 99 147.1M  99 145.9M   0      0  3.64M      0   00:40   00:40          5.92M
+100 147.1M 100 147.1M   0      0  3.65M      0   00:40   00:40          5.92M
+100 147.1M 100 147.1M   0      0  3.65M      0   00:40   00:40          5.92M
+100 147.1M 100 147.1M   0      0  3.65M      0   00:40   00:40          5.92M
+[17:36:39.627]   -> Downloading linux-6.18.6.tar.sign...
+[17:36:39.630] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[17:36:39.631] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[17:36:39.811] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+100    989 100    989   0      0   5494      0                              0
+100    989 100    989   0      0   5492      0                              0
+100    989 100    989   0      0   5490      0                              0
+[17:36:39.821]   -> Downloading linux-v6.18.6-arch1.patch.zst...
+[17:36:39.826] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[17:36:39.826] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[17:36:40.190] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+[17:36:40.443] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+100   4737 100   4737   0      0   7680      0                              0
+100   4737 100   4737   0      0   7679      0                              0
+100   4737 100   4737   0      0   7678      0                              0
+[17:36:40.455]   -> Downloading linux-v6.18.6-arch1.patch.zst.sig...
+[17:36:40.459] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[17:36:40.459] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[17:36:40.806] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+[17:36:40.958] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+100    228 100    228   0      0    456      0                              0
+100    228 100    228   0      0    456      0                              0
+100    228 100    228   0      0    456      0                              0
+[17:36:40.966]   -> Found config
+[17:36:40.969] ==> Validating source files with sha256sums...
+[17:36:40.969] ==> Validating source files with sha256sums...
+[17:36:41.317] [STDERR]     linux-6.18.6.tar.xz ... Passed
+[17:36:41.320] [STDERR]     linux-6.18.6.tar.sign ... Skipped
+[17:36:41.327] [STDERR]     linux-v6.18.6-arch1.patch.zst ... Passed
+[17:36:41.330] [STDERR]     linux-v6.18.6-arch1.patch.zst.sig ... Skipped
+[17:36:41.338] [STDERR]     config ... Passed
+[17:36:41.341] ==> Validating source files with b2sums...
+[17:36:41.341] ==> Validating source files with b2sums...
+[17:36:41.498] [STDERR]     linux-6.18.6.tar.xz ... Passed
+[17:36:41.500] [STDERR]     linux-6.18.6.tar.sign ... Skipped
+[17:36:41.509] [STDERR]     linux-v6.18.6-arch1.patch.zst ... Passed
+[17:36:41.511] [STDERR]     linux-v6.18.6-arch1.patch.zst.sig ... Skipped
+[17:36:41.518] [STDERR]     config ... Passed
+[17:36:41.522] ==> Verifying source file signatures with gpg...
+[17:36:41.522] ==> Verifying source file signatures with gpg...
+[17:36:43.738] [STDERR]     linux-6.18.6.tar ... Passed
+[17:36:43.752] [STDERR]     linux-v6.18.6-arch1.patch.zst ... Passed
+[17:36:43.756] ==> Extracting sources...
+[17:36:43.756] ==> Extracting sources...
+[17:36:43.801]   -> Extracting linux-6.18.6.tar.xz with bsdtar
+[17:36:52.775]   -> Extracting linux-v6.18.6-arch1.patch.zst with zstd
+[17:36:52.810] ==> Starting prepare()...
+[17:36:52.810] ==> Starting prepare()...
+[17:36:52.811] [STDERR] [MODPROBED] [PATH-DETECTION] HOME env var: $HOME
+[17:36:52.811] [STDERR] [MODPROBED] [PATH-DETECTION] Resolved modprobed.db path: /home/minigoat/.config/modprobed.db
+[17:36:52.811] [STDERR] [MODPROBED] [PATH-DETECTION] Checked: $HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db
+[17:36:52.811] [STDERR] [MODPROBED] Found modprobed-db at /home/minigoat/.config/modprobed.db
+[17:36:52.811] [STDERR] [MODPROBED] Running localmodconfig to filter kernel modules...
+[17:36:52.811] [STDERR] [MODPROBED] This will automatically filter kernel modules to those in use
+[17:36:52.811] [STDERR] [MODPROBED] Using modprobed database: /home/minigoat/.config/modprobed.db
+[17:36:52.813] [STDERR] [MODPROBED] Found kernel source directory: /home/minigoat/Documents/GOATd-Kernel/GOATd-Kernel-master/linux/src/linux-6.18.6
+[17:36:52.813] [STDERR] [MODPROBED] Changed to kernel source directory
+[17:36:52.813] [STDERR] [MODPROBED] Running: yes "" | make LLVM=1 LLVM_IAS=1 LSMOD=/home/minigoat/.config/modprobed.db localmodconfig
+[17:36:53.189]   HOSTCC  scripts/basic/fixdep
+[17:36:53.534]   HOSTCC  scripts/kconfig/conf.o
+[17:36:53.534]   HOSTCC  scripts/kconfig/confdata.o
+[17:36:53.534]   HOSTCC  scripts/kconfig/expr.o
+[17:36:53.535]   LEX     scripts/kconfig/lexer.lex.c
+[17:36:53.535]   YACC    scripts/kconfig/parser.tab.[ch]
+[17:36:53.535]   HOSTCC  scripts/kconfig/menu.o
+[17:36:53.536]   HOSTCC  scripts/kconfig/preprocess.o
+[17:36:53.537]   HOSTCC  scripts/kconfig/symbol.o
+[17:36:53.537]   HOSTCC  scripts/kconfig/util.o
+[17:36:53.631]   HOSTCC  scripts/kconfig/lexer.lex.o
+[17:36:53.631]   HOSTCC  scripts/kconfig/parser.tab.o
+[17:36:53.869]   HOSTLD  scripts/kconfig/conf
+[17:36:53.924] using config: '/proc/config.gz'
+[17:36:54.548] intel_vsec config not found!!
+[17:36:57.354] *
+[17:36:57.354] * Restart config...
+[17:36:57.355] *
+[17:36:57.355] *
+[17:36:57.355] * General architecture-dependent options
+[17:36:57.355] *
+[17:36:57.355] SMT (Hyperthreading) scheduler support (SCHED_SMT) [Y/?] y
+[17:36:57.355] Cluster scheduler support (SCHED_CLUSTER) [Y/n/?] y
+[17:36:57.356] Multi-Core Cache (MC) scheduler support (SCHED_MC) [Y/n/?] y
+[17:36:57.356] Kprobes (KPROBES) [Y/n/?] y
+[17:36:57.356] Optimize very unlikely/likely branches (JUMP_LABEL) [Y/n/?] y
+[17:36:57.356]   Static key selftest (STATIC_KEYS_SELFTEST) [N/y/?] n
+[17:36:57.356] Static call selftest (STATIC_CALL_SELFTEST) [N/y/?] n
+[17:36:57.356] Enable seccomp to safely execute untrusted bytecode (SECCOMP) [Y/n/?] y
+[17:36:57.357]   Show seccomp filter cache status in /proc/pid/seccomp_cache (SECCOMP_CACHE_DEBUG) [N/y/?] n
+[17:36:57.357] Stack Protector buffer overflow detection (STACKPROTECTOR) [Y/n/?] y
+[17:36:57.357]   Strong Stack Protector (STACKPROTECTOR_STRONG) [Y/n/?] y
+[17:36:57.357] Link Time Optimization (LTO)
+[17:36:57.357] > 1. None (LTO_NONE)
+[17:36:57.358]   2. Clang Full LTO (EXPERIMENTAL) (LTO_CLANG_FULL) (NEW)
+[17:36:57.358]   3. Clang ThinLTO (EXPERIMENTAL) (LTO_CLANG_THIN) (NEW)
+[17:36:57.358] choice[1-3?]:
+[17:36:57.358] Enable Clang's AutoFDO build (EXPERIMENTAL) (AUTOFDO_CLANG) [N/y/?] (NEW)
+[17:36:57.358] Enable Clang's Propeller build (PROPELLER_CLANG) [N/y/?] (NEW)
+[17:36:57.359] Use Kernel Control Flow Integrity (kCFI) (CFI) [N/y/?] (NEW)
+[17:36:57.359] MMU page size
+[17:36:57.359] > 1. 4KiB pages (PAGE_SIZE_4KB)
+[17:36:57.359] choice[1]: 1
+[17:36:57.359] Provide system calls for 32-bit time_t (COMPAT_32BIT_TIME) [Y/n/?] y
+[17:36:57.360] Use a virtually-mapped stack (VMAP_STACK) [Y/n/?] y
+[17:36:57.360] Support for randomizing kernel stack offset on syscall entry (RANDOMIZE_KSTACK_OFFSET) [Y/?] y
+[17:36:57.360]   Default state of kernel stack offset randomization (RANDOMIZE_KSTACK_OFFSET_DEFAULT) [Y/n/?] y
+[17:36:57.360] Locking event counts collection (LOCK_EVENT_COUNTS) [Y/n/?] y
+-------
+[17:37:06.964] Prepared linux-goatd-gaming version 6.18.6-arch1-1-goatd-gaming
+[17:37:06.964] ==> Starting build()...
+[17:37:06.964] ==> Starting build()...
+
+--------
+
+
+[17:58:00.693] Stripping vmlinux...
+[17:58:01.150] copy from `/home/minigoat/Documents/GOATd-Kernel/GOATd-Kernel-master/linux/pkg/linux-goatd-gaming-headers/usr/lib/modules/6.18.6-arch1-1-goatd-gaming/build/vmlinux' [elf64-x86-64] to `/home/minigoat/Documents/GOATd-Kernel/GOATd-Kernel-master/linux/pkg/linux-goatd-gaming-headers/usr/lib/modules/6.18.6-arch1-1-goatd-gaming/build/stF92d2M' [elf64-x86-64]
+[17:58:01.153] Adding symlink...
+[17:58:01.157] ==> Tidying install...
+[17:58:01.157] ==> Tidying install...
+[17:58:01.159]   -> Removing libtool files...
+[17:58:01.238]   -> Removing static library files...
+[17:58:01.318]   -> Purging unwanted files...
+[17:58:01.474]   -> Compressing man and info pages...
+[17:58:01.477] ==> Checking for packaging issues...
+[17:58:01.477] ==> Checking for packaging issues...
+[17:58:02.447] [STDERR] ==> WARNING: Package contains reference to $srcdir
+[17:58:02.447] [STDERR] usr/lib/modules/6.18.6-arch1-1-goatd-gaming/vdso/vdso32.so
+[17:58:02.448] [STDERR] usr/lib/modules/6.18.6-arch1-1-goatd-gaming/vdso/vdso64.so
+[17:58:02.875] ==> Creating package "linux-goatd-gaming-headers"...
+[17:58:02.875] ==> Creating package "linux-goatd-gaming-headers"...
+[17:58:02.877]   -> Generating .PKGINFO file...
+[17:58:03.710]   -> Generating .BUILDINFO file...
+[17:58:04.059]   -> Generating .MTREE file...
+[17:58:05.202]   -> Compressing package...
+[17:58:06.287] ==> Starting package_linux-goatd-gaming-docs()...
+[17:58:06.287] ==> Starting package_linux-goatd-gaming-docs()...
+[17:58:06.287] Installing documentation...
+[17:58:25.578] Adding symlink...
+[17:58:25.581] ==> Tidying install...
+[17:58:25.581] ==> Tidying install...
+[17:58:25.583]   -> Removing libtool files...
+[17:58:25.632]   -> Removing static library files...
+[17:58:25.681]   -> Purging unwanted files...
+[17:58:25.779]   -> Compressing man and info pages...
+[17:58:25.782] ==> Checking for packaging issues...
+[17:58:25.782] ==> Checking for packaging issues...
+[17:58:28.488] ==> Creating package "linux-goatd-gaming-docs"...
+[17:58:28.488] ==> Creating package "linux-goatd-gaming-docs"...
+[17:58:28.490]   -> Generating .PKGINFO file...
+[17:58:29.674]   -> Generating .BUILDINFO file...
+[17:58:30.005]   -> Generating .MTREE file...
+[17:58:31.682]   -> Compressing package...
+[17:58:33.154] ==> Leaving fakeroot environment.
+[17:58:33.154] ==> Leaving fakeroot environment.
+[17:58:33.157] ==> Finished making: linux-goatd-gaming 6.18.6.arch1-1 (Fri 23 Jan 2026 05:58:33 PM MST)
+[17:58:33.157] ==> Finished making: linux-goatd-gaming 6.18.6.arch1-1 (Fri 23 Jan 2026 05:58:33 PM MST)
+[17:58:33.158] PHASE TRANSITION: Validation
+[17:58:33.158] PHASE TRANSITION: Completed
+[18:09:00.415] [INFO] [SCXManager] SCX support check: SUPPORTED
+[18:09:00.415] [INFO] [SCXManager] Found scheduler: scx_bpfland
+[18:09:00.415] [INFO] [SCXManager] Found scheduler: scx_lavd
+[18:09:00.415] [INFO] [SCXManager] Found scheduler: scx_rusty
+[18:09:00.415] [INFO] [SCXManager] Available schedulers: ["scx_bpfland", "scx_lavd", "scx_rusty"]
+[18:09:00.415] [INFO] [SCXManager] Found SCX service: scx_loader.service at /usr/lib/systemd/system/scx_loader.service
+[18:09:00.591] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux'
+[18:09:00.591] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-lts'
+[18:09:00.591] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-hardened'
+[18:09:00.591] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-zen'
+[18:09:00.591] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-mainline'
+[18:09:00.592] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-tkg'
+[18:09:00.895] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-tkg': '${_basekernel}-273'
+[18:09:01.139] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-hardened': '6.17.13.hardened1-2'
+[18:09:01.139] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-zen': '6.18.7.zen1-1'
+[18:09:01.146] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux': '6.18.7.arch1-1'
+[18:09:01.155] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-mainline': '6.19rc6-1'
+[18:09:01.243] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-lts': '6.12.67-1'
+[18:09:02.209] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[18:09:02.597] [INFO] [KernelManager] Found 1 built kernels in workspace
+[18:09:05.202] [INFO] [AppController] [KERNEL] Starting async kernel installation from: ./linux/linux-goatd-gaming-6.18.6.arch1-1-x86_64.pkg.tar.zst
+[18:09:05.202] [INFO] [KERNEL] [RESOLVE] Starting kernel version resolution
+[18:09:05.202] [INFO] [KERNEL] [RESOLVE] Found .kernelrelease in package directory: 6.18.6-arch1-1-goatd-gaming
+[18:09:05.202] [INFO] [KernelArtifactRegistry] Extracted filename version: 6.18.6.arch1-1 from linux-goatd-gaming-6.18.6.arch1-1-x86_64.pkg.tar.zst
+[18:09:05.202] [INFO] [KernelArtifactRegistry] Kernel Identity: variant='linux-goatd-gaming', internal_version='6.18.6-arch1-1-goatd-gaming', filename_version=Some("6.18.6.arch1-1")
+[18:09:05.202] [INFO] [KernelArtifactRegistry] ✓ Found -headers via filename version fallback: linux-goatd-gaming-headers-6.18.6.arch1-1-x86_64.pkg.tar.zst
+[18:09:05.203] [INFO] [KernelArtifactRegistry] ✓ Found -docs via filename version fallback: linux-goatd-gaming-docs-6.18.6.arch1-1-x86_64.pkg.tar.zst
+[18:09:05.330] [INFO] [KernelArtifactRegistry] ✓ Critical file found in tarball: include/linux/memremap.h (including deeply nested paths)
+[18:09:05.330] [INFO] [KernelArtifactRegistry] ✓ Deep validation PASSED: All critical files found in headers tarball
+[18:09:05.330] [INFO] [SystemWrapper] Executing batch privileged commands (7 steps)
+[18:09:09.412] [INFO] [batch privileged] stdout: loading packages...
+DKMS_FAILED_SYMLINKS
+DKMS_FAILED_MODULES
+
+[18:09:09.412] [INFO] [batch privileged] stderr: error: './linux/linux-goatd-gaming-6.18.6.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+error: './linux/linux-goatd-gaming-headers-6.18.6.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+error: './linux/linux-goatd-gaming-docs-6.18.6.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+/usr/bin/sh: line 41: dkms: command not found
+
+[18:09:09.412] [INFO] [SystemWrapper] Batch execution succeeded
+[18:09:09.475] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[18:09:09.791] [INFO] [KernelManager] Found 1 built kernels in workspace
+[18:09:11.550] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[18:09:11.875] [INFO] [KernelManager] Found 1 built kernels in workspace

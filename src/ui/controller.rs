@@ -1441,7 +1441,7 @@ if [[ "$kernelver" == *"-goatd-"* ]]; then
    # DKMS TOOLCHAIN ENFORCEMENT FOR GOATD KERNELS
    # ======================================================================
    # CRITICAL: These variables must be set for DKMS to use LLVM/Clang
-   # when building kernel modules (nvidia-dkms, etc.)
+   # when building out-of-tree kernel modules (e.g., DKMS drivers)
    
    # Force LLVM compiler (version 19+ if available)
    export LLVM=1
@@ -1982,15 +1982,20 @@ fi
     
     /// Extract kernel version from filename for fallback purposes
     ///
-    /// Generalizes version extraction to handle any profile name following `linux-goatd-<profile>` pattern.
+    /// PHASE 20: Supports dynamic `linux-{variant}-goatd-{profile}` scheme.
+    /// Generalizes version extraction to handle any profile name following `-goatd-` pattern.
     ///
     /// Maps package filenames to kernel release strings:
     /// - `linux-6.18.3-arch1-1-x86_64.pkg.tar.zst` -> `6.18.3-arch1-1`
     /// - `linux-zen-6.18.3-arch1-1-x86_64.pkg.tar.zst` -> `6.18.3-arch1-1`
     /// - `linux-lts-6.18.3-arch1-1-x86_64.pkg.tar.zst` -> `6.18.3-arch1-1`
+    /// - `linux-zen-goatd-gaming-6.18.3.arch1-2-x86_64.pkg.tar.zst` -> `6.18.3-arch1-2-zen-goatd-gaming`
     /// - `linux-goatd-gaming-6.18.3.arch1-2-x86_64.pkg.tar.zst` -> `6.18.3-arch1-2-goatd-gaming`
     /// - `linux-goatd-server-6.18.3.arch1-2-x86_64.pkg.tar.zst` -> `6.18.3-arch1-2-goatd-server`
     /// - `linux-goatd-workstation-6.18.3.arch1-2-x86_64.pkg.tar.zst` -> `6.18.3-arch1-2-goatd-workstation`
+    ///
+    /// Dynamic profile extraction: Any content after `-goatd-` is treated as the profile name,
+    /// allowing new profiles to be added without code changes (e.g., `-goatd-custom`, `-goatd-optimized`).
     fn extract_kernel_version_from_filename(filename: &str) -> Option<String> {
         // Remove .pkg.tar.zst suffix
         let base = filename.strip_suffix(".pkg.tar.zst")?;
@@ -2042,16 +2047,31 @@ fi
     
     /// Determine if a variant should be appended to the kernel version string.
     ///
+    /// PHASE 20: Dynamic profile support via `-goatd-` pivot.
+    ///
     /// Standard kernel variants (zen, lts) are not appended; custom GOATd profiles
-    /// (matching `goatd-*` pattern) are always appended for proper DKMS targeting.
+    /// containing `-goatd-` are always appended for proper DKMS targeting.
+    ///
+    /// Examples:
+    /// - "zen" -> false (standard variant, don't append)
+    /// - "lts" -> false (standard variant, don't append)
+    /// - "goatd-gaming" -> true (custom profile, append)
+    /// - "zen-goatd-gaming" -> true (base variant with profile, append)
+    /// - "hardened-goatd-workstation" -> true (base variant with profile, append)
+    /// - Any content after "-goatd-" is dynamically treated as a profile
     fn should_append_profile_suffix(variant: &str) -> bool {
+        // PHASE 20: Pivot on "-goatd-" to detect dynamic profiles
+        // If the variant contains "-goatd-", it's a custom profile and should be appended
+        if variant.contains("-goatd-") {
+            return true;
+        }
+        
         // Don't append for standard Linux kernel variants
         if variant == "zen" || variant == "lts" || variant.is_empty() {
             return false;
         }
         
-        // Append for all custom profiles, including any goatd-* variant
-        // (e.g., goatd-gaming, goatd-server, goatd-workstation, etc.)
+        // Append for any other custom profiles
         true
     }
 

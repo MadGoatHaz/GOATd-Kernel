@@ -279,15 +279,49 @@ pub fn apply_exclusions(config: &mut KernelConfig, exclusions: &[&str]) -> Resul
     Ok(())
 }
 
+/// Detect active GPU vendor drivers by checking /proc/modules.
+///
+/// Returns a bitmask of detected GPU vendors:
+/// - bit 0 (1): NVIDIA driver present
+/// - bit 1 (2): AMD driver present
+/// - bit 2 (4): Intel driver present
+fn detect_active_gpu_vendors() -> u8 {
+    use std::fs;
+    let mut vendors = 0u8;
+    
+    if let Ok(content) = fs::read_to_string("/proc/modules") {
+        let lower = content.to_lowercase();
+        
+        // Detect NVIDIA drivers
+        if lower.contains("nvidia") || lower.contains("nouveau") {
+            vendors |= 1;
+        }
+        
+        // Detect AMD drivers
+        if lower.contains("amdgpu") || lower.contains("radeon") {
+            vendors |= 2;
+        }
+        
+        // Detect Intel drivers (xe or i915)
+        if lower.contains("xe") || lower.contains("i915") {
+            vendors |= 4;
+        }
+    }
+    
+    vendors
+}
+
 /// Apply GPU-aware driver exclusions based on detected hardware.
 ///
 /// Automatically excludes GPU drivers that don't match the detected GPU vendor.
+/// Handles hybrid GPU scenarios by detecting what's actually loaded.
 /// This ensures aggressive module filtering by removing unused GPU driver subsystems.
 ///
 /// **GPU Driver Exclusion Policy**:
 /// - **NVIDIA GPU detected**: Excludes AMD (amdgpu, radeon) and Intel (i915, xe) drivers
 /// - **AMD GPU detected**: Excludes NVIDIA (nouveau, nvidia) and Intel (i915, xe) drivers
 /// - **Intel GPU detected**: Excludes NVIDIA (nouveau, nvidia) and AMD (amdgpu, radeon) drivers
+/// - **Hybrid scenarios**: Only excludes drivers for vendors NOT detected to preserve working GPUs
 /// - **No GPU detected**: Excludes all dedicated GPU drivers (nouveau, nvidia, amdgpu, radeon, i915, xe)
 ///
 /// This is designed to work seamlessly with modprobed-db filtering to achieve
@@ -312,7 +346,7 @@ pub fn apply_exclusions(config: &mut KernelConfig, exclusions: &[&str]) -> Resul
 /// #
 /// # let mut config = KernelConfig::default();
 /// # let hardware = HardwareInfo {
-/// #     gpu_vendor: GpuVendor::NVIDIA,
+/// #     gpu_vendor: GpuVendor::Nvidia,
 /// #     ..HardwareInfo::default()
 /// # };
 /// #
@@ -322,30 +356,109 @@ pub fn apply_exclusions(config: &mut KernelConfig, exclusions: &[&str]) -> Resul
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn apply_gpu_exclusions(config: &mut KernelConfig, hardware_info: &HardwareInfo) -> Result<(), ConfigError> {
+    // Detect what's actually loaded to handle hybrid scenarios
+    let active_vendors = detect_active_gpu_vendors();
+    let has_nvidia = (active_vendors & 1) != 0;
+    let has_amd = (active_vendors & 2) != 0;
+    let has_intel = (active_vendors & 4) != 0;
+    
     match hardware_info.gpu_vendor {
         GpuVendor::Nvidia => {
-            // NVIDIA GPU: exclude AMD and Intel drivers
-            let gpu_drivers = vec!["amdgpu", "radeon", "i915", "xe"];
-            apply_exclusions(config, &gpu_drivers)?;
-            eprintln!("[GPU-EXCLUSION] NVIDIA GPU detected: excluding AMD (amdgpu, radeon) and Intel (i915, xe) drivers");
+            // NVIDIA GPU: aggressive exclusion of non-NVIDIA drivers
+            // But preserve AMD or Intel if they're hybrid with NVIDIA
+            let mut gpu_drivers = Vec::new();
+            
+            if !has_amd {
+                gpu_drivers.extend_from_slice(&["amdgpu", "radeon"]);
+            }
+            if !has_intel {
+                gpu_drivers.extend_from_slice(&["i915", "xe"]);
+            }
+            
+            if !gpu_drivers.is_empty() {
+                apply_exclusions(config, &gpu_drivers)?;
+            }
+            
+            let hybrid_status = if has_amd || has_intel {
+                format!(" (hybrid: NVIDIA + {})",
+                    match (has_amd, has_intel) {
+                        (true, true) => "AMD+Intel",
+                        (true, false) => "AMD",
+                        (false, true) => "Intel",
+                        _ => "Unknown"
+                    }
+                )
+            } else {
+                String::new()
+            };
+            
+            eprintln!("[GPU-EXCLUSION] NVIDIA detected{}: excluding unused AMD and Intel drivers", hybrid_status);
         },
         GpuVendor::Amd => {
-            // AMD GPU: exclude NVIDIA and Intel drivers
-            let gpu_drivers = vec!["nouveau", "nvidia", "i915", "xe"];
-            apply_exclusions(config, &gpu_drivers)?;
-            eprintln!("[GPU-EXCLUSION] AMD GPU detected: excluding NVIDIA (nouveau, nvidia) and Intel (i915, xe) drivers");
+            // AMD GPU: aggressive exclusion of non-AMD drivers
+            let mut gpu_drivers = Vec::new();
+            
+            if !has_nvidia {
+                gpu_drivers.extend_from_slice(&["nouveau", "nvidia"]);
+            }
+            if !has_intel {
+                gpu_drivers.extend_from_slice(&["i915", "xe"]);
+            }
+            
+            if !gpu_drivers.is_empty() {
+                apply_exclusions(config, &gpu_drivers)?;
+            }
+            
+            let hybrid_status = if has_nvidia || has_intel {
+                format!(" (hybrid: AMD + {})",
+                    match (has_nvidia, has_intel) {
+                        (true, true) => "NVIDIA+Intel",
+                        (true, false) => "NVIDIA",
+                        (false, true) => "Intel",
+                        _ => "Unknown"
+                    }
+                )
+            } else {
+                String::new()
+            };
+            
+            eprintln!("[GPU-EXCLUSION] AMD detected{}: excluding unused NVIDIA and Intel drivers", hybrid_status);
         },
         GpuVendor::Intel => {
-            // Intel GPU: exclude NVIDIA and AMD drivers
-            let gpu_drivers = vec!["nouveau", "nvidia", "amdgpu", "radeon"];
-            apply_exclusions(config, &gpu_drivers)?;
-            eprintln!("[GPU-EXCLUSION] Intel GPU detected: excluding NVIDIA (nouveau, nvidia) and AMD (amdgpu, radeon) drivers");
+            // Intel GPU: aggressive exclusion of non-Intel drivers
+            let mut gpu_drivers = Vec::new();
+            
+            if !has_nvidia {
+                gpu_drivers.extend_from_slice(&["nouveau", "nvidia"]);
+            }
+            if !has_amd {
+                gpu_drivers.extend_from_slice(&["amdgpu", "radeon"]);
+            }
+            
+            if !gpu_drivers.is_empty() {
+                apply_exclusions(config, &gpu_drivers)?;
+            }
+            
+            let hybrid_status = if has_nvidia || has_amd {
+                format!(" (hybrid: Intel + {})",
+                    match (has_nvidia, has_amd) {
+                        (true, true) => "NVIDIA+AMD",
+                        (true, false) => "NVIDIA",
+                        (false, true) => "AMD",
+                        _ => "Unknown"
+                    }
+                )
+            } else {
+                String::new()
+            };
+            
+            eprintln!("[GPU-EXCLUSION] Intel detected{}: excluding unused NVIDIA and AMD drivers", hybrid_status);
         },
         GpuVendor::Unknown => {
             // No dedicated GPU: exclude all dedicated GPU drivers
             let gpu_drivers = vec!["nouveau", "nvidia", "amdgpu", "radeon", "i915", "xe"];
             apply_exclusions(config, &gpu_drivers)?;
-            eprintln!("[GPU-EXCLUSION] No dedicated GPU detected: excluding all GPU drivers (nouveau, nvidia, amdgpu, radeon, i915, xe)");
+            eprintln!("[GPU-EXCLUSION] No dedicated GPU detected: excluding all GPU drivers");
         },
     }
     Ok(())

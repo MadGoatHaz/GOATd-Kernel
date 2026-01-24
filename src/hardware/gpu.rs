@@ -206,7 +206,22 @@ fn detect_vendor_from_id(vendor_str: &str) -> Option<GpuVendor> {
     }
 }
 
+/// Validate Intel Arc GPU PCI device ID.
+/// Intel Arc (DG2-based Alchemist) device IDs: 0x5692-0x569f
+/// Also accepts other Intel discrete GPU device IDs.
+fn is_intel_arc_device_id(device_id: &str) -> bool {
+    if let Ok(id) = u16::from_str_radix(device_id.trim_start_matches("0x"), 16) {
+        // Intel Arc Alchemist (DG2): 0x5692-0x569f
+        (id >= 0x5692 && id <= 0x569f) ||
+        // Intel Data Center GPU Flex: 0x56a0-0x56af
+        (id >= 0x56a0 && id <= 0x56af)
+    } else {
+        false
+    }
+}
+
 /// Detect GPU vendor via /proc/modules.
+/// Prioritizes `xe` driver over `i915` for Intel GPUs.
 fn detect_via_proc_modules() -> Option<GpuVendor> {
     let content = fs::read_to_string("/proc/modules").ok()?;
 
@@ -220,7 +235,12 @@ fn detect_via_proc_modules() -> Option<GpuVendor> {
         return Some(GpuVendor::Amd);
     }
 
-    if content_lower.contains("i915") || content_lower.contains("xe") {
+    // Prioritize `xe` (newer DG1, Arc) over `i915` (legacy integrated)
+    if content_lower.contains("xe") {
+        return Some(GpuVendor::Intel);
+    }
+
+    if content_lower.contains("i915") {
         return Some(GpuVendor::Intel);
     }
 

@@ -100,6 +100,8 @@ use regex::Regex;
 use crate::error::PatchError;
 use std::process::Command;
 use crate::kernel::lto;
+use crate::models::GpuVendor;
+use crate::hardware::gpu;
 
 /// Phase-aware patch hook system
 ///
@@ -1815,16 +1817,25 @@ export READELF=llvm-readelf
             }
         }
 
-        // PHASE 3.B.2: Patch NVIDIA DKMS configurations (Nuclear patching for specific drivers)
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: Patching NVIDIA DKMS driver configurations");
-        match self.patch_nvidia_dkms_config() {
-            Ok(patched_count) => {
-                eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: ✓ Patched {} NVIDIA DKMS configuration(s)", patched_count);
+        // PHASE 3.B.2: Patch NVIDIA DKMS configurations (only if NVIDIA GPU detected)
+        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: Checking for NVIDIA GPU before DKMS config patching");
+        let has_nvidia = gpu::detect_gpu_vendor()
+            .map(|vendor| vendor == GpuVendor::Nvidia)
+            .unwrap_or(false);
+        
+        if has_nvidia {
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: NVIDIA GPU detected - patching NVIDIA DKMS driver configurations");
+            match self.patch_nvidia_dkms_config() {
+                Ok(patched_count) => {
+                    eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: ✓ Patched {} NVIDIA DKMS configuration(s)", patched_count);
+                }
+                Err(e) => {
+                    eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: WARNING - NVIDIA DKMS config patching failed (non-fatal): {}", e);
+                    // Continue with patching even if NVIDIA config fails (may not have root access or NVIDIA sources)
+                }
             }
-            Err(e) => {
-                eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: WARNING - NVIDIA DKMS config patching failed (non-fatal): {}", e);
-                // Continue with patching even if NVIDIA config fails (may not have root access or NVIDIA sources)
-            }
+        } else {
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: Skipped - no NVIDIA GPU detected on this system");
         }
 
         // PHASE 3.C: Remove ICF flags that conflict with LTO
@@ -1841,15 +1852,23 @@ export READELF=llvm-readelf
         let strip_fixes = self.remove_strip_verbose_flag()?;
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.E: Applied {} strip fixes", strip_fixes);
 
-        // PHASE 3.F: Apply NVIDIA DKMS compatibility shim for memremap.h (source tree)
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.F: Applying NVIDIA DKMS compatibility shim (page_free field restoration)");
-        let nvidia_shim_count = self.apply_nvidia_dkms_memremap_shim()?;
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.F: Applied {} NVIDIA DKMS shim(s) to source tree", nvidia_shim_count);
+        // PHASE 3.F: Apply NVIDIA DKMS compatibility shim (only if NVIDIA GPU detected)
+        if has_nvidia {
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.F: NVIDIA GPU detected - applying NVIDIA DKMS compatibility shim (page_free field restoration)");
+            let nvidia_shim_count = self.apply_nvidia_dkms_memremap_shim()?;
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.F: Applied {} NVIDIA DKMS shim(s) to source tree", nvidia_shim_count);
+        } else {
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.F: Skipped - no NVIDIA GPU detected (memremap.h shim not needed)");
+        }
 
-        // PHASE 3.G: Inject NVIDIA DKMS shim into headers package function (CRITICAL FIX)
-         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: Injecting NVIDIA DKMS shim into headers package function");
-         let header_shim_count = self.inject_nvidia_dkms_shim_into_headers_package()?;
-         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: Injected {} header package shim(s)", header_shim_count);
+        // PHASE 3.G: Inject NVIDIA DKMS shim into headers package function (only if NVIDIA GPU detected)
+        if has_nvidia {
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: NVIDIA GPU detected - injecting NVIDIA DKMS shim into headers package function");
+            let header_shim_count = self.inject_nvidia_dkms_shim_into_headers_package()?;
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: Injected {} header package shim(s)", header_shim_count);
+        } else {
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: Skipped - no NVIDIA GPU detected (header shim not needed)");
+        }
 
          // PHASE 3.H: Inject post-install repair hook for module symlink integrity (PHASE 15)
          eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: Injecting post-install repair hook for module symlinks (PHASE 15)");

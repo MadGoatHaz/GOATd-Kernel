@@ -8,6 +8,8 @@ pub mod verification;
 use std::path::Path;
 use regex::Regex;
 use std::process::Command;
+use crate::models::GpuVendor;
+use crate::hardware::gpu;
 
 /// Purify PATH environment variable for toolchain enforcement
 ///
@@ -289,6 +291,22 @@ impl SystemWrapper for SystemImpl {
 
         log_info!("[SystemWrapper] Attempting DKMS install for kernel version: {}", kernel_version);
 
+        // VENDOR CHECK: Bypass NVIDIA-specific DKMS logic for non-NVIDIA systems
+        let has_nvidia = gpu::detect_gpu_vendor()
+            .map(|vendor| vendor == GpuVendor::Nvidia)
+            .unwrap_or(false);
+        
+        if !has_nvidia {
+            let warn_msg = format!(
+                "No NVIDIA GPU detected on this system. Skipping NVIDIA DKMS driver installation. \
+                 This is expected on systems without NVIDIA hardware."
+            );
+            eprintln!("[DKMS] [VENDOR-CHECK] {}", warn_msg);
+            log_info!("[SystemWrapper] Skipping NVIDIA DKMS (non-NVIDIA system): {}", warn_msg);
+            return Ok(()); // Not an error - just skip for non-NVIDIA systems
+        }
+        eprintln!("[DKMS] [VENDOR-CHECK] ✓ NVIDIA GPU detected - proceeding with NVIDIA DKMS");
+
         // RACE CONDITION PREVENTION: Check if DKMS is already running
         if is_dkms_running() {
             let error_msg = format!(
@@ -515,8 +533,13 @@ impl SystemWrapper for SystemImpl {
    /// it must use the same LLVM/Clang toolchain that built the kernel. This safety net configuration
    /// ensures cross-compilation consistency by:
    /// - Detecting GOATd kernels (version strings containing "-goatd-")
-   /// - Enforcing LLVM=1, LLVM_IAS=1, CC=clang, LD=ld.lld environment variables
+   /// - Enforcing LLVM=1, LLVM_IAS=1, CC=clang, LD=ld.lld environment variables for NVIDIA systems
+   /// - Bypassing NVIDIA-specific logic for non-NVIDIA systems
    /// - Preventing compilation errors from mismatched toolchains
+   ///
+   /// # Vendor-Aware Logic
+   /// - **NVIDIA GPU detected**: Applies full DKMS LLVM/Clang enforcement
+   /// - **Non-NVIDIA system**: Skips NVIDIA-specific DKMS configuration (safer for non-NVIDIA users)
    ///
    /// # Execution Context
    /// This is called as part of the unified batch_privileged_commands flow in AppController::install_kernel_async(),
@@ -525,6 +548,21 @@ impl SystemWrapper for SystemImpl {
    /// # Returns
    /// `Ok(())` if configuration was successfully created/updated, or `Err` with diagnostic message
    fn ensure_dkms_safety_net(&self) -> Result<(), String> {
+       eprintln!("[DKMS] [SAFETY-NET] Checking GPU vendor for DKMS configuration");
+       
+       // VENDOR CHECK: Only apply NVIDIA-specific DKMS logic for NVIDIA systems
+       let has_nvidia = gpu::detect_gpu_vendor()
+           .map(|vendor| vendor == GpuVendor::Nvidia)
+           .unwrap_or(false);
+       
+       if !has_nvidia {
+           let skip_msg = "No NVIDIA GPU detected. Skipping NVIDIA-specific DKMS configuration (safe default for non-NVIDIA systems)";
+           eprintln!("[DKMS] [SAFETY-NET] [VENDOR-CHECK] {}", skip_msg);
+           log_info!("[DKMS] [SAFETY-NET] {}", skip_msg);
+           return Ok(()); // Not an error - just skip for non-NVIDIA systems
+       }
+       
+       eprintln!("[DKMS] [SAFETY-NET] [VENDOR-CHECK] ✓ NVIDIA GPU detected - applying NVIDIA DKMS config");
        eprintln!("[DKMS] [SAFETY-NET] Creating global DKMS framework configuration for GOATd kernels");
 
        // The DKMS framework.conf.d configuration content

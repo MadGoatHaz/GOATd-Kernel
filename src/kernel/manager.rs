@@ -50,9 +50,9 @@ impl KernelPackage {
 pub struct KernelArtifactRegistry {
     /// Main kernel package path
     pub kernel_path: PathBuf,
-    /// Kernel variant (linux, linux-zen, linux-lts, linux-goatd-gaming, etc.)
+    /// Kernel variant (linux, linux-zen, linux-lts, linux-goatd-{profile}, etc.)
     pub kernel_variant: String,
-    /// Kernel release version (6.18.3-arch1-1, 6.18.3-arch1-1-goatd-gaming, etc.)
+    /// Kernel release version (6.18.3-arch1-1, 6.18.3-arch1-1-goatd-{profile}, etc.)
     pub kernel_release: String,
     /// Headers package path (if found)
     pub headers_path: Option<PathBuf>,
@@ -137,8 +137,8 @@ impl KernelArtifactRegistry {
                 variant_core, version_core);
             log_info!("[KernelArtifactRegistry]   6. {}-headers-* (final fallback - any version)", kernel_variant);
             log_info!("[KernelArtifactRegistry] Headers are MANDATORY for DKMS module builds!");
-            log_info!("[KernelArtifactRegistry] This installation will result in Partial Success (no GPU drivers)");
-            log_info!("[KernelArtifactRegistry] ⚠️⚠️⚠️ DKMS will fail to build out-of-tree modules ⚠️⚠️⚠️");
+            log_info!("[KernelArtifactRegistry] This installation will result in Partial Success (no out-of-tree modules)");
+            log_info!("[KernelArtifactRegistry] ⚠️⚠️⚠️ DKMS will fail to build out-of-tree modules without headers ⚠️⚠️⚠️");
         }
 
         // Phase 10: Deep validation - Verify tarball content if headers found
@@ -282,22 +282,27 @@ impl KernelArtifactRegistry {
     }
 
     /// Find a related artifact (headers or docs) using hyper-heuristic permutation discovery
+    /// with dynamic identity builder support for `linux-{variant}-goatd-{profile}` scheme
     ///
     /// # Arguments
     /// * `parent_dir` - Directory to search in
-    /// * `kernel_variant` - Kernel variant to match (e.g., "linux-goatd-mainline-gaming")
+    /// * `kernel_variant` - Kernel variant (possibly with GOATd branding) to match
+    ///   - Examples: "linux", "linux-zen", "linux-zen-goatd-gaming", "linux-goatd-workstation"
     /// * `kernel_release` - Primary kernel version (internal "Source of Truth")
     /// * `filename_version` - Secondary version from package filename (fallback)
     /// * `suffix` - "-headers" or "-docs"
     ///
-    /// # Hyper-Heuristic Permutation Strategy (Chunk 1)
-    /// Tries multiple naming permutations in order of likelihood:
-    /// 1. **Primary pattern**: {variant}{suffix}-{kernel_release}
-    /// 2. **Fallback filename pattern**: {variant}{suffix}-{filename_version}
+    /// # Hyper-Heuristic Permutation Strategy with Dynamic Identity Support
+    /// Tries multiple naming permutations in order of likelihood, automatically handling
+    /// the dynamic `linux-{variant}-goatd-{profile}` Master Identity scheme by pivoting on `-goatd-`:
+    /// 1. **Primary pattern**: {kernel_variant}{suffix}-{kernel_release}
+    ///    - Handles: "linux-zen-goatd-gaming-headers-6.18.0"
+    /// 2. **Fallback filename pattern**: {kernel_variant}{suffix}-{filename_version}
     /// 3. **Alternate prefix**: linux-{suffix}-{variant_core}-{kernel_release}
     /// 4. **Alternate prefix (filename)**: linux-{suffix}-{variant_core}-{filename_version}
-    /// 5. **Fuzzy component match**: Contains {variant_core} AND {suffix} AND {version_core}
-    /// 6. **Final fallback**: Any {variant}{suffix}- with ANY version
+    /// 5. **GOATd-aware alternate prefix**: Pivots on `-goatd-` for flexible matching
+    /// 6. **Fuzzy component match**: Contains variant AND suffix AND version_core
+    /// 7. **Final fallback**: Any {kernel_variant}{suffix}- with ANY version
     ///
     /// # Returns
     /// Path to the artifact if found, or None if not found
@@ -313,12 +318,23 @@ impl KernelArtifactRegistry {
 
         let entries_vec: Vec<_> = entries.flatten().collect();
         
-        // Extract core identity from kernel_variant (Chunk 2)
-        // E.g., "linux-goatd-mainline-gaming" -> "goatd-mainline-gaming"
+        // PHASE 20: Dynamic Identity Builder Support with GOATd Pivot
+        // Extract core identity from kernel_variant with GOATd branding awareness
+        // E.g., "linux-zen-goatd-gaming" -> "zen-goatd-gaming"
         let variant_core = if kernel_variant.starts_with("linux-") {
             &kernel_variant[6..] // Skip "linux-"
         } else {
             kernel_variant
+        };
+        
+        // NEW: Pivot on -goatd- to extract base variant and profile
+        // E.g., "zen-goatd-gaming" -> base="zen", profile=Some("gaming")
+        let (base_variant, profile) = if let Some(goatd_pos) = variant_core.find("-goatd-") {
+            let base = &variant_core[..goatd_pos];
+            let profile_and_rest = &variant_core[goatd_pos + 7..]; // +7 to skip "-goatd-"
+            (base, Some(profile_and_rest))
+        } else {
+            (variant_core, None)
         };
         
         // Extract version core (base version without release number)
@@ -360,6 +376,23 @@ impl KernelArtifactRegistry {
             }
         }
         
+        // Permutation 4b: GOATd-aware alternate prefix (PHASE 20)
+        // For variants like "linux-zen-goatd-gaming", also try "linux-headers-zen-goatd-gaming-"
+        if let Some(prof) = profile {
+            if !base_variant.is_empty() {
+                permutations.push((
+                    format!("linux{}-{}-goatd-{}-{}", suffix, base_variant, prof, kernel_release),
+                    "GOATd-aware alternate (primary)"
+                ));
+                if let Some(fb_ver) = filename_version {
+                    permutations.push((
+                        format!("linux{}-{}-goatd-{}-{}", suffix, base_variant, prof, fb_ver),
+                        "GOATd-aware alternate (filename)"
+                    ));
+                }
+            }
+        }
+        
         // Try exact permutation matches
         for (pattern, strategy_name) in &permutations {
             for entry in &entries_vec {
@@ -377,18 +410,30 @@ impl KernelArtifactRegistry {
             }
         }
         
-        // Permutation 5: Fuzzy component match
-        // Any file containing BOTH {variant_core} AND {suffix} AND {version_core}
+        // Permutation 5: Fuzzy component match with GOATd pivot (PHASE 20)
+        // Any file containing variant AND suffix AND version core
+        // If GOATd profile present, check for base, goatd, AND profile
         if !variant_core.is_empty() && !version_core.is_empty() {
             for entry in &entries_vec {
                 if let Ok(metadata) = entry.metadata() {
                     if metadata.is_file() {
                         if let Some(filename) = entry.file_name().to_str() {
-                            if filename.contains(suffix) &&
-                               filename.contains(variant_core) &&
-                               filename.contains(&version_core) &&
-                               filename.ends_with(".pkg.tar.zst") {
-                                log_info!("[KernelArtifactRegistry] ✓ Found {} via fuzzy component match: {}",
+                            let has_suffix = filename.contains(suffix);
+                            let has_version = filename.contains(&version_core);
+                            
+                            // Check variant components
+                            let has_variant = if let Some(prof) = profile {
+                                // GOATd variant: check for base, goatd, AND profile
+                                filename.contains(base_variant) &&
+                                filename.contains("-goatd-") &&
+                                filename.contains(prof)
+                            } else {
+                                // Non-GOATd variant: check for variant_core
+                                filename.contains(variant_core)
+                            };
+                            
+                            if has_suffix && has_variant && has_version && filename.ends_with(".pkg.tar.zst") {
+                                log_info!("[KernelArtifactRegistry] ✓ Found {} via fuzzy component match (GOATd-aware): {}",
                                     suffix, filename);
                                 return Ok(Some(entry.path()));
                             }
@@ -825,8 +870,8 @@ fn parse_kernel_package_to_struct(filename: &str, full_path: PathBuf) -> Option<
     // 2. Variant-based: linux-{variant}-goatd-{profile}-{version}
     // Then standard variants (lower priority)
     let kernel_name = if without_arch.contains("-goatd-") {
-        // NEW GOATD NAMING SCHEME: linux-{variant}-goatd-{profile}-{version}
-        // Also handles: linux-goatd-{profile}-{version} (stable variant)
+        // DYNAMIC PROFILE NAMING SCHEME: linux-{variant}-goatd-{profile}-{version}
+        // Also handles: linux-goatd-{profile}-{version} (stable variant, any profile after -goatd-)
         // Find the first segment that starts with a digit (version boundary)
         
         let parts_vec: Vec<&str> = without_arch.split('-').collect();
@@ -916,13 +961,16 @@ fn collect_matching_kernel_files(dir: &std::path::Path, kernel_name: &str, versi
 }
 
 /// Helper to check if a filename matches the kernel package or its related artifacts (headers, docs)
-/// Handles both standard and modular naming with robust matching to prevent partial over-matching:
-/// - Standard: Main: "linux-6.18.3-arch1-1-x86_64.pkg.tar.zst"
-/// - Modular: "linux-goatd-{variant}-{profile}-6.18.3-arch1-1-x86_64.pkg.tar.zst"
-/// Also matches headers and docs variants
+/// Handles both standard and modular naming with dynamic `linux-{variant}-goatd-{profile}` support.
 ///
-/// Uses regex-based matching to ensure version boundaries are respected and prevent
-/// false matches from partial version/variant strings.
+/// PHASE 20: Dynamic Identity Support
+/// - Standard: "linux-6.18.3-arch1-1-x86_64.pkg.tar.zst"
+/// - GOATd variants: "linux-zen-goatd-gaming-6.18.3-arch1-1-x86_64.pkg.tar.zst"
+/// - GOATd simple: "linux-goatd-workstation-6.18.3-arch1-1-x86_64.pkg.tar.zst"
+/// - Also matches headers and docs variants
+///
+/// Uses regex-based matching with (-goatd- pivot awareness) to ensure version boundaries
+/// are respected and prevent false matches from partial version/variant strings.
 fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, version: &str) -> bool {
     // Must be a package archive
     if !filename.ends_with(".pkg.tar.zst") {
@@ -948,13 +996,22 @@ fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, vers
         base.to_string()
     };
     
+    // PHASE 20: Extract base variant and profile from kernel_variant if GOATd-branded
+    let (base_variant, profile) = if let Some(goatd_pos) = kernel_variant.find("-goatd-") {
+        let base = &kernel_variant[..goatd_pos];
+        let prof = &kernel_variant[goatd_pos + 7..]; // +7 to skip "-goatd-"
+        (base, Some(prof))
+    } else {
+        (kernel_variant, None)
+    };
+    
     // Use regex-based matching to prevent partial over-matching
     // Escape special regex characters in kernel_variant and version
     let variant_escaped = regex::escape(kernel_variant);
     let version_escaped = regex::escape(version);
     
     // Build patterns with word boundaries to prevent partial matches
-    // Pattern: {variant}(-headers|-docs)?-{version}(-\d+(-\w+)?)?(-x86_64)?$
+    // Pattern: {variant}(-headers|-docs)?-{version}(-\d+)?
     let patterns = [
         format!(r"^{}-{}(?:-\d+)?$", variant_escaped, version_escaped),           // Main pattern
         format!(r"^{}-headers-{}(?:-\d+)?$", variant_escaped, version_escaped),   // Headers pattern
@@ -965,6 +1022,28 @@ fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, vers
         if let Ok(regex) = regex::Regex::new(pattern_str) {
             if regex.is_match(&without_arch) {
                 return true;
+            }
+        }
+    }
+    
+    // PHASE 20: GOATd-aware fallback patterns
+    // For GOATd-branded variants, try alternate permutations
+    if let Some(prof) = profile {
+        let base_escaped = regex::escape(base_variant);
+        let prof_escaped = regex::escape(prof);
+        
+        // Try "base-goatd-profile" pattern variations with headers/docs
+        let goatd_patterns = [
+            format!(r"^{}-goatd-{}-{}(?:-\d+)?$", base_escaped, prof_escaped, version_escaped),
+            format!(r"^{}-goatd-{}-headers-{}(?:-\d+)?$", base_escaped, prof_escaped, version_escaped),
+            format!(r"^{}-goatd-{}-docs-{}(?:-\d+)?$", base_escaped, prof_escaped, version_escaped),
+        ];
+        
+        for pattern_str in &goatd_patterns {
+            if let Ok(regex) = regex::Regex::new(pattern_str) {
+                if regex.is_match(&without_arch) {
+                    return true;
+                }
             }
         }
     }
@@ -1232,10 +1311,10 @@ impl DkmsDiagnostic {
                 }
                 DkmsErrorPattern::MissingPageFree => {
                     self.recommendations.push(
-                        "This NVIDIA driver version is incompatible with your kernel".to_string()
+                        "This out-of-tree module version is incompatible with your kernel".to_string()
                     );
                     self.recommendations.push(
-                        "Update NVIDIA driver or downgrade kernel version".to_string()
+                        "Update the driver or downgrade kernel version".to_string()
                     );
                 }
                 DkmsErrorPattern::SymbolNotFound => {
@@ -1243,7 +1322,7 @@ impl DkmsDiagnostic {
                         "Kernel symbol mismatch detected - likely ABI incompatibility".to_string()
                     );
                     self.recommendations.push(
-                        "Rebuild kernel with compatible configuration or update NVIDIA driver".to_string()
+                        "Rebuild kernel with compatible configuration or update out-of-tree driver".to_string()
                     );
                 }
                 DkmsErrorPattern::BuildFailure => {
@@ -1259,9 +1338,9 @@ impl DkmsDiagnostic {
     }
 }
 
-/// Diagnose NVIDIA DKMS build failures by parsing build logs
+/// Diagnose DKMS build failures by parsing build logs
 ///
-/// This function locates the latest NVIDIA DKMS build log and parses it for specific
+/// This function locates the latest DKMS build log and parses it for specific
 /// error patterns including:
 /// - Missing kernel headers
 /// - Compiler version mismatch
@@ -1272,16 +1351,16 @@ impl DkmsDiagnostic {
 /// # Returns
 /// A structured `DkmsDiagnostic` result with detected errors and recommendations
 pub fn diagnose_dkms_failure() -> DkmsDiagnostic {
-    log_info!("[DKMS Diagnostic] Starting NVIDIA DKMS build failure diagnosis");
+    log_info!("[DKMS Diagnostic] Starting DKMS build failure diagnosis");
 
-    // Try to find the latest NVIDIA DKMS build log
-    let log_path = match find_latest_nvidia_dkms_log() {
+    // Try to find the latest DKMS build log
+    let log_path = match find_latest_dkms_log() {
         Some(path) => {
-            log_info!("[DKMS Diagnostic] Found NVIDIA DKMS log at: {}", path);
+            log_info!("[DKMS Diagnostic] Found DKMS log at: {}", path);
             path
         }
         None => {
-            log_info!("[DKMS Diagnostic] No NVIDIA DKMS build log found");
+            log_info!("[DKMS Diagnostic] No DKMS build log found");
             return DkmsDiagnostic::failure(
                 vec![DkmsErrorPattern::BuildFailure],
                 None,
@@ -1338,7 +1417,7 @@ pub fn diagnose_dkms_failure() -> DkmsDiagnostic {
     }
 
     if detected_errors.is_empty() {
-        log_info!("[DKMS Diagnostic] NVIDIA DKMS build appears successful");
+        log_info!("[DKMS Diagnostic] DKMS build appears successful");
         return DkmsDiagnostic::success();
     }
 
@@ -1347,15 +1426,15 @@ pub fn diagnose_dkms_failure() -> DkmsDiagnostic {
     diag
 }
 
-/// Find the latest NVIDIA DKMS build log
-/// Searches `/var/lib/dkms/nvidia/*/build/make.log`
-fn find_latest_nvidia_dkms_log() -> Option<String> {
+/// Find the latest DKMS build log
+/// Searches `/var/lib/dkms/*/build/make.log` for vendor-agnostic builds
+fn find_latest_dkms_log() -> Option<String> {
     use std::process::Command;
     use std::path::PathBuf;
 
-    // Use find command to locate all nvidia build logs
+    // Use find command to locate all out-of-tree module build logs
     let output = Command::new("find")
-        .args(&["/var/lib/dkms/nvidia", "-name", "make.log", "-type", "f"])
+        .args(&["/var/lib/dkms", "-name", "make.log", "-type", "f"])
         .output()
         .ok()?;
 
