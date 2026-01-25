@@ -1,5 +1,5 @@
 //! PHASE 3.2: Variant-Aware Rebranding Validation Tests
-//! 
+//!
 //! Validates that the rebranding system correctly detects and transforms
 //! PKGBUILD files for all 6 supported kernel variants.
 
@@ -8,11 +8,36 @@
 /// Helper: Create a mock PKGBUILD for a specific variant
 fn create_pkgbuild_for_variant(variant: &str) -> String {
     let (main_func, headers_func, pkgname_main, pkgname_headers) = match variant {
-        "linux-lts" => ("linux_lts", "linux_lts_headers", "linux-lts", "linux-lts-headers"),
-        "linux-hardened" => ("linux_hardened", "linux_hardened_headers", "linux-hardened", "linux-hardened-headers"),
-        "linux-zen" => ("linux_zen", "linux_zen_headers", "linux-zen", "linux-zen-headers"),
-        "linux-mainline" => ("linux_mainline", "linux_mainline_headers", "linux-mainline", "linux-mainline-headers"),
-        "linux-tkg" => ("linux_tkg", "linux_tkg_headers", "linux-tkg", "linux-tkg-headers"),
+        "linux-lts" => (
+            "linux_lts",
+            "linux_lts_headers",
+            "linux-lts",
+            "linux-lts-headers",
+        ),
+        "linux-hardened" => (
+            "linux_hardened",
+            "linux_hardened_headers",
+            "linux-hardened",
+            "linux-hardened-headers",
+        ),
+        "linux-zen" => (
+            "linux_zen",
+            "linux_zen_headers",
+            "linux-zen",
+            "linux-zen-headers",
+        ),
+        "linux-mainline" => (
+            "linux_mainline",
+            "linux_mainline_headers",
+            "linux-mainline",
+            "linux-mainline-headers",
+        ),
+        "linux-tkg" => (
+            "linux_tkg",
+            "linux_tkg_headers",
+            "linux-tkg",
+            "linux-tkg-headers",
+        ),
         _ => ("linux", "linux-headers", "linux", "linux-headers"),
     };
 
@@ -147,10 +172,12 @@ fn test_provides_field_variant_aware() {
         } else {
             &format!("provides=('{}')", variant)
         };
-        
-        assert_eq!(provides_value, expected_provides, 
-                   "Variant '{}' should have provides field: '{}'",
-                   variant, expected_provides);
+
+        assert_eq!(
+            provides_value, expected_provides,
+            "Variant '{}' should have provides field: '{}'",
+            variant, expected_provides
+        );
     }
 }
 
@@ -169,7 +196,7 @@ fn test_master_identity_construction() {
     for (variant, profile, expected_identity) in test_cases {
         let profile_lower = profile.to_lowercase();
         let variant_without_prefix = variant.trim_start_matches("linux-").to_string();
-        
+
         // Fix: For "linux" variant specifically, variant_without_prefix will be "linux"
         // We need to check if the original variant was just "linux", not "linux-something"
         let master_identity = if variant == "linux" {
@@ -276,10 +303,10 @@ fn test_comprehensive_rebranding_simulation() {
     for (variant, profile, old_func, expected_func, _expected_provides) in test_cases {
         // Simulate what patch_pkgbuild_for_rebranding should do
         let mut content = format!("pkgbase='{}'\n{}\n", variant, old_func);
-        
+
         // Replace function name (what the variant-aware code should do)
         content = content.replace(old_func, expected_func);
-        
+
         // Verify transformation
         assert!(
             content.contains(expected_func),
@@ -297,13 +324,13 @@ fn test_comprehensive_rebranding_simulation() {
 #[test]
 fn test_no_regression_linux() {
     let content = create_pkgbuild_for_variant("linux");
-    
+
     // Should have correct structure
     assert!(content.contains("pkgbase='linux'"));
     assert!(content.contains("package_linux()"));
     // For linux variant, headers_func is "linux-headers" so function name uses hyphen
     assert!(content.contains("package_linux-headers()"));
-    
+
     // Verify it's NOT a different variant
     assert!(!content.contains("package_linux_lts"));
     assert!(!content.contains("package_linux_hardened"));

@@ -17,8 +17,8 @@ pub struct SyscallSaturationConfig {
 impl Default for SyscallSaturationConfig {
     fn default() -> Self {
         SyscallSaturationConfig {
-            iterations: 100_000,  // 100k getpid calls per run
-            runs: 5,              // 5 sequential runs
+            iterations: 100_000, // 100k getpid calls per run
+            runs: 5,             // 5 sequential runs
         }
     }
 }
@@ -66,7 +66,7 @@ impl SyscallSaturationCollector {
         for run in 0..self.config.runs {
             let run_timings = self.run_iteration()?;
             let run_time: u64 = run_timings.iter().sum();
-            
+
             all_timings.extend(&run_timings);
             total_syscalls += self.config.iterations;
             min_run_time = min_run_time.min(run_time);

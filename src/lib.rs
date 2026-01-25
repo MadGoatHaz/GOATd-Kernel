@@ -2,9 +2,9 @@
 //!
 //! This crate provides the Rust core infrastructure for the GOATd Kernel Builder,
 //! offering compiled performance, type safety, and async state management for all
-//! kernel build operations. It exposes a Rust API via Slint UI frontend.
+//! kernel build operations. It exposes a Rust API via Egui UI frontend.
 //!
-//! **Architecture**: The Slint UI frontend communicates with this Rust backend
+//! **Architecture**: The Egui UI frontend communicates with this Rust backend
 //! for all build orchestration.
 //!
 //! The system is organized into functional modules:
@@ -14,7 +14,7 @@
 //! - **hardware**: Hardware detection utilities (Phase 1)
 //! - **system**: OS abstraction, logging, and security wrappers (Phase 1)
 //! - **config**: Configuration management utilities (Phase 2)
-//! - **ui**: UI controller and Slint integration (Phase 2-3)
+//! - **ui**: UI controller and Egui integration (Phase 2-3)
 //! - **orchestrator**: Async build coordination and state management (Phases 1-5)
 //! - **kernel**: Kernel management (package management, audit) (Phases 1-3)
 //! - **validator**: Build validation utilities (Phase 5)
@@ -37,7 +37,7 @@ pub mod system;
 // Phase 2: Configuration management module
 pub mod config;
 
-// Phase 2-3: UI controller and Slint integration
+// Phase 2-3: UI controller and Egui integration
 pub mod ui;
 
 // Robust, decoupled logging system
@@ -50,7 +50,7 @@ pub mod orchestrator;
 pub use log;
 
 // Re-export logging initialization functions from system module
-pub use system::{initialize_logging, flush_all_logs};
+pub use system::{flush_all_logs, initialize_logging};
 
 // Re-export log collector for use throughout the system
 pub use log_collector::{LogCollector, LogLine};
@@ -63,48 +63,55 @@ pub mod kernel;
 // ============================================================================
 
 // Re-export error types for easy access
-pub use error::{
-    HardwareError, ConfigError, BuildError, PatchError, ValidationError,
-    Result,
-};
+pub use error::{BuildError, ConfigError, HardwareError, PatchError, Result, ValidationError};
 
 // Re-export model types for easy access
 pub use models::{
+    BootManager,
+    BootType,
+    BuildPhase,
+    BuildResult,
+    BuildState,
     // Enums
-    GpuVendor, StorageType, BootType, LtoType, BuildPhase, PatchType,
-    ValidationCheck,
-    
+    GpuVendor,
     // Hardware structs
-    HardwareInfo, BootManager, InitSystem,
-    
+    HardwareInfo,
+    InitSystem,
+
     // Build structs
-    KernelConfig, BuildState, Patch, PatchResult, BuildResult,
+    KernelConfig,
+    LtoType,
+    Patch,
+    PatchResult,
+    PatchType,
+    StorageType,
+    ValidationCheck,
 };
 
 // Re-export policy engine types for easy access
 pub use policy::{
-    GpuDecision, LtoDecision, DriverPolicy, HardwarePolicy,
-    PolicyApplicationResult, GpuDetectionInfo,
+    DriverPolicy, GpuDecision, GpuDetectionInfo, HardwarePolicy, LtoDecision,
+    PolicyApplicationResult,
 };
 
 // Re-export hardware detector
 pub use hardware::HardwareDetector;
 
 // Re-export config types and SettingsManager
-pub use config::{AppState, SettingsManager, ConfigManager};
+pub use config::{AppState, ConfigManager, SettingsManager};
 
 // Re-export UI controller and traits (Phase 2)
-pub use ui::{AppController};
+pub use ui::AppController;
 
 // Re-export orchestrator utilities and state management
 pub use orchestrator::{
+    configure_build,
+    prepare_build_environment,
+    prepare_kernel_build,
     // Stateless utility functions
     validate_hardware,
-    validate_kernel_config,
-    prepare_build_environment,
-    configure_build,
-    prepare_kernel_build,
     validate_kernel_build,
+    validate_kernel_config,
     // Async orchestrator and state management
     AsyncOrchestrator,
     BuildPhaseState,

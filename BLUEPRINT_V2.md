@@ -2,9 +2,9 @@
 
 ## EXECUTIVE SUMMARY: Recent Achievements
 
-### Laboratory-Grade Hardened Environment (Phase 44+)
+### Laboratory-Grade Hardened Environment (Phase 45+)
 This specification documents the matured GOATd Kernel Builder implementing **laboratory-grade hardening** with **robust build pipeline** and **definitive Rust headers fix**. Recent phases achieved:
-- **20-Point Review Cycle**: Comprehensive architectural audit of all core systems
+- **20-Phased Master Plan Alignment**: Strategic alignment with the long-term master architectural plan
 - **Environment Purity Controls**: Hermetically sealed build environment with explicit variable management
 - **Rust Headers Fix**: AST-aware regex injection securing DKMS out-of-tree driver compatibility across kernel variants
 - **Unified Environment Architecture**: Single source of truth for all environment variables, compiler flags, and build parameters
@@ -15,6 +15,7 @@ This specification documents the matured GOATd Kernel Builder implementing **lab
 
 ## 1. System Vision & Philosophy
 The GOATd Kernel Builder has transitioned from a **Static Preset** model to a **Dynamic Surgical Override** model with **Persistent Sched_ext Strategy Management**, **High-Fidelity Performance Diagnostics**, and **egui-based event-driven architecture**.
+- **Responsive Physical Intelligence**: V2 Global Dynamic Scaling uses `pixels_per_point` calibration to ensure UI fidelity across all display densities.
 - **User Intent is Sovereign**: UI toggles in the `egui` interface generate explicit overrides that persist through the entire pipeline.
 - **Hierarchical Truth**: Configuration is resolved via: **Hardware Truth > User Override > Profile Preset**.
 - **The Unified Surgical Engine**: String manipulation and "patch-on-patch" debt have been purged. All file modifications are now owned exclusively by the `KernelPatcher`.
@@ -29,11 +30,11 @@ The GOATd Kernel Builder has transitioned from a **Static Preset** model to a **
 
 | Layer | Component | Responsibility | Technical Constraint |
 |:---|:---|:---|:---|
-| **UI** | [`AppUI`](src/ui/app.rs) | **Frontend Orchestrator**: Manages `egui` tab routing and event loops. | Reactive rendering using atomic dirty flags. |
+| **UI** | [`AppUI`](src/ui/app.rs) | **Frontend Orchestrator**: Manages `egui` tab routing, event loops, and V2 scaling. | Reactive rendering using atomic signaling and `pixels_per_point` scaling. |
 | **Logic Broker** | [`AppController`](src/ui/controller.rs) | **Intent Broker**: Bridges UI signals to `AppState` updates and spawns `tokio` tasks. | Thread-safe interaction via `Arc<RwLock<>>`. |
 | **State** | [`AppState`](src/config/mod.rs) | **In-Memory Source of Truth**: Stores hardware info, profiles, and transient UI settings. | Must be persistent-ready for JSON serialization. |
 | **Rule Engine** | [`Finalizer`](src/config/finalizer.rs) | **Hierarchical Resolution**: Merges Hardware > Overrides > Profiles into the final `KernelConfig`. | **Pure function**. No side effects (no file I/O). |
-| **Performance** | [`PerformanceDashboard`](src/ui/performance.rs) | **Real-Time Visualization**: High-fidelity rendering of latency, jitter, and thermal telemetry. | 100ms UI throttling to prevent over-rendering. |
+| **Performance** | [`PerformanceDashboard`](src/ui/performance.rs) | **Real-Time Visualization**: High-fidelity rendering of latency, jitter, and thermal telemetry via `StripBuilder`. | 100ms UI throttling to prevent over-rendering; atomic signaling for stable refreshes. |
 | **Coordinator** | [`AsyncOrchestrator`](src/orchestrator/mod.rs) | **Phase Transition Manager**: Coordinates preparation, configuration, patching, building, and validation. | **NEVER** edits files directly. Delegates to Patcher/Executor. |
 | **Surgical Engine** | [`KernelPatcher`](src/kernel/patcher.rs) | **The Unified Enforcer**: The ONLY module permitted to modify `PKGBUILD` or `.config`. | Must maintain atomicity and create backups before any edit. |
 | **Execution** | [`Executor`](src/orchestrator/executor.rs) | **Pure Runner**: Executes `makepkg` and monitors progress. | Does not "know" about configuration. Only knows about files and processes. |
@@ -240,7 +241,13 @@ MGLRU is tuned at the **Rule Engine** layer according to the selected profile:
 
 ---
 
-## 7.5. Unified Environment Architecture & Rust Headers Fix
+## 7.5. Unified Environment Architecture, Infrastructure & Rust Headers Fix
+
+### **LogCollector Bridge & Infrastructure**
+The infrastructure now includes a consolidated real-time log piping system:
+1. **LogCollector Bridge**: Bridges core system events, traces, and makepkg logs into a unified telemetry stream.
+2. **Atomic Signaling**: Uses lock-free atomic flags to signal UI updates for high-frequency telemetry without thread contention.
+3. **Continuous Repaint Logic**: Ensures fluid visualization of real-time diagnostics during heavy system load.
 
 ### **Hermetically Sealed Build Environment**
 The orchestrator enforces strict environment purity by:

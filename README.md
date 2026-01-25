@@ -113,9 +113,14 @@ For deep metric explanations and optimization strategies, see [`GUIDE.md`](GUIDE
 ---
 
 
-### Modern Architecture: Pure Rust + egui with Modular Design (Phase 42 Complete)
+### Modern Architecture: Pure Rust + egui with Modular Design (Phase 45+)
 
 The project uses a unified Rust + egui stack with a modular component architecture for performance, maintainability, and simplicity. The UI is fully reactive, leveraging `eframe` and `tokio` to ensure a smooth, non-blocking experience even during heavy compilation or real-time performance monitoring.
+
+**Key Architectural Advancements:**
+- **V2 Global Dynamic Scaling**: Physical-pixel based scaling system ensuring sharp, consistent UI across high-DPI displays.
+- **High-Density Responsive Layouts**: Adaptive UI components (e.g., `StripBuilder`) that maintain clarity and density across varying window sizes.
+- **Stable UI Refreshes**: Atomic signaling combined with continuous repaint logic for glitch-free performance telemetry.
 
 ---
 
@@ -145,7 +150,7 @@ The project uses a unified Rust + egui stack with a modular component architectu
 - **Full Rust Architecture**
 - **Native Synchronization**: Direct sourcing from AUR and GitLab repositories using the `git2` Rust library for atomic synchronization.
 - **Async Tokio Orchestrator**: Truly concurrent I/O orchestration (git operations, file management, build monitoring).
-- **egui Framework**: Immediate-mode, high-performance UI via [`src/ui/app.rs`](src/ui/app.rs) with persistent themes (Dark/Light) and responsive layouts.
+- **egui Framework**: Immediate-mode, high-performance UI via [`src/ui/app.rs`](src/ui/app.rs) with persistent themes (Dark/Light), V2 physical-pixel scaling, and responsive `StripBuilder` layouts.
 - **Unified Cargo Build**: Single `cargo` build process manages the entire stack — no external UI compilers or C++ runtime overhead.
 
 ### 2. **Modern SCX Loader (scx_loader) Orchestration & Hardware Intelligence**
@@ -163,6 +168,7 @@ The project uses a unified Rust + egui stack with a modular component architectu
 - **Micro-Stutter Detection**: Specialized calibration targeting P99.9 alignment with 10µs optimal floor to detect the finest scheduling anomalies.
 - **Laboratory-Grade Consistency**: Consistency scoring using the Coefficient of Variation (CV %) on a 2%-30% scale with linear normalization formula: `Score = 1.0 - (CV - 0.05) / 0.25`, providing objective "Silent Kernel" validation with irreducible 5% noise floor.
 - **Data Recovery Methodology**: Uses a **1000-Sample Rolling Window (FIFO)** for all P99 and stability metrics, allowing the UI to reflect performance recovery after transient load spikes (unlike session-max aggregators).
+- **Consolidated Real-time Log Piping**: Integrated telemetry stream bridging `LogCollector` and UI for unified tracing and system logs.
 - **CPU Thermal Heatmap**: Per-physical-core thermal monitoring via sysfs to validate cooling efficiency and detect throttling under stress.
 
 ### 4. **3-Level Kernel Hardening System**

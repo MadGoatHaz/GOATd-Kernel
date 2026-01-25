@@ -22,7 +22,7 @@ fn create_mock_kernel_source(base_dir: &PathBuf) -> std::io::Result<()> {
     fs::create_dir_all(base_dir.join("drivers/nvme"))?;
     fs::create_dir_all(base_dir.join("net"))?;
     fs::create_dir_all(base_dir.join("fs"))?;
-    
+
     // Create root Kconfig file (minimal structure)
     fs::write(
         base_dir.join("Kconfig"),
@@ -129,7 +129,7 @@ all: .config
 /// Create a mock modprobed-db file with hardware module list
 fn create_mock_modprobed_db(base_dir: &PathBuf) -> std::io::Result<PathBuf> {
     let modprobed_path = base_dir.join("modprobed.db");
-    
+
     // Simulate a real modprobed-db with detected modules
     // Format: one module per line
     let modprobed_content = r#"kernel/drivers/gpu/drm/amd/amdgpu/amdgpu.ko
@@ -148,7 +148,7 @@ kernel/drivers/usb/core/usbcore.ko
 /// Create a full .config with all possible module options
 fn create_full_config(base_dir: &PathBuf) -> std::io::Result<PathBuf> {
     let config_path = base_dir.join(".config");
-    
+
     let config_content = r#"# Kernel configuration - FULL (before localmodconfig filtering)
 CONFIG_VERSION_SIGNATURE="Arch Linux"
 CONFIG_KERNEL_GZIP=y
@@ -221,17 +221,29 @@ CONFIG_DRM_I915=m
 fn test_mock_kernel_source_creation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     create_mock_kernel_source(&base_path).expect("Failed to create mock kernel source");
-    
+
     // Verify all required files exist
     assert!(base_path.join("Kconfig").exists(), "Kconfig should exist");
     assert!(base_path.join("Makefile").exists(), "Makefile should exist");
-    assert!(base_path.join("arch/x86/Kconfig").exists(), "arch/x86/Kconfig should exist");
-    assert!(base_path.join("drivers/Kconfig").exists(), "drivers/Kconfig should exist");
-    assert!(base_path.join("net/Kconfig").exists(), "net/Kconfig should exist");
-    assert!(base_path.join("fs/Kconfig").exists(), "fs/Kconfig should exist");
-    
+    assert!(
+        base_path.join("arch/x86/Kconfig").exists(),
+        "arch/x86/Kconfig should exist"
+    );
+    assert!(
+        base_path.join("drivers/Kconfig").exists(),
+        "drivers/Kconfig should exist"
+    );
+    assert!(
+        base_path.join("net/Kconfig").exists(),
+        "net/Kconfig should exist"
+    );
+    assert!(
+        base_path.join("fs/Kconfig").exists(),
+        "fs/Kconfig should exist"
+    );
+
     eprintln!("[TEST-PASS] Mock kernel source directory created successfully");
 }
 
@@ -240,18 +252,22 @@ fn test_mock_kernel_source_creation() {
 fn test_modprobed_db_creation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
-    let modprobed_path = create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
-    
+
+    let modprobed_path =
+        create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
+
     // Verify file exists and contains expected content
     assert!(modprobed_path.exists(), "modprobed.db should exist");
-    
+
     let content = fs::read_to_string(&modprobed_path).expect("Failed to read modprobed.db");
     assert!(content.contains("amdgpu"), "Should contain amdgpu module");
     assert!(content.contains("nvme"), "Should contain nvme module");
     assert!(content.contains("ext4"), "Should contain ext4 module");
-    
-    eprintln!("[TEST-PASS] Modprobed-db file created with {} modules detected", content.lines().count());
+
+    eprintln!(
+        "[TEST-PASS] Modprobed-db file created with {} modules detected",
+        content.lines().count()
+    );
 }
 
 /// Test 3: Verify full .config file creation
@@ -259,24 +275,36 @@ fn test_modprobed_db_creation() {
 fn test_full_config_creation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     let config_path = create_full_config(&base_path).expect("Failed to create .config");
-    
+
     // Verify file exists
     assert!(config_path.exists(), ".config should exist");
-    
+
     let content = fs::read_to_string(&config_path).expect("Failed to read .config");
-    
+
     // Count module lines (CONFIG_*=m)
     let module_count = content.lines().filter(|line| line.contains("=m")).count();
-    eprintln!("[TEST] .config contains {} module options (=m)", module_count);
-    
+    eprintln!(
+        "[TEST] .config contains {} module options (=m)",
+        module_count
+    );
+
     // Verify expected modules are present
-    assert!(content.contains("CONFIG_DRM_AMDGPU=m"), "Should have amdgpu module");
+    assert!(
+        content.contains("CONFIG_DRM_AMDGPU=m"),
+        "Should have amdgpu module"
+    );
     assert!(content.contains("CONFIG_NVME=m"), "Should have nvme module");
-    assert!(content.contains("CONFIG_BT=m"), "Should have unused bt module");
-    assert!(content.contains("CONFIG_WIRELESS=m"), "Should have unused wireless module");
-    
+    assert!(
+        content.contains("CONFIG_BT=m"),
+        "Should have unused bt module"
+    );
+    assert!(
+        content.contains("CONFIG_WIRELESS=m"),
+        "Should have unused wireless module"
+    );
+
     eprintln!("[TEST-PASS] Full .config created with comprehensive module options");
 }
 
@@ -285,37 +313,41 @@ fn test_full_config_creation() {
 fn test_localmodconfig_directory_context() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     // Create kernel source
     create_mock_kernel_source(&base_path).expect("Failed to create kernel source");
-    
+
     // Create modprobed-db
-    let modprobed_path = create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
-    
+    let modprobed_path =
+        create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
+
     // Create .config
     let config_path = create_full_config(&base_path).expect("Failed to create .config");
-    
+
     // Verify all components exist and are in the right place
-    assert!(base_path.join("Kconfig").exists(), "Kernel source Kconfig missing");
+    assert!(
+        base_path.join("Kconfig").exists(),
+        "Kernel source Kconfig missing"
+    );
     assert!(modprobed_path.exists(), "modprobed.db missing");
     assert!(config_path.exists(), ".config missing");
-    
+
     eprintln!("[TEST] Directory structure verification:");
     eprintln!("  Kernel source: {}", base_path.display());
     eprintln!("  modprobed-db: {}", modprobed_path.display());
     eprintln!("  .config: {}", config_path.display());
-    
+
     // This simulates what the patcher does: it needs proper directory context
     // to run make localmodconfig successfully
     let original_dir = std::env::current_dir().expect("Failed to get current dir");
-    
+
     // Verify we CAN change to the kernel source directory
     let can_cd = std::env::set_current_dir(&base_path).is_ok();
     assert!(can_cd, "Should be able to cd into kernel source");
-    
+
     // Restore original directory
     let _ = std::env::set_current_dir(&original_dir);
-    
+
     eprintln!("[TEST-PASS] Directory context verified - can cd into kernel source");
 }
 
@@ -324,17 +356,18 @@ fn test_localmodconfig_directory_context() {
 fn test_modprobed_content_parsing() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
-    let modprobed_path = create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
+
+    let modprobed_path =
+        create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
     let content = fs::read_to_string(&modprobed_path).expect("Failed to read modprobed.db");
-    
+
     // Parse modules from modprobed-db format
     let detected_modules: Vec<&str> = content
         .lines()
         .map(|line| line.trim())
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect();
-    
+
     eprintln!("[TEST] Detected hardware modules from modprobed-db:");
     for module_path in &detected_modules {
         // Extract just the module name
@@ -343,9 +376,15 @@ fn test_modprobed_content_parsing() {
             eprintln!("  - {}", module_name);
         }
     }
-    
-    assert!(detected_modules.len() > 0, "Should have detected hardware modules");
-    eprintln!("[TEST-PASS] Detected {} hardware modules", detected_modules.len());
+
+    assert!(
+        detected_modules.len() > 0,
+        "Should have detected hardware modules"
+    );
+    eprintln!(
+        "[TEST-PASS] Detected {} hardware modules",
+        detected_modules.len()
+    );
 }
 
 /// Test 6: Compare config before/after filtering theoretical
@@ -353,37 +392,48 @@ fn test_modprobed_content_parsing() {
 fn test_config_filtering_simulation() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     let config_path = create_full_config(&base_path).expect("Failed to create .config");
     let content = fs::read_to_string(&config_path).expect("Failed to read .config");
-    
+
     // Count total module options
     let total_modules = content.lines().filter(|line| line.contains("=m")).count();
-    
+
     // Identify which modules are detected (in modprobed-db)
-    let modprobed_path = create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
-    let _modprobed_content = fs::read_to_string(&modprobed_path).expect("Failed to read modprobed.db");
-    
+    let modprobed_path =
+        create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
+    let _modprobed_content =
+        fs::read_to_string(&modprobed_path).expect("Failed to read modprobed.db");
+
     // Count modules that SHOULD survive filtering
     let surviving_modules = content
         .lines()
         .filter(|line| {
             line.contains("=m")
-                && (line.contains("amdgpu") || line.contains("nvme") || line.contains("ext4") || line.contains("tcp"))
+                && (line.contains("amdgpu")
+                    || line.contains("nvme")
+                    || line.contains("ext4")
+                    || line.contains("tcp"))
         })
         .count();
-    
+
     // Count modules that SHOULD be removed
     let removable_modules = total_modules - surviving_modules;
-    
+
     eprintln!("[TEST] Config filtering simulation:");
     eprintln!("  Total module options: {}", total_modules);
     eprintln!("  Modules to keep (in modprobed): {}", surviving_modules);
     eprintln!("  Modules to remove: {}", removable_modules);
-    eprintln!("  Reduction: {:.1}%", (removable_modules as f64 / total_modules as f64) * 100.0);
-    
+    eprintln!(
+        "  Reduction: {:.1}%",
+        (removable_modules as f64 / total_modules as f64) * 100.0
+    );
+
     assert!(removable_modules > 0, "Should have removable modules");
-    eprintln!("[TEST-PASS] Config filtering simulation successful - {} modules can be removed", removable_modules);
+    eprintln!(
+        "[TEST-PASS] Config filtering simulation successful - {} modules can be removed",
+        removable_modules
+    );
 }
 
 /// Test 7: CRITICAL INTEGRATION TEST - Full modprobed chain
@@ -391,64 +441,80 @@ fn test_config_filtering_simulation() {
 fn test_modprobed_integration_full_chain() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let base_path = temp_dir.path().to_path_buf();
-    
+
     eprintln!("\n[CRITICAL TEST] Starting full modprobed integration test");
     eprintln!("================================================");
-    
+
     // Step 1: Create kernel source structure
     eprintln!("\n[STEP 1] Creating mock kernel source directory...");
     create_mock_kernel_source(&base_path).expect("Failed to create kernel source");
     assert!(base_path.join("Kconfig").exists());
-    eprintln!("[STEP 1] ✓ Kernel source created at: {}", base_path.display());
-    
+    eprintln!(
+        "[STEP 1] ✓ Kernel source created at: {}",
+        base_path.display()
+    );
+
     // Step 2: Create modprobed-db
     eprintln!("\n[STEP 2] Creating modprobed-db with detected hardware...");
-    let modprobed_path = create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
-    let modprobed_content = fs::read_to_string(&modprobed_path).expect("Failed to read modprobed.db");
+    let modprobed_path =
+        create_mock_modprobed_db(&base_path).expect("Failed to create modprobed.db");
+    let modprobed_content =
+        fs::read_to_string(&modprobed_path).expect("Failed to read modprobed.db");
     let detected_count = modprobed_content.lines().filter(|l| !l.is_empty()).count();
-    eprintln!("[STEP 2] ✓ Modprobed-db created with {} detected modules", detected_count);
-    
+    eprintln!(
+        "[STEP 2] ✓ Modprobed-db created with {} detected modules",
+        detected_count
+    );
+
     // Step 3: Create full .config
     eprintln!("\n[STEP 3] Creating full .config (before filtering)...");
     let config_path = create_full_config(&base_path).expect("Failed to create .config");
     let config_content = fs::read_to_string(&config_path).expect("Failed to read .config");
     let module_options = config_content.lines().filter(|l| l.contains("=m")).count();
-    eprintln!("[STEP 3] ✓ Created .config with {} module options", module_options);
-    
+    eprintln!(
+        "[STEP 3] ✓ Created .config with {} module options",
+        module_options
+    );
+
     // Step 4: Verify directory context (critical fix)
     eprintln!("\n[STEP 4] Verifying directory context for localmodconfig...");
     let original_dir = std::env::current_dir().expect("Failed to get current dir");
     let can_change = std::env::set_current_dir(&base_path).is_ok();
     let _ = std::env::set_current_dir(&original_dir);
-    
+
     if can_change {
         eprintln!("[STEP 4] ✓ Directory context verified - can cd into kernel source");
     } else {
         panic!("[STEP 4] ✗ CRITICAL: Cannot change to kernel source directory!");
     }
-    
+
     // Step 5: Verify all prerequisites for localmodconfig
     eprintln!("\n[STEP 5] Verifying all prerequisites for localmodconfig...");
     let has_kconfig = base_path.join("Kconfig").exists();
     let has_makefile = base_path.join("Makefile").exists();
     let has_modprobed = modprobed_path.exists();
     let has_config = config_path.exists();
-    
+
     eprintln!("  Kconfig present: {}", has_kconfig);
     eprintln!("  Makefile present: {}", has_makefile);
     eprintln!("  modprobed.db present: {}", has_modprobed);
     eprintln!(".config present: {}", has_config);
-    
-    assert!(has_kconfig && has_makefile && has_modprobed && has_config, 
-            "All prerequisites must be present");
+
+    assert!(
+        has_kconfig && has_makefile && has_modprobed && has_config,
+        "All prerequisites must be present"
+    );
     eprintln!("[STEP 5] ✓ All prerequisites verified");
-    
+
     // Step 6: Summary
     eprintln!("\n[CRITICAL TEST] ✓ PASSED - Full modprobed integration successful");
     eprintln!("================================================");
     eprintln!("Summary:");
     eprintln!("  - Kernel source: Ready");
-    eprintln!("  - Hardware detection: {} modules detected", detected_count);
+    eprintln!(
+        "  - Hardware detection: {} modules detected",
+        detected_count
+    );
     eprintln!("  - Config file: {} module options total", module_options);
     eprintln!("  - Directory context: Fixed and verified");
     eprintln!("  - Prerequisites: All met");

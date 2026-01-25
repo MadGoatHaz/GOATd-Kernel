@@ -11,16 +11,16 @@ use thiserror::Error;
 pub enum HardwareError {
     #[error("GPU detection failed: {0}")]
     GpuDetectionFailed(String),
-    
+
     #[error("Boot manager detection failed: {0}")]
     BootDetectionFailed(String),
-    
+
     #[error("Init system detection failed: {0}")]
     InitDetectionFailed(String),
-    
+
     #[error("System info unavailable: {0}")]
     SystemInfoUnavailable(String),
-    
+
     #[error("IO error during hardware detection: {0}")]
     IoError(#[from] io::Error),
 }
@@ -30,16 +30,16 @@ pub enum HardwareError {
 pub enum ConfigError {
     #[error("Configuration file not found: {0}")]
     FileNotFound(String),
-    
+
     #[error("Invalid JSON in config: {0}")]
     InvalidJson(#[from] serde_json::Error),
-    
+
     #[error("Configuration validation failed: {0}")]
     ValidationFailed(String),
-    
+
     #[error("Conflicting settings detected: {0}")]
     ConflictDetected(String),
-    
+
     #[error("IO error during config operations: {0}")]
     IoError(#[from] io::Error),
 }
@@ -49,19 +49,19 @@ pub enum ConfigError {
 pub enum BuildError {
     #[error("Preparation phase failed: {0}")]
     PreparationFailed(String),
-    
+
     #[error("Configuration phase failed: {0}")]
     ConfigurationFailed(String),
-    
+
     #[error("Patching phase failed: {0}")]
     PatchingFailed(String),
-    
+
     #[error("Build phase failed: {0}")]
     BuildFailed(String),
-    
+
     #[error("Build cancelled by user")]
     BuildCancelled,
-    
+
     #[error("Validation phase failed: {0}")]
     ValidationFailed(String),
 }
@@ -71,13 +71,13 @@ pub enum BuildError {
 pub enum PatchError {
     #[error("Invalid regex pattern: {0}")]
     RegexInvalid(String),
-    
+
     #[error("Patch target file not found: {0}")]
     FileNotFound(String),
-    
+
     #[error("Patch application failed: {0}")]
     PatchFailed(String),
-    
+
     #[error("Patch validation failed: {0}")]
     ValidationFailed(String),
 }
@@ -87,10 +87,10 @@ pub enum PatchError {
 pub enum ValidationError {
     #[error("Required artifact missing: {0}")]
     ArtifactMissing(String),
-    
+
     #[error("Configuration invalid for validation: {0}")]
     ConfigInvalid(String),
-    
+
     #[error("Boot not ready: {0}")]
     BootNotReady(String),
 }
@@ -106,39 +106,36 @@ pub enum ValidationError {
 pub enum AppError {
     /// OS command failed (e.g., pacman, uname, pkexec)
     #[error("Command '{cmd}' failed: {reason}")]
-    OsCommand {
-        cmd: String,
-        reason: String,
-    },
-    
+    OsCommand { cmd: String, reason: String },
+
     /// Hardware detection failed
     #[error("Hardware detection failed: {0}")]
     HardwareDetection(String),
-    
+
     /// Kernel config parse or read error
     #[error("Kernel config error: {0}")]
     KernelConfig(String),
-    
+
     /// File I/O error (read/write/delete)
     #[error("I/O error: {0}")]
     Io(String),
-    
+
     /// Settings persist or deserialize error
     #[error("Settings error: {0}")]
     Settings(String),
-    
+
     /// Module initialization failed
     #[error("Module initialization failed: {0}")]
     ModuleInit(String),
-    
+
     /// Invalid input (e.g., package name with shell chars)
     #[error("Invalid input: {0}")]
     InvalidInput(String),
-    
+
     /// Invalid path for Kbuild operations (contains spaces or colons)
     #[error("Invalid path for Kbuild: {0}")]
     InvalidPath(String),
-    
+
     /// Audit operation cancelled or timed out
     #[error("Audit error: {0}")]
     Audit(String),
@@ -148,24 +145,17 @@ impl AppError {
     /// Get a user-facing error message suitable for UI display
     pub fn user_message(&self) -> String {
         match self {
-            AppError::OsCommand { cmd, reason } =>
-                format!("Failed to execute '{}': {}", cmd, reason),
-            AppError::HardwareDetection(msg) =>
-                format!("Could not detect hardware: {}", msg),
-            AppError::KernelConfig(msg) =>
-                format!("Kernel configuration error: {}", msg),
-            AppError::Io(msg) =>
-                format!("File operation failed: {}", msg),
-            AppError::Settings(msg) =>
-                format!("Settings error: {}", msg),
-            AppError::ModuleInit(msg) =>
-                format!("Failed to initialize application: {}", msg),
-            AppError::InvalidInput(msg) =>
-                format!("Invalid input: {}", msg),
-            AppError::InvalidPath(msg) =>
-                format!("Invalid workspace path for Kbuild: {}", msg),
-            AppError::Audit(msg) =>
-                format!("System audit failed: {}", msg),
+            AppError::OsCommand { cmd, reason } => {
+                format!("Failed to execute '{}': {}", cmd, reason)
+            }
+            AppError::HardwareDetection(msg) => format!("Could not detect hardware: {}", msg),
+            AppError::KernelConfig(msg) => format!("Kernel configuration error: {}", msg),
+            AppError::Io(msg) => format!("File operation failed: {}", msg),
+            AppError::Settings(msg) => format!("Settings error: {}", msg),
+            AppError::ModuleInit(msg) => format!("Failed to initialize application: {}", msg),
+            AppError::InvalidInput(msg) => format!("Invalid input: {}", msg),
+            AppError::InvalidPath(msg) => format!("Invalid workspace path for Kbuild: {}", msg),
+            AppError::Audit(msg) => format!("System audit failed: {}", msg),
         }
     }
 }
@@ -206,7 +196,10 @@ mod tests {
     #[test]
     fn test_config_error_display() {
         let err = ConfigError::FileNotFound("/etc/config.json".to_string());
-        assert_eq!(err.to_string(), "Configuration file not found: /etc/config.json");
+        assert_eq!(
+            err.to_string(),
+            "Configuration file not found: /etc/config.json"
+        );
     }
 
     #[test]

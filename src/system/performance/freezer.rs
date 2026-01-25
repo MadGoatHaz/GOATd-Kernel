@@ -96,16 +96,12 @@ impl BenchmarkFreezer {
         match fs::read_to_string(&subtree_control_path) {
             Ok(content) => {
                 if !content.contains("freezer") {
-                    fs::write(&subtree_control_path, "+freezer").map_err(|e| {
-                        format!("Failed to enable freezer controller: {}", e)
-                    })?;
+                    fs::write(&subtree_control_path, "+freezer")
+                        .map_err(|e| format!("Failed to enable freezer controller: {}", e))?;
                 }
             }
             Err(e) => {
-                return Err(format!(
-                    "Failed to read cgroup.subtree_control: {}",
-                    e
-                ));
+                return Err(format!("Failed to read cgroup.subtree_control: {}", e));
             }
         }
 
@@ -243,9 +239,8 @@ impl BenchmarkFreezer {
         }
 
         // Write "1" to enable freezing
-        fs::write(path, "1").map_err(|e| {
-            format!("Failed to freeze cgroup at {}: {}", freeze_path, e)
-        })?;
+        fs::write(path, "1")
+            .map_err(|e| format!("Failed to freeze cgroup at {}: {}", freeze_path, e))?;
 
         // Attempt to suspend KWin if configured
         if self.config.suspend_kwin {
@@ -268,9 +263,8 @@ impl BenchmarkFreezer {
         }
 
         // Write "0" to disable freezing
-        fs::write(path, "0").map_err(|e| {
-            format!("Failed to thaw cgroup at {}: {}", freeze_path, e)
-        })?;
+        fs::write(path, "0")
+            .map_err(|e| format!("Failed to thaw cgroup at {}: {}", freeze_path, e))?;
 
         // Attempt to resume KWin if configured
         if self.config.suspend_kwin {

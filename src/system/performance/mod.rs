@@ -10,26 +10,26 @@
 //! - **History**: Persists performance snapshots for trend analysis
 //! - **Stressor**: Orchestrates background workers (CPU, Memory, Scheduler) for load testing
 
-pub mod tuner;
 pub mod collector;
+pub mod context_switch;
 pub mod diagnostic;
 pub mod diagnostic_buffer;
-pub mod history;
-pub mod stressor;
-pub mod thermal;
-pub mod watchdog;
 pub mod freezer;
+pub mod history;
 pub mod jitter;
-pub mod context_switch;
+pub mod scoring;
+pub mod stressor;
 pub mod syscall;
 pub mod task_wakeup;
-pub mod scoring;
+pub mod thermal;
+pub mod tuner;
+pub mod watchdog;
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, Duration, Instant};
-use std::fmt;
+use std::time::{Duration, Instant, SystemTime};
 
 /// Collection state for warmup / measurement lifecycle
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,43 +73,43 @@ fn default_instant() -> Instant {
 pub struct TelemetryFrame {
     /// Timestamp of this frame
     pub timestamp: Instant,
-    
+
     // === LATENCY METRICS (from LatencyCollector) ===
     /// Rolling 1000-sample P99 latency (microseconds)
     pub rolling_p99_us: f32,
-    
+
     /// Rolling 1000-sample P99.9 latency (microseconds)
     pub rolling_p99_9_us: f32,
-    
+
     /// Rolling peak jitter from scheduler variance (microseconds)
     pub rolling_jitter_us: f32,
-    
+
     /// Rolling consistency (standard deviation in microseconds)
     pub rolling_consistency_us: f32,
-    
+
     // === HARDWARE METRICS (polled by SystemMonitor) ===
     /// CPU usage percentage (0.0-100.0)
     pub cpu_usage: f32,
-    
+
     /// Core temperatures in Celsius
     pub core_temperatures: Vec<f32>,
-    
+
     /// Package temperature in Celsius
     pub package_temperature: f32,
-    
+
     /// Active CPU governor name
     pub active_governor: String,
-    
+
     /// Current CPU frequency in MHz
     pub governor_hz: i32,
-    
+
     // === DIAGNOSTIC STATE ===
     /// Collection state: Idle, WarmingUp, Running, Finished
     pub collection_state: CollectionState,
-    
+
     /// Real-time priority active status
     pub rt_active: bool,
-    
+
     /// Detected hardware noise floor (microseconds)
     pub noise_floor_us: f32,
 }
@@ -148,57 +148,53 @@ impl Default for TelemetryFrame {
 pub struct BenchmarkReport {
     /// Session start timestamp
     pub session_start: SystemTime,
-    
+
     /// Session end timestamp (None if in progress)
     pub session_end: Option<SystemTime>,
-    
+
     // === AGGREGATED PHASE METRICS (from BenchmarkOrchestrator) ===
     /// Final GOAT Score (0-1000)
     pub goat_score: u16,
-    
+
     /// Session state: Idle, Running, Paused, Completed
     pub lifecycle_state: LifecycleState,
-    
+
     /// Phase-specific metrics snapshots (6 phases)
     pub phase_metrics: Vec<(String, PerformanceMetrics)>,
-    
+
     // === SPECIALIZED BENCHMARK METRICS (Phase 2.1 Collectors) ===
     /// Micro-jitter metrics (P99.99 percentile)
     pub micro_jitter: Option<jitter::MicroJitterMetrics>,
-    
+
     /// Context-switch round-trip time
     pub context_switch_rtt: Option<context_switch::ContextSwitchMetrics>,
-    
+
     /// Syscall saturation metrics
     pub syscall_saturation: Option<syscall::SyscallSaturationMetrics>,
-    
+
     /// Task-to-task wakeup latency
     pub task_wakeup: Option<task_wakeup::TaskWakeupMetrics>,
-    
+
     // === DIAGNOSTIC INFO ===
     /// Kernel version at time of benchmark
     pub kernel_version: String,
-    
+
     /// Active SCX scheduler profile
     pub scx_profile: String,
-    
+
     /// LTO configuration
     pub lto_config: String,
-    
+
     /// Stressors active during this benchmark
     pub active_stressors: Vec<String>,
-    
+
     /// Custom label for this benchmark (user-provided)
     pub label: Option<String>,
 }
 
 impl BenchmarkReport {
     /// Create a new BenchmarkReport with the given kernel context
-    pub fn new(
-        kernel_version: String,
-        scx_profile: String,
-        lto_config: String,
-    ) -> Self {
+    pub fn new(kernel_version: String, scx_profile: String, lto_config: String) -> Self {
         BenchmarkReport {
             session_start: SystemTime::now(),
             session_end: None,
@@ -216,7 +212,7 @@ impl BenchmarkReport {
             label: None,
         }
     }
-    
+
     /// Mark benchmark as completed and calculate final GOAT Score
     pub fn mark_completed(&mut self, final_score: u16) {
         self.session_end = Some(SystemTime::now());
@@ -246,22 +242,24 @@ impl Default for BenchmarkReport {
     }
 }
 
-pub use tuner::{Tuner, PmQosGuard};
 pub use collector::LatencyCollector;
-pub use diagnostic::{SmiCorrelation, SmiDetector};
-pub use diagnostic_buffer::{DiagnosticBuffer, DiagnosticMessage, init_global_buffer, get_global_buffer};
-pub use history::{PerformanceHistory, PerformanceSnapshot, HistoryManager, BenchmarkRun, BenchmarkRunManager};
-pub use stressor::{StressorManager, StressorType, Intensity};
-pub use thermal::{ThermalData, read_thermal_data};
-pub use watchdog::{BenchmarkWatchdog, WatchdogConfig, HeartbeatHandle};
-pub use freezer::{BenchmarkFreezer, FreezerConfig};
-pub use jitter::{MicroJitterCollector, MicroJitterConfig, MicroJitterMetrics};
 pub use context_switch::{ContextSwitchCollector, ContextSwitchConfig, ContextSwitchMetrics};
+pub use diagnostic::{SmiCorrelation, SmiDetector};
+pub use diagnostic_buffer::{
+    get_global_buffer, init_global_buffer, DiagnosticBuffer, DiagnosticMessage,
+};
+pub use freezer::{BenchmarkFreezer, FreezerConfig};
+pub use history::{
+    BenchmarkRun, BenchmarkRunManager, HistoryManager, PerformanceHistory, PerformanceSnapshot,
+};
+pub use jitter::{MicroJitterCollector, MicroJitterConfig, MicroJitterMetrics};
+pub use scoring::{PerformanceScorer, PersonalityType, ReferenceBenchmarks, ScoringResult};
+pub use stressor::{Intensity, StressorManager, StressorType};
 pub use syscall::{SyscallSaturationCollector, SyscallSaturationConfig, SyscallSaturationMetrics};
 pub use task_wakeup::{TaskWakeupCollector, TaskWakeupConfig, TaskWakeupMetrics};
-pub use scoring::{
-    PerformanceScorer, ReferenceBenchmarks, PersonalityType, ScoringResult,
-};
+pub use thermal::{read_thermal_data, ThermalData};
+pub use tuner::{PmQosGuard, Tuner};
+pub use watchdog::{BenchmarkWatchdog, HeartbeatHandle, WatchdogConfig};
 
 /// Configuration for performance monitoring
 #[derive(Clone, Debug)]
@@ -277,8 +275,8 @@ pub struct PerformanceConfig {
 impl Default for PerformanceConfig {
     fn default() -> Self {
         PerformanceConfig {
-            interval_us: 1000,      // 1 ms default
-            core_id: 0,             // CPU 0 default
+            interval_us: 1000,       // 1 ms default
+            core_id: 0,              // CPU 0 default
             spike_threshold_us: 100, // 100 µs spike threshold
         }
     }
@@ -892,7 +890,8 @@ impl BenchmarkOrchestrator {
 
     /// Record metrics for the current phase
     pub fn record_phase_metrics(&mut self, metrics: PerformanceMetrics) {
-        self.phase_metrics.push((self.current_phase.to_string(), metrics));
+        self.phase_metrics
+            .push((self.current_phase.to_string(), metrics));
     }
 
     /// Calculate the final GOAT Score from aggregated phase metrics
@@ -920,13 +919,13 @@ impl BenchmarkOrchestrator {
             aggregated.p99_us += metrics.p99_us;
             aggregated.p99_9_us += metrics.p99_9_us;
             aggregated.avg_us += metrics.avg_us;
-            
+
             // Accumulate rolling metrics (already in µs, can be directly averaged)
             aggregated.rolling_p99_us += metrics.rolling_p99_us;
             aggregated.rolling_p99_9_us += metrics.rolling_p99_9_us;
             aggregated.rolling_jitter_us += metrics.rolling_jitter_us;
             aggregated.rolling_consistency_us += metrics.rolling_consistency_us;
-            
+
             // Accumulate spike/SMI metrics
             aggregated.total_spikes += metrics.total_spikes;
             aggregated.total_smis += metrics.total_smis;
@@ -944,7 +943,8 @@ impl BenchmarkOrchestrator {
         aggregated.rolling_consistency_us /= phase_count;
         aggregated.total_spikes = (aggregated.total_spikes as f32 / phase_count) as u64;
         aggregated.total_smis = (aggregated.total_smis as f32 / phase_count) as u64;
-        aggregated.spikes_correlated_to_smi = (aggregated.spikes_correlated_to_smi as f32 / phase_count) as u64;
+        aggregated.spikes_correlated_to_smi =
+            (aggregated.spikes_correlated_to_smi as f32 / phase_count) as u64;
 
         // Preserve benchmark_metrics from last phase for detailed scoring
         if let Some((_, last_metrics)) = self.phase_metrics.last() {
@@ -955,10 +955,10 @@ impl BenchmarkOrchestrator {
         // This applies the standard 7-metric weighting (27% Latency, 18% Consistency, etc.)
         let scorer = PerformanceScorer::new();
         let result = scorer.score_metrics(&aggregated);
-        
+
         eprintln!("[BENCHMARK_ORCHESTRATOR] Final GOAT Score from cumulative metrics: {} ({} phases averaged)",
             result.goat_score, self.phase_metrics.len());
-        
+
         Some(result.goat_score)
     }
 }

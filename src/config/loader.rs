@@ -7,22 +7,20 @@ use std::path::{Path, PathBuf};
 
 /// Get the global settings path: ~/.config/goatd-kernel/settings.json
 pub fn get_global_settings_path() -> Result<PathBuf, ConfigError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| ConfigError::ValidationFailed(
-            "Cannot determine home directory".to_string(),
-        ))?;
-    
+    let home = dirs::home_dir().ok_or_else(|| {
+        ConfigError::ValidationFailed("Cannot determine home directory".to_string())
+    })?;
+
     let config_dir = home.join(".config/goatd-kernel");
     Ok(config_dir.join("settings.json"))
 }
 
 /// Ensure the global settings directory exists
 pub fn ensure_settings_dir_exists() -> Result<(), ConfigError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| ConfigError::ValidationFailed(
-            "Cannot determine home directory".to_string(),
-        ))?;
-    
+    let home = dirs::home_dir().ok_or_else(|| {
+        ConfigError::ValidationFailed("Cannot determine home directory".to_string())
+    })?;
+
     let config_dir = home.join(".config/goatd-kernel");
     fs::create_dir_all(&config_dir).map_err(ConfigError::IoError)?;
     Ok(())
@@ -61,8 +59,7 @@ pub fn save_config_to_file(config: &KernelConfig, path: &Path) -> Result<(), Con
     }
 
     // Serialize config to JSON with pretty formatting
-    let json_content =
-        serde_json::to_string_pretty(config).map_err(ConfigError::InvalidJson)?;
+    let json_content = serde_json::to_string_pretty(config).map_err(ConfigError::InvalidJson)?;
 
     // Write to file
     fs::write(path, json_content).map_err(ConfigError::IoError)?;
@@ -130,10 +127,7 @@ pub fn list_config_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigError> {
     let mut config_files = Vec::new();
 
     // Recursively walk directory tree
-    fn walk_dir(
-        dir: &Path,
-        config_files: &mut Vec<PathBuf>,
-    ) -> Result<(), ConfigError> {
+    fn walk_dir(dir: &Path, config_files: &mut Vec<PathBuf>) -> Result<(), ConfigError> {
         let entries = fs::read_dir(dir).map_err(ConfigError::IoError)?;
 
         for entry in entries {
@@ -165,7 +159,7 @@ pub fn list_config_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{LtoType, HardeningLevel};
+    use crate::models::{HardeningLevel, LtoType};
     use std::fs;
     use std::io::Write;
     use tempfile::TempDir;
@@ -266,7 +260,10 @@ mod tests {
         let config = create_default_config();
         save_config_to_file(&config, &config_path).expect("Failed to save config");
 
-        assert!(config_path.exists(), "Config file should exist in nested directory");
+        assert!(
+            config_path.exists(),
+            "Config file should exist in nested directory"
+        );
         assert!(
             config_path.parent().unwrap().exists(),
             "Parent directories should be created"

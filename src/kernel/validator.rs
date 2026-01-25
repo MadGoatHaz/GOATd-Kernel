@@ -6,11 +6,11 @@
 //! - Configuration options are properly set
 //! - LTO shielding is correctly applied
 
+use crate::error::AppError;
+use crate::error::PatchError;
+use regex::Regex;
 use std::fs;
 use std::path::Path;
-use regex::Regex;
-use crate::error::PatchError;
-use crate::error::AppError;
 
 /// Result type for validation operations
 pub type ValidationResult<T> = std::result::Result<T, PatchError>;
@@ -78,10 +78,7 @@ pub fn validate_patch_application(
 /// # Returns
 ///
 /// Success if pattern is absent, error if found
-pub fn validate_pattern_removed(
-    file_path: &Path,
-    unwanted_pattern: &str,
-) -> ValidationResult<()> {
+pub fn validate_pattern_removed(file_path: &Path, unwanted_pattern: &str) -> ValidationResult<()> {
     if !file_path.exists() {
         return Err(PatchError::FileNotFound(format!(
             "File not found for validation: {}",
@@ -179,9 +176,7 @@ pub fn validate_config_options(
     for (key, value) in required_options {
         // Use a simpler approach - just check if the line exists as-is
         let expected_line = format!("{}={}", key, value);
-        let found = content
-            .lines()
-            .any(|line| line.trim() == expected_line);
+        let found = content.lines().any(|line| line.trim() == expected_line);
 
         if !found {
             return Err(PatchError::ValidationFailed(format!(
@@ -218,8 +213,8 @@ pub fn validate_lto_shielding(makefile_path: &Path) -> ValidationResult<()> {
         .map_err(|e| PatchError::ValidationFailed(format!("Failed to read file: {}", e)))?;
 
     // Check for AMD GPU shielding patterns
-    let has_amdgpu_shield = content.contains("CFLAGS_amdgpu")
-        && content.contains("filter-out -flto");
+    let has_amdgpu_shield =
+        content.contains("CFLAGS_amdgpu") && content.contains("filter-out -flto");
 
     if !has_amdgpu_shield {
         return Err(PatchError::ValidationFailed(
@@ -264,24 +259,24 @@ pub fn validate_lto_shielding(makefile_path: &Path) -> ValidationResult<()> {
 /// assert!(result.is_ok());
 /// ```
 pub fn validate_kbuild_path(path: &Path) -> std::result::Result<(), AppError> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| AppError::InvalidPath(
-            "Path contains invalid UTF-8 characters".to_string()
-        ))?;
-    
+    let path_str = path.to_str().ok_or_else(|| {
+        AppError::InvalidPath("Path contains invalid UTF-8 characters".to_string())
+    })?;
+
     if path_str.contains(' ') {
-        return Err(AppError::InvalidPath(
-            format!("Path contains spaces: {}", path_str)
-        ));
+        return Err(AppError::InvalidPath(format!(
+            "Path contains spaces: {}",
+            path_str
+        )));
     }
-    
+
     if path_str.contains(':') {
-        return Err(AppError::InvalidPath(
-            format!("Path contains colons: {}", path_str)
-        ));
+        return Err(AppError::InvalidPath(format!(
+            "Path contains colons: {}",
+            path_str
+        )));
     }
-    
+
     Ok(())
 }
 
@@ -300,7 +295,7 @@ pub fn validate_kbuild_path(path: &Path) -> std::result::Result<(), AppError> {
 /// Success if bash syntax is valid, error message if syntax errors found
 pub fn validate_pkgbuild_syntax(pkgbuild_path: &Path) -> ValidationResult<()> {
     use std::process::Command;
-    
+
     if !pkgbuild_path.exists() {
         return Err(PatchError::FileNotFound(format!(
             "PKGBUILD not found: {}",
@@ -309,16 +304,19 @@ pub fn validate_pkgbuild_syntax(pkgbuild_path: &Path) -> ValidationResult<()> {
     }
 
     eprintln!("[Validator] [PKGBUILD-SYNTAX] Validating PKGBUILD syntax with bash -n");
-    eprintln!("[Validator] [PKGBUILD-SYNTAX] File: {}", pkgbuild_path.display());
+    eprintln!(
+        "[Validator] [PKGBUILD-SYNTAX] File: {}",
+        pkgbuild_path.display()
+    );
 
     // Run bash -n to check syntax without executing
     let output = Command::new("bash")
         .arg("-n")
         .arg(pkgbuild_path)
         .output()
-        .map_err(|e| PatchError::ValidationFailed(
-            format!("Failed to run bash syntax check: {}", e)
-        ))?;
+        .map_err(|e| {
+            PatchError::ValidationFailed(format!("Failed to run bash syntax check: {}", e))
+        })?;
 
     if output.status.success() {
         eprintln!("[Validator] [PKGBUILD-SYNTAX] ✓ PKGBUILD syntax is valid");
@@ -497,10 +495,7 @@ mod tests {
         writeln!(file, "CONFIG_LTO_CLANG=y").unwrap();
         drop(file);
 
-        let result = validate_config_options(
-            &config_path,
-            &[("CONFIG_CFI_CLANG", "y")],
-        );
+        let result = validate_config_options(&config_path, &[("CONFIG_CFI_CLANG", "y")]);
         assert!(result.is_err());
     }
 

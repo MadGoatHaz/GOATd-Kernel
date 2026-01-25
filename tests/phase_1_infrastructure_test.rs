@@ -81,14 +81,18 @@ fn test_phase1_pid_exclusion_logic() {
             println!("PIDs migrated to cgroup: {}", count);
 
             // Verify current process was NOT migrated
-            if let Ok(content) = fs::read_to_string(format!("{}/cgroup.procs", config.cgroup_path)) {
+            if let Ok(content) = fs::read_to_string(format!("{}/cgroup.procs", config.cgroup_path))
+            {
                 let pids_in_cgroup: Vec<u32> = content
                     .lines()
                     .filter_map(|line| line.parse::<u32>().ok())
                     .collect();
 
                 if pids_in_cgroup.contains(&current_pid) {
-                    println!("✗ FAIL: Current process {} was moved to cgroup", current_pid);
+                    println!(
+                        "✗ FAIL: Current process {} was moved to cgroup",
+                        current_pid
+                    );
                 } else {
                     println!("✓ Current process {} correctly excluded", current_pid);
                 }
@@ -101,12 +105,16 @@ fn test_phase1_pid_exclusion_logic() {
                 }
 
                 // Check if any kernel threads are in the cgroup (they shouldn't be)
-                let kernel_threads = pids_in_cgroup.iter().filter(|&&pid| {
-                    is_kernel_thread(pid)
-                }).count();
+                let kernel_threads = pids_in_cgroup
+                    .iter()
+                    .filter(|&&pid| is_kernel_thread(pid))
+                    .count();
 
                 if kernel_threads > 0 {
-                    println!("⚠ WARNING: {} kernel threads were migrated to cgroup", kernel_threads);
+                    println!(
+                        "⚠ WARNING: {} kernel threads were migrated to cgroup",
+                        kernel_threads
+                    );
                 } else {
                     println!("✓ No kernel threads in cgroup");
                 }
@@ -188,7 +196,7 @@ fn test_phase1_watchdog_heartbeat_and_initialization() {
 
     let watchdog_config = WatchdogConfig {
         timeout: Duration::from_secs(2), // Short timeout for testing
-        priority: 10, // Lower priority for testing (may fail as non-root)
+        priority: 10,                    // Lower priority for testing (may fail as non-root)
         cgroup_freeze_path: "/sys/fs/cgroup/benchmark_freeze_test4/cgroup.freeze".to_string(),
     };
 
@@ -274,7 +282,9 @@ fn test_phase1_watchdog_timeout_recovery() {
                             if state == "0" {
                                 println!("✓ Watchdog triggered emergency thaw on timeout");
                             } else {
-                                println!("⚠ Freeze state unchanged - watchdog may not have triggered");
+                                println!(
+                                    "⚠ Freeze state unchanged - watchdog may not have triggered"
+                                );
                             }
                         }
 

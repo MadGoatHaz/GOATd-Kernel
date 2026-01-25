@@ -10,14 +10,14 @@
 //! - Event-based diagnostic pipeline (lock-free, allocation-free hot loop)
 //! - Baseline Calibration Mode: Pure mode eliminates overhead by skipping SMI/buffer operations
 
+use hdrhistogram::Histogram;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use hdrhistogram::Histogram;
 
-use super::SmiCorrelation;
-use super::thermal;
 use super::diagnostic_buffer::send_diagnostic;
+use super::thermal;
+use super::SmiCorrelation;
 
 /// Collection mode for baseline calibration
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +42,12 @@ pub enum CollectorEvent {
     /// Ring buffer full: dropped_count
     BufferFull(u64),
     /// Status periodic update: sample_count, spike_total, smi_correlated_total, dropped_total
-    Status { samples: u64, spikes: u64, smi_correlated: u64, dropped: u64 },
+    Status {
+        samples: u64,
+        spikes: u64,
+        smi_correlated: u64,
+        dropped: u64,
+    },
     /// Warmup phase complete: transition to official metrics recording
     WarmupComplete,
     /// Warmup phase complete: transition to recording
@@ -179,7 +184,7 @@ impl LatencyCollector {
             };
             libc::sched_setscheduler(0, libc::SCHED_FIFO, &sched_param)
         };
-        
+
         if priority_result != 0 {
             let errno = std::io::Error::last_os_error();
             send_diagnostic(&format!(
@@ -220,178 +225,201 @@ impl LatencyCollector {
             // CRITICAL PATH START: Hot loop is STRICTLY lock-free and allocation-free
             // ============================================================================
             while !self.stop_flag.load(Ordering::Relaxed) {
-            // Sleep until the target absolute time
-            unsafe {
-                libc::clock_nanosleep(
-                    libc::CLOCK_MONOTONIC,
-                    libc::TIMER_ABSTIME,
-                    &next_wake,
-                    std::ptr::null_mut(),
-                );
-            }
-
-            // Get the actual wake-up time
-            let now: libc::timespec = unsafe {
-                let mut ts = std::mem::zeroed::<libc::timespec>();
-                libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
-                ts
-            };
-
-            // Calculate latency: actual_wake - target_wake (in nanoseconds)
-            // This is measured against the ORIGINAL target before gap-skipping
-            let latency_ns = timespec_diff_ns(&now, &next_wake);
-            
-            // In Pure mode, use black_box to prevent compiler optimization
-            let latency_ns = if self.mode == CollectionMode::Pure {
-                std::hint::black_box(latency_ns)
-            } else {
-                latency_ns
-            };
-            
-            sample_count += 1;
-
-            // ====================================================================
-            // SAMPLER HARDENING: Synthetic Sample Injection for Missed Intervals
-            // ====================================================================
-            // When stutter occurs (phase-lag), inject synthetic samples to represent
-            // the missed time. This ensures every gap on the 1ms grid is accounted for.
-            // Example: 50ms missing on 1ms grid → 49 synthetic samples at interval_ns
-            
-            // CRITICAL: Push the REAL sample FIRST (the one we just measured)
-            if self.mode == CollectionMode::Full {
-                if self.producer.push(latency_ns).is_err() {
-                    self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                // Sleep until the target absolute time
+                unsafe {
+                    libc::clock_nanosleep(
+                        libc::CLOCK_MONOTONIC,
+                        libc::TIMER_ABSTIME,
+                        &next_wake,
+                        std::ptr::null_mut(),
+                    );
                 }
-            }
-            
-            // Now handle grid alignment and synthetic sample injection
-            let mut synthetic_samples = 0u64;
-            if timespec_cmp(&now, &next_wake) > 0 {
-                // Late wake-up (Phase-Lag): We detected a stutter
-                let late_ns = timespec_diff_ns(&now, &next_wake);
-                let missed = late_ns / interval_ns;  // How many MISSED intervals
-                
-                // LABORATORY-GRADE: Inject synthetic samples for missed intervals
-                // Each synthetic sample has latency = interval_ns (represents the missed time slot)
-                // This reconstructs the temporal structure without allocation
-                // CRITICAL: Cap synthetic samples to prevent unbounded loops on extreme stutters
-                const MAX_SYNTHETIC_SAMPLES: u64 = 10000;  // Max synthetic samples per stutter event
-                if missed > 0 && self.mode == CollectionMode::Full {
-                    let capped_missed = missed.min(MAX_SYNTHETIC_SAMPLES);
-                    for _ in 0..capped_missed {
-                        // Push synthetic sample representing missed interval
-                        // Synthetic latency = nominal interval (1000ns for 1kHz sampling)
-                        if self.producer.push(interval_ns).is_err() {
-                            self.dropped_count.fetch_add(1, Ordering::Relaxed);
-                        }
-                        synthetic_samples += 1;
-                    }
-                    
-                    // LOG: If we exceeded cap, warn about extreme stutter
-                    if missed > MAX_SYNTHETIC_SAMPLES {
-                        eprintln!("[COLLECTOR] ⚠️ Warning: Extreme stutter detected: {} intervals missed, capped synthetic injection to {}", missed, MAX_SYNTHETIC_SAMPLES);
-                    }
-                    
-                    // Diagnostic: Report stutter with synthetic recovery
-                    if self.event_producer.push(CollectorEvent::Status {
-                        samples: sample_count,
-                        spikes: self.spike_count.load(Ordering::Relaxed),
-                        smi_correlated: self.smi_correlated_spikes.load(Ordering::Relaxed),
-                        dropped: self.dropped_count.load(Ordering::Relaxed) + synthetic_samples,
-                    }).is_err() {
-                        self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-                
-                // Snap to next grid point
-                add_ns_to_timespec(&mut next_wake, (missed + 1) * interval_ns);
-            } else {
-                // On time: increment by exactly one interval
-                add_ns_to_timespec(&mut next_wake, interval_ns);
-            }
 
-            // WARMUP STATE TRANSITION: When we exit the warmup phase (sample_count >= warmup_samples), activate recording and send WarmupComplete event
-            if sample_count >= self.warmup_samples && !warmup_transitioned {
-                warmup_transitioned = true;
-                self.is_recording.store(true, Ordering::Relaxed);
-                // Push WarmupComplete event instead of calling send_diagnostic (removes Mutex acquisition and format! from hot loop)
-                if self.event_producer.push(CollectorEvent::WarmupComplete).is_err() {
-                    self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
-                }
-            }
+                // Get the actual wake-up time
+                let now: libc::timespec = unsafe {
+                    let mut ts = std::mem::zeroed::<libc::timespec>();
+                    libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+                    ts
+                };
 
-            // ALWAYS push samples to producer (UNCONDITIONAL) - allows live data flow to UI during warmup
-            if self.mode == CollectionMode::Full {
-                // Try to push latency sample to the producer. If full, increment dropped counter.
-                match self.producer.push(latency_ns) {
-                    Ok(_) => {
-                        // Successfully pushed
-                    }
-                    Err(_push_err) => {
-                        // Buffer is full, increment dropped count atomically
-                        self.dropped_count.fetch_add(1, Ordering::Relaxed);
-                        dropped_total += 1;
+                // Calculate latency: actual_wake - target_wake (in nanoseconds)
+                // This is measured against the ORIGINAL target before gap-skipping
+                let latency_ns = timespec_diff_ns(&now, &next_wake);
 
-                        // Push buffer full event only on significant milestones (non-blocking)
-                        if dropped_total > prev_dropped_logged + 100 {
-                            if self.event_producer.push(CollectorEvent::BufferFull(dropped_total)).is_err() {
-                                self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
-                            }
-                            prev_dropped_logged = dropped_total;
-                        }
-                    }
-                }
-            }
-
-            // Track max latency and statistics in Pure mode
-            if self.mode == CollectionMode::Pure {
-                if latency_ns > max_latency_ns {
-                    max_latency_ns = latency_ns;
-                    self.max_latency_pure_ns.store(max_latency_ns, Ordering::Relaxed);
-                }
-                // Accumulate for average calculation
-                self.pure_mode_sum_latency.fetch_add(latency_ns, Ordering::Relaxed);
-                self.pure_mode_sample_count.fetch_add(1, Ordering::Relaxed);
-            }
-
-            // CONDITIONAL: Detect spikes and perform cycle-accurate SMI correlation
-            // Uses Relaxed ordering for efficiency (non-blocking check)
-            if self.is_recording.load(Ordering::Relaxed) && latency_ns > self.spike_threshold {
-                // Early-exit if in Pure mode (skip spike detection overhead entirely)
-                if self.mode == CollectionMode::Pure {
-                    // Pure mode: no spike events, no SMI reads
+                // In Pure mode, use black_box to prevent compiler optimization
+                let latency_ns = if self.mode == CollectionMode::Pure {
+                    std::hint::black_box(latency_ns)
                 } else {
-                    // Full mode: increment spike counter atomically
-                    self.spike_count.fetch_add(1, Ordering::Release);
-                    spike_total += 1;
+                    latency_ns
+                };
 
-                    // ================================================================
-                    // CYCLE-ACCURATE SMI CORRELATION: Atomic load immediately on spike
-                    // ================================================================
-                    // CRITICAL FIX: Load SMI count IMMEDIATELY when spike is detected
-                    // This provides cycle-accurate correlation with the latency spike
-                    // instead of using stale cached values from 100+ iterations ago
-                    let raw_smi_count = TOTAL_SMI_COUNT.load(Ordering::Acquire);
-                    
-                    // Correlate spike with SMI event: if SMI count changed since last spike, mark correlation
-                    if raw_smi_count > cached_smi_count && raw_smi_count > 0 {
-                        self.smi_correlated_spikes.fetch_add(1, Ordering::Release);
-                        eprintln!("[COLLECTOR] [SMI_SPIKE] Spike at {:.3}µs CORRELATED with SMI: count={} (prev={})",
-                            latency_ns as f32 / 1000.0, raw_smi_count, cached_smi_count);
+                sample_count += 1;
+
+                // ====================================================================
+                // SAMPLER HARDENING: Synthetic Sample Injection for Missed Intervals
+                // ====================================================================
+                // When stutter occurs (phase-lag), inject synthetic samples to represent
+                // the missed time. This ensures every gap on the 1ms grid is accounted for.
+                // Example: 50ms missing on 1ms grid → 49 synthetic samples at interval_ns
+
+                // CRITICAL: Push the REAL sample FIRST (the one we just measured)
+                if self.mode == CollectionMode::Full {
+                    if self.producer.push(latency_ns).is_err() {
+                        self.dropped_count.fetch_add(1, Ordering::Relaxed);
                     }
-                    
-                    // Update cache for next comparison
-                    cached_smi_count = raw_smi_count;
+                }
 
-                    // Push spike event with cycle-accurate SMI count (non-blocking, allocation-free)
-                    if self.event_producer.push(CollectorEvent::Spike(latency_ns, spike_total, raw_smi_count)).is_err() {
+                // Now handle grid alignment and synthetic sample injection
+                let mut synthetic_samples = 0u64;
+                if timespec_cmp(&now, &next_wake) > 0 {
+                    // Late wake-up (Phase-Lag): We detected a stutter
+                    let late_ns = timespec_diff_ns(&now, &next_wake);
+                    let missed = late_ns / interval_ns; // How many MISSED intervals
+
+                    // LABORATORY-GRADE: Inject synthetic samples for missed intervals
+                    // Each synthetic sample has latency = interval_ns (represents the missed time slot)
+                    // This reconstructs the temporal structure without allocation
+                    // CRITICAL: Cap synthetic samples to prevent unbounded loops on extreme stutters
+                    const MAX_SYNTHETIC_SAMPLES: u64 = 10000; // Max synthetic samples per stutter event
+                    if missed > 0 && self.mode == CollectionMode::Full {
+                        let capped_missed = missed.min(MAX_SYNTHETIC_SAMPLES);
+                        for _ in 0..capped_missed {
+                            // Push synthetic sample representing missed interval
+                            // Synthetic latency = nominal interval (1000ns for 1kHz sampling)
+                            if self.producer.push(interval_ns).is_err() {
+                                self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                            }
+                            synthetic_samples += 1;
+                        }
+
+                        // LOG: If we exceeded cap, warn about extreme stutter
+                        if missed > MAX_SYNTHETIC_SAMPLES {
+                            eprintln!("[COLLECTOR] ⚠️ Warning: Extreme stutter detected: {} intervals missed, capped synthetic injection to {}", missed, MAX_SYNTHETIC_SAMPLES);
+                        }
+
+                        // Diagnostic: Report stutter with synthetic recovery
+                        if self
+                            .event_producer
+                            .push(CollectorEvent::Status {
+                                samples: sample_count,
+                                spikes: self.spike_count.load(Ordering::Relaxed),
+                                smi_correlated: self.smi_correlated_spikes.load(Ordering::Relaxed),
+                                dropped: self.dropped_count.load(Ordering::Relaxed)
+                                    + synthetic_samples,
+                            })
+                            .is_err()
+                        {
+                            self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+
+                    // Snap to next grid point
+                    add_ns_to_timespec(&mut next_wake, (missed + 1) * interval_ns);
+                } else {
+                    // On time: increment by exactly one interval
+                    add_ns_to_timespec(&mut next_wake, interval_ns);
+                }
+
+                // WARMUP STATE TRANSITION: When we exit the warmup phase (sample_count >= warmup_samples), activate recording and send WarmupComplete event
+                if sample_count >= self.warmup_samples && !warmup_transitioned {
+                    warmup_transitioned = true;
+                    self.is_recording.store(true, Ordering::Relaxed);
+                    // Push WarmupComplete event instead of calling send_diagnostic (removes Mutex acquisition and format! from hot loop)
+                    if self
+                        .event_producer
+                        .push(CollectorEvent::WarmupComplete)
+                        .is_err()
+                    {
                         self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
-            }
 
-            // Periodic status update moved outside hot loop to reduce contention
-            // Status events are now only sent at program exit via post-hot-loop diagnostics
+                // ALWAYS push samples to producer (UNCONDITIONAL) - allows live data flow to UI during warmup
+                if self.mode == CollectionMode::Full {
+                    // Try to push latency sample to the producer. If full, increment dropped counter.
+                    match self.producer.push(latency_ns) {
+                        Ok(_) => {
+                            // Successfully pushed
+                        }
+                        Err(_push_err) => {
+                            // Buffer is full, increment dropped count atomically
+                            self.dropped_count.fetch_add(1, Ordering::Relaxed);
+                            dropped_total += 1;
+
+                            // Push buffer full event only on significant milestones (non-blocking)
+                            if dropped_total > prev_dropped_logged + 100 {
+                                if self
+                                    .event_producer
+                                    .push(CollectorEvent::BufferFull(dropped_total))
+                                    .is_err()
+                                {
+                                    self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
+                                }
+                                prev_dropped_logged = dropped_total;
+                            }
+                        }
+                    }
+                }
+
+                // Track max latency and statistics in Pure mode
+                if self.mode == CollectionMode::Pure {
+                    if latency_ns > max_latency_ns {
+                        max_latency_ns = latency_ns;
+                        self.max_latency_pure_ns
+                            .store(max_latency_ns, Ordering::Relaxed);
+                    }
+                    // Accumulate for average calculation
+                    self.pure_mode_sum_latency
+                        .fetch_add(latency_ns, Ordering::Relaxed);
+                    self.pure_mode_sample_count.fetch_add(1, Ordering::Relaxed);
+                }
+
+                // CONDITIONAL: Detect spikes and perform cycle-accurate SMI correlation
+                // Uses Relaxed ordering for efficiency (non-blocking check)
+                if self.is_recording.load(Ordering::Relaxed) && latency_ns > self.spike_threshold {
+                    // Early-exit if in Pure mode (skip spike detection overhead entirely)
+                    if self.mode == CollectionMode::Pure {
+                        // Pure mode: no spike events, no SMI reads
+                    } else {
+                        // Full mode: increment spike counter atomically
+                        self.spike_count.fetch_add(1, Ordering::Release);
+                        spike_total += 1;
+
+                        // ================================================================
+                        // CYCLE-ACCURATE SMI CORRELATION: Atomic load immediately on spike
+                        // ================================================================
+                        // CRITICAL FIX: Load SMI count IMMEDIATELY when spike is detected
+                        // This provides cycle-accurate correlation with the latency spike
+                        // instead of using stale cached values from 100+ iterations ago
+                        let raw_smi_count = TOTAL_SMI_COUNT.load(Ordering::Acquire);
+
+                        // Correlate spike with SMI event: if SMI count changed since last spike, mark correlation
+                        if raw_smi_count > cached_smi_count && raw_smi_count > 0 {
+                            self.smi_correlated_spikes.fetch_add(1, Ordering::Release);
+                            eprintln!("[COLLECTOR] [SMI_SPIKE] Spike at {:.3}µs CORRELATED with SMI: count={} (prev={})",
+                            latency_ns as f32 / 1000.0, raw_smi_count, cached_smi_count);
+                        }
+
+                        // Update cache for next comparison
+                        cached_smi_count = raw_smi_count;
+
+                        // Push spike event with cycle-accurate SMI count (non-blocking, allocation-free)
+                        if self
+                            .event_producer
+                            .push(CollectorEvent::Spike(
+                                latency_ns,
+                                spike_total,
+                                raw_smi_count,
+                            ))
+                            .is_err()
+                        {
+                            self.dropped_event_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                }
+
+                // Periodic status update moved outside hot loop to reduce contention
+                // Status events are now only sent at program exit via post-hot-loop diagnostics
             }
             // ============================================================================
             // CRITICAL PATH END: Hot loop completed
@@ -400,11 +428,16 @@ impl LatencyCollector {
             // Post-hot-loop diagnostics (outside critical path, uses send_diagnostic)
             send_diagnostic(&format!(
                 "[COLLECTOR] Hot loop stopped after {} samples ({} warmup + {} recorded)",
-                sample_count, self.warmup_samples, sample_count.saturating_sub(self.warmup_samples)
+                sample_count,
+                self.warmup_samples,
+                sample_count.saturating_sub(self.warmup_samples)
             ));
             send_diagnostic(&format!(
                 "[COLLECTOR] Spikes: {}, Dropped: {}, Dropped Events: {}, Mode: {:?}",
-                spike_total, dropped_total, self.dropped_event_count.load(Ordering::Relaxed), self.mode
+                spike_total,
+                dropped_total,
+                self.dropped_event_count.load(Ordering::Relaxed),
+                self.mode
             ));
             if self.mode == CollectionMode::Pure {
                 send_diagnostic(&format!(
@@ -420,7 +453,7 @@ impl LatencyCollector {
                 ));
             }
         }));
-        
+
         // Handle panic result: log and continue gracefully
         if let Err(panic_info) = result {
             let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -437,14 +470,20 @@ impl LatencyCollector {
     /// Gets a reference to the spike count.
     pub fn spike_count(&self) -> Arc<AtomicU64> {
         let count = self.spike_count.load(Ordering::Relaxed);
-        send_diagnostic(&format!("[COLLECTOR_ACCESS] Reading spike_count: {}", count));
+        send_diagnostic(&format!(
+            "[COLLECTOR_ACCESS] Reading spike_count: {}",
+            count
+        ));
         Arc::clone(&self.spike_count)
     }
 
     /// Gets a reference to the SMI-correlated spike count.
     pub fn smi_correlated_spikes(&self) -> Arc<AtomicU64> {
         let count = self.smi_correlated_spikes.load(Ordering::Relaxed);
-        send_diagnostic(&format!("[COLLECTOR_ACCESS] Reading smi_correlated_spikes: {}", count));
+        send_diagnostic(&format!(
+            "[COLLECTOR_ACCESS] Reading smi_correlated_spikes: {}",
+            count
+        ));
         Arc::clone(&self.smi_correlated_spikes)
     }
 
@@ -504,15 +543,15 @@ pub fn spawn_msr_poller() -> std::thread::JoinHandle<()> {
         if DISABLE_MSR_POLLER.load(Ordering::Relaxed) {
             return;
         }
-        
+
         loop {
             std::thread::sleep(Duration::from_millis(100));
-            
+
             // Check disable flag every iteration for fast response
             if DISABLE_MSR_POLLER.load(Ordering::Relaxed) {
                 return;
             }
-            
+
             // Try to read SMI count from MSR (Intel only)
             // This uses existing diagnostic infrastructure to fetch MSR data
             // If unavailable (non-Intel or no MSR), this is a no-op
@@ -529,25 +568,25 @@ pub fn spawn_msr_poller() -> std::thread::JoinHandle<()> {
 fn read_smi_count_from_msr() -> Result<u64, Box<dyn std::error::Error>> {
     // Attempt to read MSR 0x34 (IA32_SMI_COUNT) on Intel CPUs
     // This is a privileged operation and may fail on non-Intel or restricted systems
-    
+
     // For now, this is a placeholder that attempts to use /dev/cpu/*/msr interface
     // In production, integrate with existing diagnostic::SmiDetector if available
-    
+
     // Try to read from the first CPU's MSR file
     const MSR_SMI_COUNT: u64 = 0x34;
     let msr_path = format!("/dev/cpu/0/msr");
-    
+
     match std::fs::File::open(&msr_path) {
         Ok(mut file) => {
             use std::io::Seek;
             // Seek to the SMI count MSR offset
             file.seek(std::io::SeekFrom::Start(MSR_SMI_COUNT))?;
-            
+
             // Read 8 bytes as u64
             let mut buf = [0u8; 8];
             use std::io::Read;
             file.read_exact(&mut buf)?;
-            
+
             let smi_count = u64::from_le_bytes(buf);
             Ok(smi_count)
         }
@@ -570,9 +609,17 @@ fn add_ns_to_timespec(ts: &mut libc::timespec, ns: u64) {
 /// Returns: -1 if a < b, 0 if a == b, 1 if a > b
 fn timespec_cmp(a: &libc::timespec, b: &libc::timespec) -> i32 {
     if a.tv_sec != b.tv_sec {
-        if a.tv_sec < b.tv_sec { -1 } else { 1 }
+        if a.tv_sec < b.tv_sec {
+            -1
+        } else {
+            1
+        }
     } else if a.tv_nsec != b.tv_nsec {
-        if a.tv_nsec < b.tv_nsec { -1 } else { 1 }
+        if a.tv_nsec < b.tv_nsec {
+            -1
+        } else {
+            1
+        }
     } else {
         0
     }
@@ -663,13 +710,13 @@ impl LatencyProcessor {
         // Clamp input to 1..100_000_000 ns
         let clamped_ns = latency_ns.max(1).min(100_000_000);
         let latency_f64 = clamped_ns as f64;
-        
+
         // Pure logarithmic mapping: log10(ns) / 8 * 19
         // log10(100_000_000) = 8, so we span log10(1) = 0 to log10(100_000_000) = 8
         let log_val = latency_f64.log10();
         let bucket_f64 = (log_val / 8.0) * 19.0;
         let bucket_u = bucket_f64 as usize;
-        
+
         bucket_u.min(19)
     }
 
@@ -682,19 +729,19 @@ impl LatencyProcessor {
 
         // Record nanoseconds directly in histogram (no conversion, preserves sub-microsecond precision)
         self.histogram.record(sample_ns)?;
-        
+
         // Update internal state with nanosecond values
         self.last_sample_ns = sample_ns;
         self.max_latency_ns = self.max_latency_ns.max(sample_ns);
         self.sample_count += 1;
-        
+
         // Update 20-bucket histogram
         let bucket_idx = Self::latency_to_bucket_index(sample_ns);
         self.buckets[bucket_idx] += 1;
-        
+
         // Track maximum latency in the current cycle (for jitter timeline)
         self.cycle_max_ns = self.cycle_max_ns.max(sample_ns);
-        
+
         // Add sample to rolling window for responsive average calculation
         self.rolling_samples.push_back(sample_ns);
         if self.rolling_samples.len() > self.rolling_max_size {
@@ -736,7 +783,7 @@ impl LatencyProcessor {
         if self.rolling_samples.is_empty() {
             return 0.0;
         }
-        
+
         // Calculate rolling average from the last 1,000 samples (or fewer if not enough data)
         let sum: u64 = self.rolling_samples.iter().sum();
         let avg_ns = (sum as f64) / (self.rolling_samples.len() as f64);
@@ -766,31 +813,31 @@ impl LatencyProcessor {
         self.cycle_max_ns = 0;
         self.rolling_samples.clear();
     }
-    
+
     /// Set core temperatures directly (for seamless restart transition)
     /// This prevents heatmap blackout when monitoring is restarted
     pub fn set_core_temperatures(&mut self, temps: Vec<f32>) {
         self.core_temperatures = temps;
     }
-    
+
     /// Update thermal data (called periodically, e.g., every 100ms)
     pub fn update_thermal_data(&mut self) {
         // Throttle thermal reads to every 100ms to avoid excessive sysfs access
         if self.last_thermal_read.elapsed() < std::time::Duration::from_millis(100) {
             return;
         }
-        
+
         let thermal_data = thermal::read_thermal_data();
         self.core_temperatures = thermal_data.core_temperatures;
         self.package_temperature = thermal_data.package_temperature;
         self.last_thermal_read = std::time::Instant::now();
     }
-    
+
     /// Get current core temperatures
     pub fn core_temperatures(&self) -> &[f32] {
         &self.core_temperatures
     }
-    
+
     /// Get current package temperature
     pub fn package_temperature(&self) -> f32 {
         self.package_temperature
@@ -902,11 +949,11 @@ mod tests {
         // 1 ns should map to bucket 0
         let bucket_1ns = LatencyProcessor::latency_to_bucket_index(1);
         assert_eq!(bucket_1ns, 0, "1 ns should map to bucket 0");
-        
+
         // 100 ns should map to early bucket (log10(100) ≈ 2.0)
         let bucket_100ns = LatencyProcessor::latency_to_bucket_index(100);
         assert!(bucket_100ns < 10, "100 ns should map to early bucket");
-        
+
         // 500 ns should still map to early bucket
         let bucket_500ns = LatencyProcessor::latency_to_bucket_index(500);
         assert!(bucket_500ns < 10, "500 ns should map to early bucket");
@@ -918,15 +965,15 @@ mod tests {
         // 1000 ns = 1 µs
         let bucket_1us = LatencyProcessor::latency_to_bucket_index(1000);
         assert!(bucket_1us <= 10, "1 µs should map to valid bucket");
-        
+
         // 10 µs = 10,000 ns
         let bucket_10us = LatencyProcessor::latency_to_bucket_index(10_000);
         assert!(bucket_10us <= 19, "10 µs should map to valid bucket");
-        
+
         // 100 µs = 100,000 ns
         let bucket_100us = LatencyProcessor::latency_to_bucket_index(100_000);
         assert!(bucket_100us <= 19, "100 µs should map to valid bucket");
-        
+
         // 1 ms = 1,000,000 ns
         let bucket_1ms = LatencyProcessor::latency_to_bucket_index(1_000_000);
         assert!(bucket_1ms <= 19, "1 ms should map to valid bucket");
@@ -938,11 +985,11 @@ mod tests {
         // 10 ms = 10,000,000 ns
         let bucket_10ms = LatencyProcessor::latency_to_bucket_index(10_000_000);
         assert!(bucket_10ms <= 19, "10 ms should map to valid bucket");
-        
+
         // 50 ms = 50,000,000 ns
         let bucket_50ms = LatencyProcessor::latency_to_bucket_index(50_000_000);
         assert!(bucket_50ms <= 19, "50 ms should map to valid bucket");
-        
+
         // 100 ms = 100,000,000 ns (upper boundary)
         let bucket_100ms = LatencyProcessor::latency_to_bucket_index(100_000_000);
         assert_eq!(bucket_100ms, 19, "100 ms should map to bucket 19 (max)");
@@ -952,16 +999,30 @@ mod tests {
     fn test_latency_bucket_index_monotonic() {
         // Test that bucket indices are monotonically increasing
         let test_values = vec![
-            1, 10, 100, 500, 999, 1000, 10_000, 100_000, 1_000_000,
-            10_000_000, 50_000_000, 100_000_000
+            1,
+            10,
+            100,
+            500,
+            999,
+            1000,
+            10_000,
+            100_000,
+            1_000_000,
+            10_000_000,
+            50_000_000,
+            100_000_000,
         ];
-        
+
         let mut prev_bucket = 0;
         for &ns in &test_values {
             let bucket = LatencyProcessor::latency_to_bucket_index(ns);
-            assert!(bucket >= prev_bucket,
-                    "Buckets should be monotonically increasing: {} ns → bucket {}, but prev was {}",
-                    ns, bucket, prev_bucket);
+            assert!(
+                bucket >= prev_bucket,
+                "Buckets should be monotonically increasing: {} ns → bucket {}, but prev was {}",
+                ns,
+                bucket,
+                prev_bucket
+            );
             prev_bucket = bucket;
         }
     }
@@ -969,53 +1030,74 @@ mod tests {
     #[test]
     fn test_processor_fractional_microseconds_precision() {
         let mut processor = LatencyProcessor::default();
-        
+
         // Record a sample with sub-microsecond precision: 123 ns
-        processor.record_sample(123).expect("Failed to record 123 ns sample");
-        
+        processor
+            .record_sample(123)
+            .expect("Failed to record 123 ns sample");
+
         // The getter should return 123 / 1000 = 0.123 µs (not rounded to 0.0)
         let last_sample_us = processor.last_sample();
-        assert!(last_sample_us > 0.1 && last_sample_us < 0.2,
-                "123 ns should convert to ~0.123 µs, got {}", last_sample_us);
+        assert!(
+            last_sample_us > 0.1 && last_sample_us < 0.2,
+            "123 ns should convert to ~0.123 µs, got {}",
+            last_sample_us
+        );
     }
 
     #[test]
     fn test_processor_max_fractional_precision() {
         let mut processor = LatencyProcessor::default();
-        
+
         // Record samples with sub-microsecond precision
-        processor.record_sample(456).expect("Failed to record sample");
-        processor.record_sample(789).expect("Failed to record sample");
-        
+        processor
+            .record_sample(456)
+            .expect("Failed to record sample");
+        processor
+            .record_sample(789)
+            .expect("Failed to record sample");
+
         // Max should be 789 ns = 0.789 µs
         let max_us = processor.max();
-        assert!(max_us > 0.7 && max_us < 1.0,
-                "Max of 789 ns should be ~0.789 µs, got {}", max_us);
+        assert!(
+            max_us > 0.7 && max_us < 1.0,
+            "Max of 789 ns should be ~0.789 µs, got {}",
+            max_us
+        );
     }
 
     #[test]
     fn test_processor_millisecond_accuracy() {
         let mut processor = LatencyProcessor::default();
-        
+
         // Record millisecond-scale samples
-        processor.record_sample(5_000_000).expect("Failed to record 5 ms sample");  // 5 ms
-        processor.record_sample(25_000_000).expect("Failed to record 25 ms sample"); // 25 ms
-        
+        processor
+            .record_sample(5_000_000)
+            .expect("Failed to record 5 ms sample"); // 5 ms
+        processor
+            .record_sample(25_000_000)
+            .expect("Failed to record 25 ms sample"); // 25 ms
+
         // Verify samples are recorded correctly
         assert_eq!(processor.sample_count(), 2);
-        assert!(processor.max() >= 25.0, "Max should be at least 25 µs (25 ms)");
+        assert!(
+            processor.max() >= 25.0,
+            "Max should be at least 25 µs (25 ms)"
+        );
     }
 
     #[test]
     fn test_processor_p99_fractional_precision() {
         let mut processor = LatencyProcessor::default();
-        
+
         // Record a mix of sub-microsecond and larger samples
         for i in 1..=100 {
             let sample = (i as u64) * 100; // 100 ns, 200 ns, ..., 10000 ns
-            processor.record_sample(sample).expect("Failed to record sample");
+            processor
+                .record_sample(sample)
+                .expect("Failed to record sample");
         }
-        
+
         let p99_us = processor.p99();
         // P99 should be retrievable with fractional precision
         assert!(p99_us > 0.0, "P99 should be positive");
@@ -1024,7 +1106,7 @@ mod tests {
     #[test]
     fn test_fractional_precision_across_scales() {
         // Comprehensive test that fractional microseconds are preserved across all scales
-        
+
         // Test values with fractional results when divided by 1000
         let test_cases = vec![
             (7, "7 ns = 0.007 µs"),
@@ -1035,35 +1117,54 @@ mod tests {
             (12_345, "12,345 ns = 12.345 µs"),
             (999_999, "999,999 ns = 999.999 µs"),
         ];
-        
+
         for (ns_value, _description) in test_cases {
             let mut temp_processor = LatencyProcessor::default();
-            temp_processor.record_sample(ns_value).expect("Failed to record sample");
-            
+            temp_processor
+                .record_sample(ns_value)
+                .expect("Failed to record sample");
+
             // Verify the last_sample is not integer-rounded
             let us_value = temp_processor.last_sample();
             let expected = ns_value as f32 / 1000.0;
-            assert!((us_value - expected).abs() < 0.0001,
-                    "Fractional precision lost: {} ns should be {:.3} µs, got {:.3} µs",
-                    ns_value, expected, us_value);
+            assert!(
+                (us_value - expected).abs() < 0.0001,
+                "Fractional precision lost: {} ns should be {:.3} µs, got {:.3} µs",
+                ns_value,
+                expected,
+                us_value
+            );
         }
     }
 
     #[test]
     fn test_full_range_coverage_1ns_to_100ms() {
         let mut processor = LatencyProcessor::default();
-        
+
         // Log-spaced samples from 1 ns to 100 ms with fixed increment
         let test_values = vec![
-            1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000
+            1,
+            10,
+            100,
+            1_000,
+            10_000,
+            100_000,
+            1_000_000,
+            10_000_000,
+            100_000_000,
         ];
-        
+
         for sample in test_values {
-            processor.record_sample(sample).expect("Failed to record sample");
+            processor
+                .record_sample(sample)
+                .expect("Failed to record sample");
         }
-        
+
         // Verify processor captured the full range
         assert_eq!(processor.sample_count(), 9);
-        assert!(processor.max() >= 100.0, "Max should reach at least 100 µs (100 ms range)");
+        assert!(
+            processor.max() >= 100.0,
+            "Max should reach at least 100 µs (100 ms range)"
+        );
     }
 }

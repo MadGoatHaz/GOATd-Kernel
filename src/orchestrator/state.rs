@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::models::{HardwareInfo, KernelConfig, BuildState};
+use crate::models::{BuildState, HardwareInfo, KernelConfig};
 
 /// Build phase enumeration - discrete states in the build lifecycle.
 ///
@@ -25,25 +25,25 @@ use crate::models::{HardwareInfo, KernelConfig, BuildState};
 pub enum BuildPhaseState {
     /// Phase 1: Hardware detection and environment validation
     Preparation,
-    
+
     /// Phase 2: Kernel config loading and policy application
     Configuration,
-    
+
     /// Phase 3: LTO shielding, ICF removal, patch application
     Patching,
-    
+
     /// Phase 4: makepkg execution and build monitoring
     Building,
-    
+
     /// Phase 5: Artifact verification and LTO confirmation
     Validation,
 
     /// Phase 6: Automated installation of built packages
     Installation,
-    
+
     /// Build completed successfully
     Completed,
-    
+
     /// Build failed, recovery/rollback available
     Failed,
 }
@@ -66,12 +66,22 @@ impl BuildPhaseState {
     /// Get all valid phase transitions FROM this phase.
     pub fn valid_next_phases(&self) -> Vec<BuildPhaseState> {
         match self {
-            BuildPhaseState::Preparation => vec![BuildPhaseState::Configuration, BuildPhaseState::Failed],
-            BuildPhaseState::Configuration => vec![BuildPhaseState::Patching, BuildPhaseState::Failed],
+            BuildPhaseState::Preparation => {
+                vec![BuildPhaseState::Configuration, BuildPhaseState::Failed]
+            }
+            BuildPhaseState::Configuration => {
+                vec![BuildPhaseState::Patching, BuildPhaseState::Failed]
+            }
             BuildPhaseState::Patching => vec![BuildPhaseState::Building, BuildPhaseState::Failed],
             BuildPhaseState::Building => vec![BuildPhaseState::Validation, BuildPhaseState::Failed],
-            BuildPhaseState::Validation => vec![BuildPhaseState::Installation, BuildPhaseState::Completed, BuildPhaseState::Failed],
-            BuildPhaseState::Installation => vec![BuildPhaseState::Completed, BuildPhaseState::Failed],
+            BuildPhaseState::Validation => vec![
+                BuildPhaseState::Installation,
+                BuildPhaseState::Completed,
+                BuildPhaseState::Failed,
+            ],
+            BuildPhaseState::Installation => {
+                vec![BuildPhaseState::Completed, BuildPhaseState::Failed]
+            }
             BuildPhaseState::Completed => vec![],
             BuildPhaseState::Failed => vec![BuildPhaseState::Preparation], // Allow recovery restart
         }
@@ -121,10 +131,7 @@ pub struct OrchestrationState {
 
 impl OrchestrationState {
     /// Create a new orchestration state for a build execution.
-    pub fn new(
-        hardware: HardwareInfo,
-        config: KernelConfig,
-    ) -> Self {
+    pub fn new(hardware: HardwareInfo, config: KernelConfig) -> Self {
         let now = SystemTime::now();
         OrchestrationState {
             phase: BuildPhaseState::Preparation,
@@ -239,37 +246,37 @@ mod tests {
             all_drives: Vec::new(),
         };
         let config = crate::models::KernelConfig {
-             version: "6.6.0".to_string(),
-             lto_type: crate::models::LtoType::Thin,
-             use_modprobed: true,
-             use_whitelist: false,
-             driver_exclusions: vec![],
-             config_options: std::collections::HashMap::new(),
-             hardening: crate::models::HardeningLevel::Standard,
-             secure_boot: false,
-             profile: "Generic".to_string(),
-             use_bore: false,
-             use_polly: false,
-             use_mglru: false,
-             user_toggled_bore: false,
-             user_toggled_polly: false,
-             user_toggled_mglru: false,
-             user_toggled_hardening: false,
-             user_toggled_lto: false,
-             mglru_enabled_mask: 0x0007,
-             mglru_min_ttl_ms: 1000,
-             hz: 300,
-             preemption: "Voluntary".to_string(),
-             force_clang: true,
-             lto_shield_modules: vec![],
-             scx_available: vec![],
-             scx_active_scheduler: None,
-             native_optimizations: true,
-             user_toggled_native_optimizations: false,
-             kernel_variant: String::new(),
-          };
+            version: "6.6.0".to_string(),
+            lto_type: crate::models::LtoType::Thin,
+            use_modprobed: true,
+            use_whitelist: false,
+            driver_exclusions: vec![],
+            config_options: std::collections::HashMap::new(),
+            hardening: crate::models::HardeningLevel::Standard,
+            secure_boot: false,
+            profile: "Generic".to_string(),
+            use_bore: false,
+            use_polly: false,
+            use_mglru: false,
+            user_toggled_bore: false,
+            user_toggled_polly: false,
+            user_toggled_mglru: false,
+            user_toggled_hardening: false,
+            user_toggled_lto: false,
+            mglru_enabled_mask: 0x0007,
+            mglru_min_ttl_ms: 1000,
+            hz: 300,
+            preemption: "Voluntary".to_string(),
+            force_clang: true,
+            lto_shield_modules: vec![],
+            scx_available: vec![],
+            scx_active_scheduler: None,
+            native_optimizations: true,
+            user_toggled_native_optimizations: false,
+            kernel_variant: String::new(),
+        };
 
-          let state = OrchestrationState::new(hw.clone(), config.clone());
+        let state = OrchestrationState::new(hw.clone(), config.clone());
         assert_eq!(state.phase, BuildPhaseState::Preparation);
         assert_eq!(state.progress, 0);
     }
@@ -312,22 +319,22 @@ mod tests {
             user_toggled_bore: false,
             user_toggled_polly: false,
             user_toggled_mglru: false,
-             user_toggled_hardening: false,
-             user_toggled_lto: false,
-             mglru_enabled_mask: 0x0007,
-             mglru_min_ttl_ms: 1000,
-             hz: 300,
-             preemption: "Voluntary".to_string(),
-             force_clang: true,
-             lto_shield_modules: vec![],
-             scx_available: vec![],
-             scx_active_scheduler: None,
-             native_optimizations: true,
-             user_toggled_native_optimizations: false,
-             kernel_variant: String::new(),
-         };
+            user_toggled_hardening: false,
+            user_toggled_lto: false,
+            mglru_enabled_mask: 0x0007,
+            mglru_min_ttl_ms: 1000,
+            hz: 300,
+            preemption: "Voluntary".to_string(),
+            force_clang: true,
+            lto_shield_modules: vec![],
+            scx_available: vec![],
+            scx_active_scheduler: None,
+            native_optimizations: true,
+            user_toggled_native_optimizations: false,
+            kernel_variant: String::new(),
+        };
 
-         let mut state = OrchestrationState::new(hw, config);
+        let mut state = OrchestrationState::new(hw, config);
         assert!(state.transition_to(BuildPhaseState::Configuration).is_ok());
         assert_eq!(state.phase, BuildPhaseState::Configuration);
     }
@@ -370,20 +377,20 @@ mod tests {
             user_toggled_bore: false,
             user_toggled_polly: false,
             user_toggled_mglru: false,
-             user_toggled_hardening: false,
-             user_toggled_lto: false,
-             mglru_enabled_mask: 0x0007,
-             mglru_min_ttl_ms: 1000,
-             hz: 300,
-             preemption: "Voluntary".to_string(),
-             force_clang: true,
-             lto_shield_modules: vec![],
-             scx_available: vec![],
-             scx_active_scheduler: None,
-             native_optimizations: true,
-             user_toggled_native_optimizations: false,
-             kernel_variant: String::new(),
-         };
+            user_toggled_hardening: false,
+            user_toggled_lto: false,
+            mglru_enabled_mask: 0x0007,
+            mglru_min_ttl_ms: 1000,
+            hz: 300,
+            preemption: "Voluntary".to_string(),
+            force_clang: true,
+            lto_shield_modules: vec![],
+            scx_available: vec![],
+            scx_active_scheduler: None,
+            native_optimizations: true,
+            user_toggled_native_optimizations: false,
+            kernel_variant: String::new(),
+        };
 
         let mut state = OrchestrationState::new(hw, config);
         assert!(state.transition_to(BuildPhaseState::Validation).is_err());
@@ -446,7 +453,7 @@ mod tests {
         state.record_patch_applied(true);
         state.record_patch_applied(true);
         state.record_patch_applied(false);
-        
+
         assert_eq!(state.patches_applied, 2);
         assert_eq!(state.patches_failed, 1);
     }

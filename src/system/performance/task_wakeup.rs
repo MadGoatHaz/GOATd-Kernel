@@ -3,10 +3,10 @@
 //! Measures wake-up latency between threads using futex-based signaling.
 //! Evaluates how fast one thread can wake another and get scheduled.
 
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::thread;
-use serde::{Deserialize, Serialize};
 
 /// Configuration for task wakeup measurement
 #[derive(Clone, Debug)]
@@ -95,7 +95,11 @@ impl TaskWakeupCollector {
                 }
 
                 if (i + 1) % 100 == 0 {
-                    eprintln!("[WAKEUP] Sleeper: received {}/{} wakeups", i + 1, iterations);
+                    eprintln!(
+                        "[WAKEUP] Sleeper: received {}/{} wakeups",
+                        i + 1,
+                        iterations
+                    );
                 }
             }
 
@@ -150,13 +154,12 @@ impl TaskWakeupCollector {
 
         let min_latency = (*latencies_us.first().unwrap_or(&0)) as f32;
         let max_latency = (*latencies_us.last().unwrap_or(&0)) as f32;
-        let p99_idx = ((latencies_us.len() as f32 * 0.99) as usize).min(
-            if latencies_us.len() > 0 {
+        let p99_idx =
+            ((latencies_us.len() as f32 * 0.99) as usize).min(if latencies_us.len() > 0 {
                 latencies_us.len() - 1
             } else {
                 0
-            },
-        );
+            });
         let p99_latency = if latencies_us.len() > 0 {
             latencies_us[p99_idx] as f32
         } else {
@@ -173,7 +176,10 @@ impl TaskWakeupCollector {
 
         eprintln!(
             "[WAKEUP] Test completed: Avg={:.2}µs, Min={:.2}µs, Max={:.2}µs, P99={:.2}µs",
-            metrics.avg_latency_us, metrics.min_latency_us, metrics.max_latency_us, metrics.p99_latency_us
+            metrics.avg_latency_us,
+            metrics.min_latency_us,
+            metrics.max_latency_us,
+            metrics.p99_latency_us
         );
 
         Ok(metrics)

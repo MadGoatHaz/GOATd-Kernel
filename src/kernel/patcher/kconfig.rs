@@ -3,22 +3,21 @@
 //! This module handles the generation and application of kernel configuration
 //! options through both native KConfig injection and direct .config manipulation.
 
-use std::fs;
-use std::path::PathBuf;
-use std::collections::HashMap;
+use crate::error::PatchError;
+use crate::models::{HardeningLevel, LtoType};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use crate::error::PatchError;
-use crate::models::{LtoType, HardeningLevel};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
 // Pre-compiled regex patterns for kconfig-specific operations
 static LTO_REMOVAL_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)^(?:CONFIG_LTO_|CONFIG_HAS_LTO_|# CONFIG_LTO_|# CONFIG_HAS_LTO_)[^\n]*$")
         .expect("Invalid LTO removal regex")
 });
-static SPACE_COLLAPSE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\n\n+").expect("Invalid space collapse regex")
-});
+static SPACE_COLLAPSE_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\n\n+").expect("Invalid space collapse regex"));
 
 /// Result type for patching operations
 pub type PatchResult<T> = std::result::Result<T, PatchError>;
@@ -42,21 +41,27 @@ impl crate::kernel::patcher::KernelPatcher {
     ///
     /// # Returns
     /// Path to the generated `.config.override` file, or error
-    pub fn generate_config_override(&self, options: HashMap<String, String>, lto_type: LtoType) -> PatchResult<PathBuf> {
+    pub fn generate_config_override(
+        &self,
+        options: HashMap<String, String>,
+        lto_type: LtoType,
+    ) -> PatchResult<PathBuf> {
         let override_path = self.src_dir().join(".config.override");
-        
+
         // CRITICAL FIX: Also write config to parent directory as ../config
         // This is needed for PKGBUILD's "Setting config..." step: cp ../config .config
         // The parent directory is srcdir in makepkg context
-        let parent_config_path = self.src_dir().parent()
+        let parent_config_path = self
+            .src_dir()
+            .parent()
             .map(|p| p.join("config"))
             .unwrap_or_else(|| PathBuf::from("../config"));
-        
+
         let mut content = String::new();
         content.push_str("# GOATd-generated .config.override - Native KConfig injection\n");
         content.push_str("# Processed by kernel via KCONFIG_ALLCONFIG environment variable\n");
         content.push_str("# Do NOT hand-edit - regenerated each build\n\n");
-        
+
         // STEP 1: Inject LTO configuration based on lto_type
         match lto_type {
             LtoType::Full => {
@@ -78,11 +83,11 @@ impl crate::kernel::patcher::KernelPatcher {
                 eprintln!("[Patcher] [CONFIG-OVERRIDE] LTO disabled");
             }
         }
-        
+
         content.push_str("\n# Clang/LLVM toolchain enforcement\n");
         content.push_str("CONFIG_CC_IS_CLANG=y\n");
         content.push_str("CONFIG_CLANG_VERSION=190106\n");
-        
+
         // STEP 2: Inject user-provided options (skip special prefix keys)
         content.push_str("\n# User-provided configuration options\n");
         for (key, value) in &options {
@@ -91,7 +96,7 @@ impl crate::kernel::patcher::KernelPatcher {
                 content.push_str(&format!("{}={}\n", key, value));
             }
         }
-        
+
         // STEP 3: Extract and inject MGLRU options if present
         let mut mglru_count = 0;
         for (key, value) in &options {
@@ -102,30 +107,46 @@ impl crate::kernel::patcher::KernelPatcher {
                     let config_value = value[eq_pos + 1..].to_string();
                     content.push_str(&format!("{}={}\n", config_key, config_value));
                     mglru_count += 1;
-                    eprintln!("[Patcher] [CONFIG-OVERRIDE] Injected MGLRU: {}={}", config_key, config_value);
+                    eprintln!(
+                        "[Patcher] [CONFIG-OVERRIDE] Injected MGLRU: {}={}",
+                        config_key, config_value
+                    );
                 }
             }
         }
-        
+
         if mglru_count > 0 {
-            eprintln!("[Patcher] [CONFIG-OVERRIDE] Total MGLRU options: {}", mglru_count);
+            eprintln!(
+                "[Patcher] [CONFIG-OVERRIDE] Total MGLRU options: {}",
+                mglru_count
+            );
         }
-        
+
         // Write .config.override file
-        fs::write(&override_path, &content)
-            .map_err(|e| PatchError::PatchFailed(format!("Failed to write .config.override: {}", e)))?;
-        
+        fs::write(&override_path, &content).map_err(|e| {
+            PatchError::PatchFailed(format!("Failed to write .config.override: {}", e))
+        })?;
+
         // CRITICAL FIX: Also write to parent directory as ../config for PKGBUILD compatibility
         // This ensures "cp ../config .config" in PKGBUILD's "Setting config..." step works
         if let Ok(_) = fs::write(&parent_config_path, &content) {
-            eprintln!("[Patcher] [CONFIG-OVERRIDE] Also wrote config to parent directory: {}", parent_config_path.display());
+            eprintln!(
+                "[Patcher] [CONFIG-OVERRIDE] Also wrote config to parent directory: {}",
+                parent_config_path.display()
+            );
         } else {
             eprintln!("[Patcher] [CONFIG-OVERRIDE] WARNING: Could not write to parent config path (may be non-fatal): {}", parent_config_path.display());
         }
-        
-        eprintln!("[Patcher] [CONFIG-OVERRIDE] SUCCESS: Generated .config.override at {}", override_path.display());
-        eprintln!("[Patcher] [CONFIG-OVERRIDE] Set KCONFIG_ALLCONFIG={} for KConfig injection", override_path.display());
-        
+
+        eprintln!(
+            "[Patcher] [CONFIG-OVERRIDE] SUCCESS: Generated .config.override at {}",
+            override_path.display()
+        );
+        eprintln!(
+            "[Patcher] [CONFIG-OVERRIDE] Set KCONFIG_ALLCONFIG={} for KConfig injection",
+            override_path.display()
+        );
+
         Ok(override_path)
     }
 
@@ -147,7 +168,11 @@ impl crate::kernel::patcher::KernelPatcher {
     ///
     /// # Returns
     /// Result indicating success or error
-    fn inject_baked_in_cmdline(&self, use_mglru: bool, hardening_level: HardeningLevel) -> PatchResult<()> {
+    fn inject_baked_in_cmdline(
+        &self,
+        use_mglru: bool,
+        hardening_level: HardeningLevel,
+    ) -> PatchResult<()> {
         let config_path = self.src_dir().join(".config");
 
         // Read or create .config
@@ -168,7 +193,10 @@ impl crate::kernel::patcher::KernelPatcher {
                     if let Some(end) = line.rfind('"') {
                         if start < end {
                             existing_cmdline = line[start + 1..end].to_string();
-                            eprintln!("[Patcher] [CMDLINE] Found existing CONFIG_CMDLINE: '{}'", existing_cmdline);
+                            eprintln!(
+                                "[Patcher] [CMDLINE] Found existing CONFIG_CMDLINE: '{}'",
+                                existing_cmdline
+                            );
                         }
                     }
                 }
@@ -211,7 +239,10 @@ impl crate::kernel::patcher::KernelPatcher {
         // Remove trailing space
         let final_cmdline = final_cmdline.trim_end().to_string();
 
-        eprintln!("[Patcher] [CMDLINE] FINAL BAKED-IN CMDLINE: '{}'", final_cmdline);
+        eprintln!(
+            "[Patcher] [CMDLINE] FINAL BAKED-IN CMDLINE: '{}'",
+            final_cmdline
+        );
 
         // STEP 4: Remove existing CONFIG_CMDLINE* entries from .config (exact and prefix matches)
         // Exact matches: CONFIG_CMDLINE_BOOL, CONFIG_CMDLINE_OVERRIDE
@@ -220,9 +251,9 @@ impl crate::kernel::patcher::KernelPatcher {
             .lines()
             .filter(|line| {
                 let trimmed = line.trim();
-                !(trimmed.starts_with("CONFIG_CMDLINE=") ||
-                  trimmed.starts_with("CONFIG_CMDLINE_BOOL=") ||
-                  trimmed.starts_with("CONFIG_CMDLINE_OVERRIDE="))
+                !(trimmed.starts_with("CONFIG_CMDLINE=")
+                    || trimmed.starts_with("CONFIG_CMDLINE_BOOL=")
+                    || trimmed.starts_with("CONFIG_CMDLINE_OVERRIDE="))
             })
             .collect();
 
@@ -262,7 +293,14 @@ impl crate::kernel::patcher::KernelPatcher {
     ///
     /// Now also supports baking in command line parameters via CONFIG_CMDLINE for
     /// features like MGLRU that require runtime parameter enforcement.
-    pub fn apply_kconfig(&self, options: HashMap<String, String>, lto_type: LtoType) -> PatchResult<()> {
+    /// Also injects Polly optimization flags if present in options.
+    pub fn apply_kconfig(
+        &self,
+        options: HashMap<String, String>,
+        lto_type: LtoType,
+    ) -> PatchResult<()> {
+        // Inject Polly flags if present in options
+        super::pkgbuild::inject_polly_flags(self.src_dir(), &options)?;
         let config_path = self.src_dir().join(".config");
 
         // Create backup directory
@@ -304,16 +342,25 @@ impl crate::kernel::patcher::KernelPatcher {
                     let config_key = value[..eq_pos].to_string();
                     let config_value = value[eq_pos + 1..].to_string();
                     mglru_count += 1;
-                    eprintln!("[Patcher] [MGLRU] Extracted MGLRU config #{}: {}={}", mglru_count, config_key, config_value);
+                    eprintln!(
+                        "[Patcher] [MGLRU] Extracted MGLRU config #{}: {}={}",
+                        mglru_count, config_key, config_value
+                    );
                     mglru_options.insert(config_key, config_value);
                 } else {
-                    eprintln!("[Patcher] [MGLRU] WARNING: Invalid MGLRU value format (no '='): {}", value);
+                    eprintln!(
+                        "[Patcher] [MGLRU] WARNING: Invalid MGLRU value format (no '='): {}",
+                        value
+                    );
                 }
             }
         }
-        
+
         if mglru_count > 0 {
-            eprintln!("[Patcher] [MGLRU] TOTAL: Extracted {} MGLRU config options", mglru_count);
+            eprintln!(
+                "[Patcher] [MGLRU] TOTAL: Extracted {} MGLRU config options",
+                mglru_count
+            );
         }
 
         // STEP 1: Remove ALL GCC-related config lines to prevent conflicts
@@ -384,37 +431,40 @@ impl crate::kernel::patcher::KernelPatcher {
             content.push_str(&format!("{}={}", key, value));
             content.push('\n');
 
-            eprintln!("[Patcher] [MGLRU] CRITICAL: Injected {}={} into .config", key, value);
+            eprintln!(
+                "[Patcher] [MGLRU] CRITICAL: Injected {}={} into .config",
+                key, value
+            );
         }
 
         // STEP 3: FORCEFULLY INJECT Clang-specific configuration
-         // These MUST be hardcoded to override any kernel-detected GCC settings
-         // CRITICAL: Respect the target lto_type when setting LTO configs
-         // NOTE: CONFIG_LOCALVERSION is set dynamically based on variant + profile
-         // to ensure collision-free kernel version strings across all builds
-         let mut clang_configs = vec![
-             ("CONFIG_CC_IS_CLANG", "y"),
-             ("CONFIG_CLANG_VERSION", "190106"),  // LLVM 19.0.1 release
-             ("CONFIG_CC_IS_GCC", "n"),
-         ];
-         
-         // Add LTO configs based on lto_type parameter
-         match lto_type {
-             LtoType::Full => {
-                 clang_configs.push(("CONFIG_LTO_CLANG_FULL", "y"));
-                 clang_configs.push(("CONFIG_LTO_CLANG", "y"));
-                 eprintln!("[Patcher] [KCONFIG] LTO Type: FULL - Setting CONFIG_LTO_CLANG_FULL=y");
-             }
-             LtoType::Thin => {
-                 clang_configs.push(("CONFIG_LTO_CLANG_THIN", "y"));
-                 clang_configs.push(("CONFIG_LTO_CLANG", "y"));
-                 eprintln!("[Patcher] [KCONFIG] LTO Type: THIN - Setting CONFIG_LTO_CLANG_THIN=y");
-             }
-             LtoType::None => {
-                 eprintln!("[Patcher] [KCONFIG] LTO Type: NONE - Removing all LTO configs");
-                 // Don't add any LTO configs for None type
-             }
-         }
+        // These MUST be hardcoded to override any kernel-detected GCC settings
+        // CRITICAL: Respect the target lto_type when setting LTO configs
+        // NOTE: CONFIG_LOCALVERSION is set dynamically based on variant + profile
+        // to ensure collision-free kernel version strings across all builds
+        let mut clang_configs = vec![
+            ("CONFIG_CC_IS_CLANG", "y"),
+            ("CONFIG_CLANG_VERSION", "190106"), // LLVM 19.0.1 release
+            ("CONFIG_CC_IS_GCC", "n"),
+        ];
+
+        // Add LTO configs based on lto_type parameter
+        match lto_type {
+            LtoType::Full => {
+                clang_configs.push(("CONFIG_LTO_CLANG_FULL", "y"));
+                clang_configs.push(("CONFIG_LTO_CLANG", "y"));
+                eprintln!("[Patcher] [KCONFIG] LTO Type: FULL - Setting CONFIG_LTO_CLANG_FULL=y");
+            }
+            LtoType::Thin => {
+                clang_configs.push(("CONFIG_LTO_CLANG_THIN", "y"));
+                clang_configs.push(("CONFIG_LTO_CLANG", "y"));
+                eprintln!("[Patcher] [KCONFIG] LTO Type: THIN - Setting CONFIG_LTO_CLANG_THIN=y");
+            }
+            LtoType::None => {
+                eprintln!("[Patcher] [KCONFIG] LTO Type: NONE - Removing all LTO configs");
+                // Don't add any LTO configs for None type
+            }
+        }
 
         for (key, value) in clang_configs {
             // Remove existing line if present (even if it was just added in user options)
@@ -444,10 +494,10 @@ impl crate::kernel::patcher::KernelPatcher {
         // Module size optimization flags to reduce on-disk footprint from 462MB to <100MB
         // These MUST be injected AFTER user options to enforce stripping priorities
         let module_optimization_configs = vec![
-            ("CONFIG_MODULE_COMPRESS_ZSTD", "y"),     // Compress modules with Zstandard (best compression)
-            ("CONFIG_STRIP_ASM_SYMS", "y"),           // Strip assembly symbols from modules
-            ("CONFIG_DEBUG_INFO", "n"),               // Disable debug info (critical for size reduction)
-            ("CONFIG_DEBUG_INFO_NONE", "y"),          // Explicitly enforce no debug info
+            ("CONFIG_MODULE_COMPRESS_ZSTD", "y"), // Compress modules with Zstandard (best compression)
+            ("CONFIG_STRIP_ASM_SYMS", "y"),       // Strip assembly symbols from modules
+            ("CONFIG_DEBUG_INFO", "n"), // Disable debug info (critical for size reduction)
+            ("CONFIG_DEBUG_INFO_NONE", "y"), // Explicitly enforce no debug info
         ];
 
         for (key, value) in module_optimization_configs {
@@ -471,69 +521,77 @@ impl crate::kernel::patcher::KernelPatcher {
             content.push_str(&format!("{}={}", key, value));
             content.push('\n');
 
-            eprintln!("[Patcher] [MODULE-OPT] CRITICAL: Injected {}={} (Phase 3 stripping)", key, value);
-         }
+            eprintln!(
+                "[Patcher] [MODULE-OPT] CRITICAL: Injected {}={} (Phase 3 stripping)",
+                key, value
+            );
+        }
 
-         // ============================================================================
-         // PHASE 13: NVIDIA ABI PRESERVATION (SAFETY CLUSTER)
-         // ============================================================================
-         // These Kconfigs are CRITICAL for NVIDIA driver and DKMS compatibility.
-         // They must be FORCEFULLY enabled to ensure ABI stability and proper memory
-         // management interoperability with proprietary driver stacks.
-         //
-         // Safety Cluster Definition:
-         // - CONFIG_ZONE_DEVICE: Enables device memory zone support (required for NVIDIA GPU memory)
-         // - CONFIG_MEMORY_HOTPLUG: Allows runtime memory hotplug (NVIDIA DKMS interaction)
-         // - CONFIG_SPARSEMEM_VMEMMAP: Virtual memory map for sparse memory (GPU P2P DMA support)
-         // - CONFIG_DEVICE_PRIVATE: Private device memory support (critical for GPU integration)
-         // - CONFIG_PCI_P2PDMA: PCI Peer-to-Peer DMA (NVIDIA direct GPU transfers)
-         // - CONFIG_MMU_NOTIFIER: Memory management unit notifications (GPU page table sync)
+        // ============================================================================
+        // PHASE 13: NVIDIA ABI PRESERVATION (SAFETY CLUSTER)
+        // ============================================================================
+        // These Kconfigs are CRITICAL for NVIDIA driver and DKMS compatibility.
+        // They must be FORCEFULLY enabled to ensure ABI stability and proper memory
+        // management interoperability with proprietary driver stacks.
+        //
+        // Safety Cluster Definition:
+        // - CONFIG_ZONE_DEVICE: Enables device memory zone support (required for NVIDIA GPU memory)
+        // - CONFIG_MEMORY_HOTPLUG: Allows runtime memory hotplug (NVIDIA DKMS interaction)
+        // - CONFIG_SPARSEMEM_VMEMMAP: Virtual memory map for sparse memory (GPU P2P DMA support)
+        // - CONFIG_DEVICE_PRIVATE: Private device memory support (critical for GPU integration)
+        // - CONFIG_PCI_P2PDMA: PCI Peer-to-Peer DMA (NVIDIA direct GPU transfers)
+        // - CONFIG_MMU_NOTIFIER: Memory management unit notifications (GPU page table sync)
 
-         eprintln!("[Patcher] [PHASE-13-ABI] Starting NVIDIA ABI Preservation (Safety Cluster)...");
+        eprintln!("[Patcher] [PHASE-13-ABI] Starting NVIDIA ABI Preservation (Safety Cluster)...");
 
-         // Add comment header to .config for documentation
-         if !content.is_empty() && !content.ends_with('\n') {
-             content.push('\n');
-         }
-         content.push_str("# NVIDIA ABI Safeguards (Phase 13)\n");
+        // Add comment header to .config for documentation
+        if !content.is_empty() && !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push_str("# NVIDIA ABI Safeguards (Phase 13)\n");
 
-         let safety_cluster = vec![
-             ("CONFIG_ZONE_DEVICE", "y"),
-             ("CONFIG_MEMORY_HOTPLUG", "y"),
-             ("CONFIG_SPARSEMEM_VMEMMAP", "y"),
-             ("CONFIG_DEVICE_PRIVATE", "y"),
-             ("CONFIG_PCI_P2PDMA", "y"),
-             ("CONFIG_MMU_NOTIFIER", "y"),
-         ];
+        let safety_cluster = vec![
+            ("CONFIG_ZONE_DEVICE", "y"),
+            ("CONFIG_MEMORY_HOTPLUG", "y"),
+            ("CONFIG_SPARSEMEM_VMEMMAP", "y"),
+            ("CONFIG_DEVICE_PRIVATE", "y"),
+            ("CONFIG_PCI_P2PDMA", "y"),
+            ("CONFIG_MMU_NOTIFIER", "y"),
+        ];
 
-         for (key, value) in safety_cluster {
-             // Remove existing line if present to prevent conflicts
-             let lines: Vec<&str> = content
-                 .lines()
-                 .filter(|line| !line.starts_with(&format!("{}=", key)))
-                 .collect();
+        for (key, value) in safety_cluster {
+            // Remove existing line if present to prevent conflicts
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{}=", key)))
+                .collect();
 
-             if lines.len() != content.lines().count() {
-                 content = lines.join("\n");
-                 if !content.is_empty() {
-                     content.push('\n');
-                 }
-                 eprintln!("[Patcher] [PHASE-13-ABI] Removed existing {} entry", key);
-             }
+            if lines.len() != content.lines().count() {
+                content = lines.join("\n");
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                eprintln!("[Patcher] [PHASE-13-ABI] Removed existing {} entry", key);
+            }
 
-             // Inject Safety Cluster option with ABSOLUTE priority
-             if !content.is_empty() && !content.ends_with('\n') {
-                 content.push('\n');
-             }
-             content.push_str(&format!("{}={}", key, value));
-             content.push('\n');
+            // Inject Safety Cluster option with ABSOLUTE priority
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&format!("{}={}", key, value));
+            content.push('\n');
 
-             eprintln!("[Patcher] [PHASE-13-ABI] CRITICAL: Injected {}={} (NVIDIA ABI Safeguard)", key, value);
-         }
+            eprintln!(
+                "[Patcher] [PHASE-13-ABI] CRITICAL: Injected {}={} (NVIDIA ABI Safeguard)",
+                key, value
+            );
+        }
 
-         eprintln!("[Patcher] [PHASE-13-ABI] NVIDIA ABI Preservation complete - Safety Cluster enforced");
+        eprintln!(
+            "[Patcher] [PHASE-13-ABI] NVIDIA ABI Preservation complete - Safety Cluster enforced"
+        );
 
-         // STEP 4: Final cleanup - remove any dangling GCC settings
+        // STEP 4: Final cleanup - remove any dangling GCC settings
         let final_lines: Vec<String> = content
             .lines()
             .filter(|line| {
@@ -564,18 +622,18 @@ impl crate::kernel::patcher::KernelPatcher {
         // Then atomically inject the complete correct trio in the proper order.
 
         eprintln!("[Patcher] [PHASE-5-HARD-ENFORCER] Starting SURGICAL LTO override protection...");
-        
+
         // SURGICAL REMOVAL: Target ALL LTO configuration variants (using pre-compiled pattern)
-         // This regex matches:
-         // - CONFIG_LTO_NONE=y
-         // - CONFIG_LTO_NONE=n
-         // - CONFIG_LTO_CLANG=y
-         // - CONFIG_LTO_CLANG_THIN=y
-         // - CONFIG_LTO_CLANG_FULL=y
-         // - CONFIG_HAS_LTO_CLANG=y
-         // - # CONFIG_LTO_* is not set (commented-out variants)
-         // - # CONFIG_HAS_LTO_* is not set (commented-out HAS_LTO variants)
-        
+        // This regex matches:
+        // - CONFIG_LTO_NONE=y
+        // - CONFIG_LTO_NONE=n
+        // - CONFIG_LTO_CLANG=y
+        // - CONFIG_LTO_CLANG_THIN=y
+        // - CONFIG_LTO_CLANG_FULL=y
+        // - CONFIG_HAS_LTO_CLANG=y
+        // - # CONFIG_LTO_* is not set (commented-out variants)
+        // - # CONFIG_HAS_LTO_* is not set (commented-out HAS_LTO variants)
+
         let lines_before = content.lines().count();
         content = LTO_REMOVAL_REGEX.replace_all(&content, "").to_string();
         let lines_after = content.lines().count();
@@ -651,7 +709,9 @@ impl crate::kernel::patcher::KernelPatcher {
         fs::write(&config_path, &content)
             .map_err(|e| PatchError::PatchFailed(format!("Failed to write .config: {}", e)))?;
 
-        eprintln!("[Patcher] [PHASE-5] SUCCESS: .config written with LTO override protection active");
+        eprintln!(
+            "[Patcher] [PHASE-5] SUCCESS: .config written with LTO override protection active"
+        );
 
         // ============================================================================
         // CMDLINE INJECTION: Bake in kernel parameters for runtime enforcement
@@ -686,7 +746,11 @@ impl crate::kernel::patcher::KernelPatcher {
     ///
     /// # Returns
     /// Result indicating success or error
-    pub fn inject_modular_localversion(&self, variant: &str, profile_name: &str) -> PatchResult<()> {
+    pub fn inject_modular_localversion(
+        &self,
+        variant: &str,
+        profile_name: &str,
+    ) -> PatchResult<()> {
         let config_path = self.src_dir().join(".config");
 
         // Read or create .config
@@ -706,14 +770,14 @@ impl crate::kernel::patcher::KernelPatcher {
             // Variant kernels: variant is "linux-zen", "linux-hardened", etc.
             // Extract the suffix after "linux-" and build: -linux-{variant_suffix}-goatd-{profile}
             // Example: "linux-zen" -> variant_suffix is "zen" -> "-linux-zen-goatd-{profile}"
-            let variant_suffix = variant
-                .strip_prefix("linux-")
-                .unwrap_or(&variant); // Fallback to variant if no "linux-" prefix
+            let variant_suffix = variant.strip_prefix("linux-").unwrap_or(&variant); // Fallback to variant if no "linux-" prefix
             format!("-linux-{}-goatd-{}", variant_suffix, profile_name)
         };
 
-        eprintln!("[Patcher] [LOCALVERSION] variant='{}', profile='{}' -> LOCALVERSION='{}'",
-                  variant, profile_name, localversion);
+        eprintln!(
+            "[Patcher] [LOCALVERSION] variant='{}', profile='{}' -> LOCALVERSION='{}'",
+            variant, profile_name, localversion
+        );
 
         // STEP 2: Remove any existing CONFIG_LOCALVERSION lines from .config
         let lines: Vec<&str> = content
@@ -740,7 +804,10 @@ impl crate::kernel::patcher::KernelPatcher {
         fs::write(&config_path, &content)
             .map_err(|e| PatchError::PatchFailed(format!("Failed to write .config: {}", e)))?;
 
-        eprintln!("[Patcher] [LOCALVERSION] SUCCESS: Injected CONFIG_LOCALVERSION=\"{}\" into .config", localversion);
+        eprintln!(
+            "[Patcher] [LOCALVERSION] SUCCESS: Injected CONFIG_LOCALVERSION=\"{}\" into .config",
+            localversion
+        );
 
         Ok(())
     }

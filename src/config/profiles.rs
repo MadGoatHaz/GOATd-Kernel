@@ -1,21 +1,29 @@
 //! Kernel build profiles.
 
-use crate::models::{LtoType, HardeningLevel};
-use std::collections::HashMap;
+use crate::models::{HardeningLevel, LtoType};
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 
 lazy_static! {
     static ref PROFILES: HashMap<String, ProfileDefinition> = {
         let mut profiles = HashMap::new();
-        
+
         profiles.insert(
             "generic".to_string(),
             ProfileDefinition::new(
                 "Generic".to_string(),
                 "Balanced (Clang, EEVDF, -O2)".to_string(),
-                "A reasonable default for most systems. Balances performance and stability.".to_string(),
-                true, LtoType::Thin, false, HardeningLevel::Standard,
-                "Voluntary".to_string(), 300, false, false, true,
+                "A reasonable default for most systems. Balances performance and stability."
+                    .to_string(),
+                true,
+                LtoType::Thin,
+                false,
+                HardeningLevel::Standard,
+                "Voluntary".to_string(),
+                300,
+                false,
+                false,
+                true,
             ),
         );
 
@@ -70,18 +78,18 @@ lazy_static! {
 /// Profile definition.
 #[derive(Debug, Clone)]
 pub struct ProfileDefinition {
-    pub name: String,                   // Name
-    pub description: String,            // Desc
-    pub explanation: String,            // User-friendly explanation
-    pub use_clang: bool,                // Clang?
-    pub default_lto: LtoType,           // LTO
-    pub enable_module_stripping: bool,  // Strip?
+    pub name: String,                    // Name
+    pub description: String,             // Desc
+    pub explanation: String,             // User-friendly explanation
+    pub use_clang: bool,                 // Clang?
+    pub default_lto: LtoType,            // LTO
+    pub enable_module_stripping: bool,   // Strip?
     pub hardening_level: HardeningLevel, // Hardening level
-    pub preemption: String,             // Preempt
-    pub hz: u32,                        // Hz
-    pub use_polly: bool,                // Polly?
-    pub use_mglru: bool,                // MGLRU?
-    pub native_optimizations: bool,     // Native optimizations (-march=native)?
+    pub preemption: String,              // Preempt
+    pub hz: u32,                         // Hz
+    pub use_polly: bool,                 // Polly?
+    pub use_mglru: bool,                 // MGLRU?
+    pub native_optimizations: bool,      // Native optimizations (-march=native)?
 }
 
 impl ProfileDefinition {
@@ -184,7 +192,7 @@ mod tests {
         assert_eq!(profile.default_lto, LtoType::Full);
         assert!(profile.enable_module_stripping);
         assert_eq!(profile.hardening_level, HardeningLevel::Hardened);
-        assert!(profile.use_mglru);  // Server uses MGLRU for memory efficiency
+        assert!(profile.use_mglru); // Server uses MGLRU for memory efficiency
         assert!(profile.native_optimizations);
     }
 

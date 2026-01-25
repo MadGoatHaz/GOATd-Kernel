@@ -9,10 +9,8 @@
 //! Validates that metrics are within reasonable physical bounds and no resource leaks occur.
 
 use goatd_kernel::system::performance::{
-    MicroJitterCollector, MicroJitterConfig,
-    ContextSwitchCollector, ContextSwitchConfig,
-    SyscallSaturationCollector, SyscallSaturationConfig,
-    TaskWakeupCollector, TaskWakeupConfig,
+    ContextSwitchCollector, ContextSwitchConfig, MicroJitterCollector, MicroJitterConfig,
+    SyscallSaturationCollector, SyscallSaturationConfig, TaskWakeupCollector, TaskWakeupConfig,
 };
 
 /// Physical bounds for validation
@@ -36,13 +34,13 @@ struct PhysicalBounds {
 impl Default for PhysicalBounds {
     fn default() -> Self {
         PhysicalBounds {
-            jitter_p99_99_max_us: 10000.0,      // 10ms max for P99.99 jitter
-            cs_rtt_min_us: 0.01,                 // 0.01µs minimum
-            cs_rtt_max_us: 100000.0,             // 100ms max (conservative)
-            syscall_min_ns: 0.1,                 // 0.1ns minimum (sanity check)
-            syscall_max_ns: 100000.0,            // 100µs max per syscall
-            wakeup_min_us: 0.01,                 // 0.01µs minimum
-            wakeup_max_us: 100000.0,             // 100ms max (conservative)
+            jitter_p99_99_max_us: 10000.0, // 10ms max for P99.99 jitter
+            cs_rtt_min_us: 0.01,           // 0.01µs minimum
+            cs_rtt_max_us: 100000.0,       // 100ms max (conservative)
+            syscall_min_ns: 0.1,           // 0.1ns minimum (sanity check)
+            syscall_max_ns: 100000.0,      // 100µs max per syscall
+            wakeup_min_us: 0.01,           // 0.01µs minimum
+            wakeup_max_us: 100000.0,       // 100ms max (conservative)
         }
     }
 }
@@ -50,12 +48,12 @@ impl Default for PhysicalBounds {
 #[test]
 fn test_micro_jitter_collector() {
     eprintln!("\n========== MICRO-JITTER COLLECTOR TEST ==========");
-    
+
     let bounds = PhysicalBounds::default();
     let config = MicroJitterConfig {
         interval_us: 50,
         spike_threshold_us: 500,
-        duration_secs: 2,  // Short duration for testing
+        duration_secs: 2, // Short duration for testing
     };
 
     eprintln!("[JITTER.TEST] Configuration:");
@@ -77,36 +75,70 @@ fn test_micro_jitter_collector() {
 
     // Validation checks
     eprintln!("[JITTER.TEST] Validation Checks:");
-    
+
     // Check 1: P99.99 should be positive
     eprintln!("  [CHECK] P99.99 > 0: {}", metrics.p99_99_us > 0.0);
-    assert!(metrics.p99_99_us > 0.0, "P99.99 should be positive, got {}", metrics.p99_99_us);
-    
+    assert!(
+        metrics.p99_99_us > 0.0,
+        "P99.99 should be positive, got {}",
+        metrics.p99_99_us
+    );
+
     // Check 2: P99.99 should be within physical bounds
-    eprintln!("  [CHECK] P99.99 <= {}: {}", bounds.jitter_p99_99_max_us, metrics.p99_99_us <= bounds.jitter_p99_99_max_us);
-    assert!(metrics.p99_99_us <= bounds.jitter_p99_99_max_us, 
-        "P99.99 {} exceeds max bound {}", metrics.p99_99_us, bounds.jitter_p99_99_max_us);
-    
+    eprintln!(
+        "  [CHECK] P99.99 <= {}: {}",
+        bounds.jitter_p99_99_max_us,
+        metrics.p99_99_us <= bounds.jitter_p99_99_max_us
+    );
+    assert!(
+        metrics.p99_99_us <= bounds.jitter_p99_99_max_us,
+        "P99.99 {} exceeds max bound {}",
+        metrics.p99_99_us,
+        bounds.jitter_p99_99_max_us
+    );
+
     // Check 3: Max should be >= P99.99
-    eprintln!("  [CHECK] Max >= P99.99: {}", metrics.max_us >= metrics.p99_99_us);
-    assert!(metrics.max_us >= metrics.p99_99_us, 
-        "Max {} should be >= P99.99 {}", metrics.max_us, metrics.p99_99_us);
-    
+    eprintln!(
+        "  [CHECK] Max >= P99.99: {}",
+        metrics.max_us >= metrics.p99_99_us
+    );
+    assert!(
+        metrics.max_us >= metrics.p99_99_us,
+        "Max {} should be >= P99.99 {}",
+        metrics.max_us,
+        metrics.p99_99_us
+    );
+
     // Check 4: Avg should be positive and <= max
-    eprintln!("  [CHECK] 0 < Avg <= Max: {} && {}", 
-        metrics.avg_us > 0.0, metrics.avg_us <= metrics.max_us);
-    assert!(metrics.avg_us > 0.0 && metrics.avg_us <= metrics.max_us, 
-        "Avg {} should be between 0 and max {}", metrics.avg_us, metrics.max_us);
-    
+    eprintln!(
+        "  [CHECK] 0 < Avg <= Max: {} && {}",
+        metrics.avg_us > 0.0,
+        metrics.avg_us <= metrics.max_us
+    );
+    assert!(
+        metrics.avg_us > 0.0 && metrics.avg_us <= metrics.max_us,
+        "Avg {} should be between 0 and max {}",
+        metrics.avg_us,
+        metrics.max_us
+    );
+
     // Check 5: Sample count should be non-zero
     eprintln!("  [CHECK] Sample Count > 0: {}", metrics.sample_count > 0);
     assert!(metrics.sample_count > 0, "Sample count should be non-zero");
-    
+
     // Check 6: Spike count should be reasonable
     let spike_ratio = (metrics.spike_count as f32) / (metrics.sample_count as f32);
-    eprintln!("  [CHECK] Spike Ratio: {:.4}% (count: {}/{})", 
-        spike_ratio * 100.0, metrics.spike_count, metrics.sample_count);
-    assert!(spike_ratio < 0.5, "Spike ratio {:.2}% seems too high", spike_ratio * 100.0);
+    eprintln!(
+        "  [CHECK] Spike Ratio: {:.4}% (count: {}/{})",
+        spike_ratio * 100.0,
+        metrics.spike_count,
+        metrics.sample_count
+    );
+    assert!(
+        spike_ratio < 0.5,
+        "Spike ratio {:.2}% seems too high",
+        spike_ratio * 100.0
+    );
 
     eprintln!("[JITTER.TEST] ✓ All validation checks passed\n");
 }
@@ -114,10 +146,10 @@ fn test_micro_jitter_collector() {
 #[test]
 fn test_context_switch_collector() {
     eprintln!("\n========== CONTEXT-SWITCH COLLECTOR TEST ==========");
-    
+
     let bounds = PhysicalBounds::default();
     let config = ContextSwitchConfig {
-        iterations: 100,  // Short duration for testing
+        iterations: 100, // Short duration for testing
         thread1_cpu: Some(0),
         thread2_cpu: Some(1),
     };
@@ -142,36 +174,72 @@ fn test_context_switch_collector() {
 
     // Validation checks
     eprintln!("[CS.TEST] Validation Checks:");
-    
+
     // Check 1: All RTT values should be positive
     eprintln!("  [CHECK] Mean RTT > 0: {}", metrics.mean > 0.0);
-    assert!(metrics.mean > 0.0, "Mean RTT should be positive, got {}", metrics.mean);
-    
+    assert!(
+        metrics.mean > 0.0,
+        "Mean RTT should be positive, got {}",
+        metrics.mean
+    );
+
     eprintln!("  [CHECK] Median RTT >= 0: {}", metrics.median >= 0.0);
-    assert!(metrics.median >= 0.0, "Median RTT should be >= 0, got {}", metrics.median);
-    
+    assert!(
+        metrics.median >= 0.0,
+        "Median RTT should be >= 0, got {}",
+        metrics.median
+    );
+
     eprintln!("  [CHECK] P95 RTT >= Mean: {}", metrics.p95 >= metrics.mean);
-    assert!(metrics.p95 >= metrics.mean,
-        "P95 {} should be >= Mean {}", metrics.p95, metrics.mean);
-    
+    assert!(
+        metrics.p95 >= metrics.mean,
+        "P95 {} should be >= Mean {}",
+        metrics.p95,
+        metrics.mean
+    );
+
     // Check 2: RTT values should be within physical bounds
-    eprintln!("  [CHECK] P95 RTT <= {}: {}", bounds.cs_rtt_max_us, metrics.p95 <= bounds.cs_rtt_max_us);
-    assert!(metrics.p95 <= bounds.cs_rtt_max_us,
-        "P95 RTT {} exceeds bound {}", metrics.p95, bounds.cs_rtt_max_us);
-    
+    eprintln!(
+        "  [CHECK] P95 RTT <= {}: {}",
+        bounds.cs_rtt_max_us,
+        metrics.p95 <= bounds.cs_rtt_max_us
+    );
+    assert!(
+        metrics.p95 <= bounds.cs_rtt_max_us,
+        "P95 RTT {} exceeds bound {}",
+        metrics.p95,
+        bounds.cs_rtt_max_us
+    );
+
     // Check 3: P95 should be between median and mean
-    eprintln!("  [CHECK] Median <= Mean <= P95: {} && {}",
-        metrics.median <= metrics.mean, metrics.mean <= metrics.p95);
-    assert!(metrics.median <= metrics.mean && metrics.mean <= metrics.p95,
+    eprintln!(
+        "  [CHECK] Median <= Mean <= P95: {} && {}",
+        metrics.median <= metrics.mean,
+        metrics.mean <= metrics.p95
+    );
+    assert!(
+        metrics.median <= metrics.mean && metrics.mean <= metrics.p95,
         "Median {} should be <= Mean {} <= P95 {}",
-        metrics.median, metrics.mean, metrics.p95);
-    
+        metrics.median,
+        metrics.mean,
+        metrics.p95
+    );
+
     // Check 4: Successful passes should match iterations
-    eprintln!("  [CHECK] Successful Passes == Iterations: {} == {}",
-        metrics.successful_passes, iterations);
-    assert!(metrics.successful_passes > 0, "Should have successful passes");
-    assert!(metrics.successful_passes <= iterations as u64,
-        "Successful passes {} exceeds iterations {}", metrics.successful_passes, iterations);
+    eprintln!(
+        "  [CHECK] Successful Passes == Iterations: {} == {}",
+        metrics.successful_passes, iterations
+    );
+    assert!(
+        metrics.successful_passes > 0,
+        "Should have successful passes"
+    );
+    assert!(
+        metrics.successful_passes <= iterations as u64,
+        "Successful passes {} exceeds iterations {}",
+        metrics.successful_passes,
+        iterations
+    );
 
     eprintln!("[CS.TEST] ✓ All validation checks passed\n");
 }
@@ -179,11 +247,11 @@ fn test_context_switch_collector() {
 #[test]
 fn test_syscall_saturation_collector() {
     eprintln!("\n========== SYSCALL SATURATION COLLECTOR TEST ==========");
-    
+
     let bounds = PhysicalBounds::default();
     let config = SyscallSaturationConfig {
-        iterations: 1000,   // Reduced for testing
-        runs: 2,            // Reduced for testing
+        iterations: 1000, // Reduced for testing
+        runs: 2,          // Reduced for testing
     };
 
     let iterations = config.iterations;
@@ -196,7 +264,9 @@ fn test_syscall_saturation_collector() {
     eprintln!("  - Max per call: {}ns", bounds.syscall_max_ns);
 
     let collector = SyscallSaturationCollector::new(config);
-    let metrics = collector.run().expect("Syscall saturation collector failed");
+    let metrics = collector
+        .run()
+        .expect("Syscall saturation collector failed");
 
     eprintln!("[SYSCALL.TEST] Results:");
     eprintln!("  - Avg ns/call: {}ns", metrics.avg_ns_per_call);
@@ -207,42 +277,87 @@ fn test_syscall_saturation_collector() {
 
     // Validation checks
     eprintln!("[SYSCALL.TEST] Validation Checks:");
-    
+
     // Check 1: Average per call should be positive and reasonable
-    eprintln!("  [CHECK] Avg ns/call > 0: {}", metrics.avg_ns_per_call > 0.0);
-    assert!(metrics.avg_ns_per_call > 0.0, "Avg ns/call should be positive, got {}", metrics.avg_ns_per_call);
-    
+    eprintln!(
+        "  [CHECK] Avg ns/call > 0: {}",
+        metrics.avg_ns_per_call > 0.0
+    );
+    assert!(
+        metrics.avg_ns_per_call > 0.0,
+        "Avg ns/call should be positive, got {}",
+        metrics.avg_ns_per_call
+    );
+
     // Check 2: Avg per call should be within physical bounds
-    eprintln!("  [CHECK] Avg <= Max bound {}: {}", bounds.syscall_max_ns, metrics.avg_ns_per_call <= bounds.syscall_max_ns);
-    assert!(metrics.avg_ns_per_call <= bounds.syscall_max_ns, 
-        "Avg {} exceeds max bound {}", metrics.avg_ns_per_call, bounds.syscall_max_ns);
-    
+    eprintln!(
+        "  [CHECK] Avg <= Max bound {}: {}",
+        bounds.syscall_max_ns,
+        metrics.avg_ns_per_call <= bounds.syscall_max_ns
+    );
+    assert!(
+        metrics.avg_ns_per_call <= bounds.syscall_max_ns,
+        "Avg {} exceeds max bound {}",
+        metrics.avg_ns_per_call,
+        bounds.syscall_max_ns
+    );
+
     // Check 3: Min should be >= 0 and <= avg
-    eprintln!("  [CHECK] 0 <= Min <= Avg: {} && {}", 
-        metrics.min_ns_per_call >= 0.0, metrics.min_ns_per_call <= metrics.avg_ns_per_call);
-    assert!(metrics.min_ns_per_call >= 0.0 && metrics.min_ns_per_call <= metrics.avg_ns_per_call,
-        "Min {} should be between 0 and avg {}", metrics.min_ns_per_call, metrics.avg_ns_per_call);
-    
+    eprintln!(
+        "  [CHECK] 0 <= Min <= Avg: {} && {}",
+        metrics.min_ns_per_call >= 0.0,
+        metrics.min_ns_per_call <= metrics.avg_ns_per_call
+    );
+    assert!(
+        metrics.min_ns_per_call >= 0.0 && metrics.min_ns_per_call <= metrics.avg_ns_per_call,
+        "Min {} should be between 0 and avg {}",
+        metrics.min_ns_per_call,
+        metrics.avg_ns_per_call
+    );
+
     // Check 4: Max should be >= avg
-    eprintln!("  [CHECK] Max >= Avg: {}", metrics.max_ns_per_call >= metrics.avg_ns_per_call);
-    assert!(metrics.max_ns_per_call >= metrics.avg_ns_per_call, 
-        "Max {} should be >= avg {}", metrics.max_ns_per_call, metrics.avg_ns_per_call);
-    
+    eprintln!(
+        "  [CHECK] Max >= Avg: {}",
+        metrics.max_ns_per_call >= metrics.avg_ns_per_call
+    );
+    assert!(
+        metrics.max_ns_per_call >= metrics.avg_ns_per_call,
+        "Max {} should be >= avg {}",
+        metrics.max_ns_per_call,
+        metrics.avg_ns_per_call
+    );
+
     // Check 5: Total syscalls should match expected count
     let expected_total = iterations * runs;
-    eprintln!("  [CHECK] Total Syscalls == Expected: {} == {}", metrics.total_syscalls, expected_total);
-    assert!(metrics.total_syscalls == expected_total, 
-        "Total syscalls {} doesn't match expected {}", metrics.total_syscalls, expected_total);
-    
+    eprintln!(
+        "  [CHECK] Total Syscalls == Expected: {} == {}",
+        metrics.total_syscalls, expected_total
+    );
+    assert!(
+        metrics.total_syscalls == expected_total,
+        "Total syscalls {} doesn't match expected {}",
+        metrics.total_syscalls,
+        expected_total
+    );
+
     // Check 6: Throughput should be non-zero and reasonable (thousands per second)
     eprintln!("  [CHECK] Throughput > 0: {}", metrics.calls_per_second > 0);
-    assert!(metrics.calls_per_second > 0, "Throughput should be non-zero");
-    
+    assert!(
+        metrics.calls_per_second > 0,
+        "Throughput should be non-zero"
+    );
+
     let throughput_millions = (metrics.calls_per_second as f64) / 1_000_000.0;
-    eprintln!("  [CHECK] Throughput ~= {:.2}M calls/sec", throughput_millions);
+    eprintln!(
+        "  [CHECK] Throughput ~= {:.2}M calls/sec",
+        throughput_millions
+    );
     // Modern systems should do at least 1M syscalls/sec (10k ~= 10µs per call)
-    assert!(metrics.calls_per_second > 1_000_000, 
-        "Throughput {} seems too low (< 1M calls/sec)", metrics.calls_per_second);
+    assert!(
+        metrics.calls_per_second > 1_000_000,
+        "Throughput {} seems too low (< 1M calls/sec)",
+        metrics.calls_per_second
+    );
 
     eprintln!("[SYSCALL.TEST] ✓ All validation checks passed\n");
 }
@@ -250,10 +365,10 @@ fn test_syscall_saturation_collector() {
 #[test]
 fn test_task_wakeup_collector() {
     eprintln!("\n========== TASK WAKEUP COLLECTOR TEST ==========");
-    
+
     let bounds = PhysicalBounds::default();
     let config = TaskWakeupConfig {
-        iterations: 100,  // Short duration for testing
+        iterations: 100, // Short duration for testing
         waker_cpu: Some(0),
         sleeper_cpu: Some(1),
     };
@@ -279,52 +394,98 @@ fn test_task_wakeup_collector() {
 
     // Validation checks
     eprintln!("[WAKEUP.TEST] Validation Checks:");
-    
+
     // Check 1: All latency values should be positive
-    eprintln!("  [CHECK] Avg Latency > 0: {}", metrics.avg_latency_us > 0.0);
-    assert!(metrics.avg_latency_us > 0.0, "Avg latency should be positive, got {}", metrics.avg_latency_us);
-    
-    eprintln!("  [CHECK] Min Latency >= 0: {}", metrics.min_latency_us >= 0.0);
-    assert!(metrics.min_latency_us >= 0.0, "Min latency should be >= 0, got {}", metrics.min_latency_us);
-    
-    eprintln!("  [CHECK] Max Latency >= Avg: {}", metrics.max_latency_us >= metrics.avg_latency_us);
-    assert!(metrics.max_latency_us >= metrics.avg_latency_us, 
-        "Max {} should be >= Avg {}", metrics.max_latency_us, metrics.avg_latency_us);
-    
+    eprintln!(
+        "  [CHECK] Avg Latency > 0: {}",
+        metrics.avg_latency_us > 0.0
+    );
+    assert!(
+        metrics.avg_latency_us > 0.0,
+        "Avg latency should be positive, got {}",
+        metrics.avg_latency_us
+    );
+
+    eprintln!(
+        "  [CHECK] Min Latency >= 0: {}",
+        metrics.min_latency_us >= 0.0
+    );
+    assert!(
+        metrics.min_latency_us >= 0.0,
+        "Min latency should be >= 0, got {}",
+        metrics.min_latency_us
+    );
+
+    eprintln!(
+        "  [CHECK] Max Latency >= Avg: {}",
+        metrics.max_latency_us >= metrics.avg_latency_us
+    );
+    assert!(
+        metrics.max_latency_us >= metrics.avg_latency_us,
+        "Max {} should be >= Avg {}",
+        metrics.max_latency_us,
+        metrics.avg_latency_us
+    );
+
     // Check 2: Latency values should be within physical bounds
-    eprintln!("  [CHECK] Max Latency <= {}: {}", bounds.wakeup_max_us, metrics.max_latency_us <= bounds.wakeup_max_us);
-    assert!(metrics.max_latency_us <= bounds.wakeup_max_us, 
-        "Max latency {} exceeds bound {}", metrics.max_latency_us, bounds.wakeup_max_us);
-    
+    eprintln!(
+        "  [CHECK] Max Latency <= {}: {}",
+        bounds.wakeup_max_us,
+        metrics.max_latency_us <= bounds.wakeup_max_us
+    );
+    assert!(
+        metrics.max_latency_us <= bounds.wakeup_max_us,
+        "Max latency {} exceeds bound {}",
+        metrics.max_latency_us,
+        bounds.wakeup_max_us
+    );
+
     // Check 3: P99 should be between min and max
-    eprintln!("  [CHECK] Min <= P99 <= Max: {} && {}", 
-        metrics.p99_latency_us >= metrics.min_latency_us, metrics.p99_latency_us <= metrics.max_latency_us);
-    assert!(metrics.p99_latency_us >= metrics.min_latency_us && metrics.p99_latency_us <= metrics.max_latency_us,
-        "P99 {} should be between min {} and max {}", 
-        metrics.p99_latency_us, metrics.min_latency_us, metrics.max_latency_us);
-    
+    eprintln!(
+        "  [CHECK] Min <= P99 <= Max: {} && {}",
+        metrics.p99_latency_us >= metrics.min_latency_us,
+        metrics.p99_latency_us <= metrics.max_latency_us
+    );
+    assert!(
+        metrics.p99_latency_us >= metrics.min_latency_us
+            && metrics.p99_latency_us <= metrics.max_latency_us,
+        "P99 {} should be between min {} and max {}",
+        metrics.p99_latency_us,
+        metrics.min_latency_us,
+        metrics.max_latency_us
+    );
+
     // Check 4: Successful wakeups should match iterations
-    eprintln!("  [CHECK] Successful Wakeups == Iterations: {} == {}",
-        metrics.successful_wakeups, iterations);
-    assert!(metrics.successful_wakeups > 0, "Should have successful wakeups");
-    assert!(metrics.successful_wakeups <= iterations as u64,
-        "Successful wakeups {} exceeds iterations {}", metrics.successful_wakeups, iterations);
+    eprintln!(
+        "  [CHECK] Successful Wakeups == Iterations: {} == {}",
+        metrics.successful_wakeups, iterations
+    );
+    assert!(
+        metrics.successful_wakeups > 0,
+        "Should have successful wakeups"
+    );
+    assert!(
+        metrics.successful_wakeups <= iterations as u64,
+        "Successful wakeups {} exceeds iterations {}",
+        metrics.successful_wakeups,
+        iterations
+    );
 
     eprintln!("[WAKEUP.TEST] ✓ All validation checks passed\n");
 }
 
 #[test]
-#[ignore]  // Full integration test - takes longer due to default durations
+#[ignore] // Full integration test - takes longer due to default durations
 fn test_all_collectors_integration() {
     eprintln!("\n========== FULL PHASE 2 INTEGRATION TEST ==========");
     eprintln!("Running all collectors with full default configurations...\n");
-    
+
     // Run all collectors
     test_micro_jitter_collector();
     test_context_switch_collector();
     test_syscall_saturation_collector();
     test_task_wakeup_collector();
-    
+
     eprintln!("\n========== INTEGRATION TEST COMPLETE ==========\n");
 }
 
@@ -332,11 +493,11 @@ fn test_all_collectors_integration() {
 fn test_collectors_no_resource_leaks() {
     eprintln!("\n========== RESOURCE LEAK TEST ==========");
     eprintln!("Running multiple iterations to check for resource exhaustion...\n");
-    
+
     // Run each collector multiple times to detect resource leaks
     for iteration in 1..=3 {
         eprintln!("[LEAK.TEST] Iteration {}/3", iteration);
-        
+
         // Micro-Jitter
         let jitter_config = MicroJitterConfig {
             duration_secs: 1,
@@ -345,7 +506,7 @@ fn test_collectors_no_resource_leaks() {
         let jitter_collector = MicroJitterCollector::new(jitter_config);
         let _ = jitter_collector.run();
         eprintln!("  ✓ Micro-Jitter completed");
-        
+
         // Context-Switch
         let cs_config = ContextSwitchConfig {
             iterations: 50,
@@ -354,7 +515,7 @@ fn test_collectors_no_resource_leaks() {
         let cs_collector = ContextSwitchCollector::new(cs_config);
         let _ = cs_collector.run();
         eprintln!("  ✓ Context-Switch completed");
-        
+
         // Syscall
         let syscall_config = SyscallSaturationConfig {
             iterations: 100,
@@ -363,7 +524,7 @@ fn test_collectors_no_resource_leaks() {
         let syscall_collector = SyscallSaturationCollector::new(syscall_config);
         let _ = syscall_collector.run();
         eprintln!("  ✓ Syscall Saturation completed");
-        
+
         // Task Wakeup
         let wakeup_config = TaskWakeupConfig {
             iterations: 50,
@@ -373,6 +534,6 @@ fn test_collectors_no_resource_leaks() {
         let _ = wakeup_collector.run();
         eprintln!("  ✓ Task Wakeup completed");
     }
-    
+
     eprintln!("\n[LEAK.TEST] ✓ All iterations completed without crashes\n");
 }

@@ -27,16 +27,16 @@
 //! - Persists state to `config/settings.json`
 //! - Handles serialization/deserialization
 
-pub mod loader;
-pub mod validator;
-pub mod modprobed;
-pub mod whitelist;
 pub mod exclusions;
-pub mod profiles;
 pub mod finalizer;
+pub mod loader;
+pub mod modprobed;
+pub mod profiles;
+pub mod validator;
+pub mod whitelist;
 
 use crate::error::ConfigError;
-use crate::models::{KernelConfig, LtoType, HardeningLevel};
+use crate::models::{HardeningLevel, KernelConfig, LtoType};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -57,7 +57,7 @@ pub struct AppState {
     pub use_polly: bool,
     pub use_mglru: bool,
     pub native_optimizations: bool,
-    
+
     // Override flags: Track if user manually toggled a feature
     // These prevent profile changes from wiping out user customizations
     pub user_toggled_polly: bool,
@@ -65,20 +65,20 @@ pub struct AppState {
     pub user_toggled_hardening: bool,
     pub user_toggled_lto: bool,
     pub user_toggled_bore: bool,
-    
+
     // Settings
     pub workspace_path: String,
     pub security_level: String,
     pub startup_audit: bool,
     pub theme_mode: String,
     pub minimize_to_tray: bool,
-    
+
     // Kernel source path (where the repository was cloned)
     pub kernel_source_path: String,
-    
+
     // Security & Verification Settings
     pub verify_signatures: bool,
-    
+
     // UI Customization Settings
     pub theme_idx: usize,
     pub ui_font_size: f32,
@@ -86,12 +86,12 @@ pub struct AppState {
     pub auto_scroll_logs: bool,
     pub check_for_updates: bool,
     pub save_window_state: bool,
-    
+
     // Debug Settings
     pub debug_logging: bool,
     pub tokio_tracing: bool,
     pub audit_on_startup: bool,
-    
+
     // Performance monitoring settings
     /// Whether to continue monitoring when window is minimized
     pub perf_background_enabled: bool,
@@ -103,7 +103,7 @@ impl Default for AppState {
     fn default() -> Self {
         AppState {
             selected_variant: "linux".to_string(),
-            selected_profile: "gaming".to_string(),  // LOWERCASE - matches profiles.rs HashMap keys
+            selected_profile: "gaming".to_string(), // LOWERCASE - matches profiles.rs HashMap keys
             selected_lto: "thin".to_string(),
             selected_scx_profile: "Default (Safe)".to_string(),
             selected_scx_mode: "Auto".to_string(),
@@ -159,21 +159,21 @@ impl SettingsManager {
     /// instead of panicking. This provides graceful fallback when config format changes.
     pub fn load() -> Result<AppState, ConfigError> {
         let config_path = "config/settings.json";
-        
+
         match std::fs::read_to_string(config_path) {
             Ok(content) => {
                 match serde_json::from_str::<AppState>(&content) {
                     Ok(mut state) => {
-                         // VALIDATION: Check if workspace_path exists and is a directory
-                         if !state.workspace_path.is_empty() {
-                             let path = std::path::Path::new(&state.workspace_path);
-                             if !path.exists() || !path.is_dir() {
-                                 eprintln!("[Config] [VALIDATION] workspace_path is invalid (doesn't exist or not a directory): '{}'", state.workspace_path);
-                                 eprintln!("[Config] [VALIDATION] Resetting workspace_path to empty string for CWD fallback");
-                                 state.workspace_path = String::new();
-                             }
-                         }
-                         Ok(state)
+                        // VALIDATION: Check if workspace_path exists and is a directory
+                        if !state.workspace_path.is_empty() {
+                            let path = std::path::Path::new(&state.workspace_path);
+                            if !path.exists() || !path.is_dir() {
+                                eprintln!("[Config] [VALIDATION] workspace_path is invalid (doesn't exist or not a directory): '{}'", state.workspace_path);
+                                eprintln!("[Config] [VALIDATION] Resetting workspace_path to empty string for CWD fallback");
+                                state.workspace_path = String::new();
+                            }
+                        }
+                        Ok(state)
                     }
                     Err(e) => {
                         // Graceful fallback: Log warning and return defaults instead of panicking
@@ -189,25 +189,31 @@ impl SettingsManager {
     /// Save AppState to config/settings.json
     pub fn save(state: &AppState) -> Result<(), ConfigError> {
         let config_path = "config/settings.json";
-        
-        eprintln!("[CONFIG] [SETTINGS_SAVE] Persisting AppState to {}", config_path);
-        eprintln!("[CONFIG] [SETTINGS_SAVE]   selected_variant: '{}'", state.selected_variant);
-        
+
+        eprintln!(
+            "[CONFIG] [SETTINGS_SAVE] Persisting AppState to {}",
+            config_path
+        );
+        eprintln!(
+            "[CONFIG] [SETTINGS_SAVE]   selected_variant: '{}'",
+            state.selected_variant
+        );
+
         // Ensure config directory exists
         let config_dir = std::path::Path::new("config");
         if !config_dir.exists() {
-            std::fs::create_dir_all(config_dir)
-                .map_err(ConfigError::IoError)?;
+            std::fs::create_dir_all(config_dir).map_err(ConfigError::IoError)?;
         }
-        
+
         // Serialize and write to file
-        let content = serde_json::to_string_pretty(state)
-            .map_err(ConfigError::InvalidJson)?;
-        
-        std::fs::write(config_path, content)
-            .map_err(ConfigError::IoError)?;
-        
-        eprintln!("[CONFIG] [SETTINGS_SAVE] ✓ Successfully persisted AppState with variant: '{}'", state.selected_variant);
+        let content = serde_json::to_string_pretty(state).map_err(ConfigError::InvalidJson)?;
+
+        std::fs::write(config_path, content).map_err(ConfigError::IoError)?;
+
+        eprintln!(
+            "[CONFIG] [SETTINGS_SAVE] ✓ Successfully persisted AppState with variant: '{}'",
+            state.selected_variant
+        );
         Ok(())
     }
 
@@ -391,11 +397,10 @@ impl ConfigManager {
     /// Result indicating success or ConfigError if profile not found
     pub fn apply_profile(&mut self, profile_name: &str) -> Result<(), ConfigError> {
         // Verify the profile exists
-        profiles::get_profile(profile_name)
-            .ok_or_else(|| ConfigError::ValidationFailed(
-                format!("Unknown profile: {}", profile_name)
-            ))?;
-        
+        profiles::get_profile(profile_name).ok_or_else(|| {
+            ConfigError::ValidationFailed(format!("Unknown profile: {}", profile_name))
+        })?;
+
         // Set the profile name (actual application happens in Finalizer)
         self.config.profile = profile_name.to_string();
         Ok(())
@@ -498,7 +503,7 @@ mod tests {
     fn test_config_manager_creation() {
         let config = ConfigManager::create_default_config("6.6.0".to_string());
         let manager = ConfigManager::new(PathBuf::from("/tmp"), config);
-        
+
         assert_eq!(manager.config_dir(), &PathBuf::from("/tmp"));
         assert_eq!(manager.config().version, "6.6.0");
         assert_eq!(manager.config().lto_type, LtoType::Thin);
@@ -508,7 +513,7 @@ mod tests {
     fn test_set_lto() {
         let config = ConfigManager::create_default_config("6.6.0".to_string());
         let mut manager = ConfigManager::new(PathBuf::from("/tmp"), config);
-        
+
         manager.set_lto(LtoType::Full).unwrap();
         assert_eq!(manager.config().lto_type, LtoType::Full);
     }
@@ -517,8 +522,10 @@ mod tests {
     fn test_set_config_option() {
         let config = ConfigManager::create_default_config("6.6.0".to_string());
         let mut manager = ConfigManager::new(PathBuf::from("/tmp"), config);
-        
-        manager.set_config_option("FOO".to_string(), "bar".to_string()).ok();
+
+        manager
+            .set_config_option("FOO".to_string(), "bar".to_string())
+            .ok();
         assert_eq!(manager.get_config_option("FOO"), Some(&"bar".to_string()));
     }
 
@@ -526,7 +533,7 @@ mod tests {
     fn test_get_summary() {
         let config = ConfigManager::create_default_config("6.6.0".to_string());
         let manager = ConfigManager::new(PathBuf::from("/tmp"), config);
-        
+
         let summary = manager.get_summary();
         assert!(summary.contains("6.6.0"));
         assert!(summary.contains("Thin"));

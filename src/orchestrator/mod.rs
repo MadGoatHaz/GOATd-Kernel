@@ -1,7 +1,7 @@
 //! Build Orchestration: 5-phase kernel build pipeline (Preparation -> Configuration -> Patching -> Building -> Validation).
 
-pub mod executor;
 pub mod checkpoint;
+pub mod executor;
 pub mod state;
 
 use std::path::PathBuf;
@@ -10,12 +10,8 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 pub use executor::{
-    validate_hardware,
-    validate_kernel_config,
-    prepare_build_environment,
-    configure_build,
-    prepare_kernel_build,
-    validate_kernel_build,
+    configure_build, prepare_build_environment, prepare_kernel_build, validate_hardware,
+    validate_kernel_build, validate_kernel_config,
 };
 
 pub use state::{BuildPhaseState, OrchestrationState};
@@ -23,6 +19,7 @@ pub use state::{BuildPhaseState, OrchestrationState};
 use crate::error::Result;
 use crate::models::{HardwareInfo, KernelConfig};
 use crate::LogCollector;
+use eframe::egui;
 
 /// Manages 5-phase kernel build orchestration with progress tracking.
 #[derive(Clone)]
@@ -50,6 +47,9 @@ pub struct AsyncOrchestrator {
 
     /// Optional timeout for the build process (test mode support)
     test_timeout: Option<Duration>,
+
+    /// Optional egui context handle for requesting repaints from background threads
+    ctx_handle: Option<egui::Context>,
 }
 
 impl AsyncOrchestrator {
@@ -65,10 +65,11 @@ impl AsyncOrchestrator {
     /// * `build_tx` - Channel for sending build events to UI
     /// * `log_collector` - Optional log collector for build output persistence
     /// * `test_timeout` - Optional timeout for build process (test mode)
+    /// * `ctx_handle` - Optional egui context for requesting repaints from background threads
     ///
     /// # Examples
     /// ```ignore
-    /// let orch = AsyncOrchestrator::new(hardware, config, "/tmp/checkpoints".into(), "/tmp/kernel-src".into(), tx, log_collector, None).await;
+    /// let orch = AsyncOrchestrator::new(hardware, config, "/tmp/checkpoints".into(), "/tmp/kernel-src".into(), tx, log_collector, None, ctx_handle).await;
     /// ```
     pub async fn new(
         hardware: HardwareInfo,
@@ -79,14 +80,15 @@ impl AsyncOrchestrator {
         cancel_rx: tokio::sync::watch::Receiver<bool>,
         log_collector: Option<Arc<LogCollector>>,
         test_timeout: Option<Duration>,
+        ctx_handle: Option<egui::Context>,
     ) -> Result<Self> {
         let state = OrchestrationState::new(hardware, config);
-        
+
         // RESTORED: Create build directory structure
         // App allows empty workspaces - auto-initialization (cloning/fetching sources) will trigger
         std::fs::create_dir_all(&kernel_path)
             .map_err(|e| format!("Failed to create kernel directory: {}", e))?;
-        
+
         Ok(AsyncOrchestrator {
             state: Arc::new(RwLock::new(state)),
             checkpoint_dir,
@@ -96,6 +98,7 @@ impl AsyncOrchestrator {
             cancel_rx,
             log_collector,
             test_timeout,
+            ctx_handle,
         })
     }
 
@@ -115,11 +118,16 @@ impl AsyncOrchestrator {
     /// * `percent` - Progress percentage (0-100), will be clamped to 100
     pub async fn set_progress(&self, percent: u32) {
         self.state.write().await.set_progress(percent);
-        
+
         // Emit Progress event to UI channel
         if let Some(ref tx) = self.build_tx {
             let progress_f32 = (percent as f32) / 100.0;
             let _ = tx.try_send(crate::ui::controller::BuildEvent::Progress(progress_f32));
+        }
+
+        // Request repaint to ensure UI updates immediately
+        if let Some(ref ctx) = self.ctx_handle {
+            ctx.request_repaint();
         }
     }
 
@@ -135,18 +143,23 @@ impl AsyncOrchestrator {
     pub async fn transition_phase(&self, next_phase: BuildPhaseState) -> Result<()> {
         let mut state = self.state.write().await;
         state.transition_to(next_phase)?;
-        
+
         // Emit PhaseChanged event to UI channel
         if let Some(ref tx) = self.build_tx {
             let phase_name = format!("{:?}", next_phase);
             let _ = tx.try_send(crate::ui::controller::BuildEvent::PhaseChanged(phase_name));
         }
-        
+
         // Log phase transition to parsed log
         if let Some(ref collector) = self.log_collector {
             collector.log_parsed(format!("PHASE TRANSITION: {:?}", next_phase));
         }
-        
+
+        // Request repaint to ensure UI updates immediately
+        if let Some(ref ctx) = self.ctx_handle {
+            ctx.request_repaint();
+        }
+
         Ok(())
     }
 
@@ -163,29 +176,50 @@ impl AsyncOrchestrator {
     /// Send a log event to the UI
     pub async fn send_log_event(&self, message: String) {
         if let Some(ref tx) = self.build_tx {
-            let _ = tx.send(crate::ui::controller::BuildEvent::Log(message)).await;
+            let _ = tx
+                .send(crate::ui::controller::BuildEvent::Log(message))
+                .await;
+        }
+        // Request repaint to ensure UI updates immediately
+        if let Some(ref ctx) = self.ctx_handle {
+            ctx.request_repaint();
         }
     }
 
     /// Send a granular status update from major phase start
     pub async fn send_status(&self, status: String) {
         if let Some(ref tx) = self.build_tx {
-            let _ = tx.send(crate::ui::controller::BuildEvent::StatusUpdate(status)).await;
+            let _ = tx
+                .send(crate::ui::controller::BuildEvent::StatusUpdate(status))
+                .await;
+        }
+        // Request repaint to ensure UI updates immediately
+        if let Some(ref ctx) = self.ctx_handle {
+            ctx.request_repaint();
         }
     }
 
     /// Send a status event to the UI
     pub async fn send_status_event(&self, message: String) {
         if let Some(ref tx) = self.build_tx {
-            let _ = tx.send(crate::ui::controller::BuildEvent::Status(message)).await;
+            let _ = tx
+                .send(crate::ui::controller::BuildEvent::Status(message))
+                .await;
+        }
+        // Request repaint to ensure UI updates immediately
+        if let Some(ref ctx) = self.ctx_handle {
+            ctx.request_repaint();
         }
     }
 
     /// Validates hardware and kernel source, cleans old artifacts.
     pub async fn prepare(&self) -> Result<()> {
         // Send status update at phase start
-        self.send_status("Preparation: Validating hardware and acquiring kernel sources...".to_string()).await;
-        
+        self.send_status(
+            "Preparation: Validating hardware and acquiring kernel sources...".to_string(),
+        )
+        .await;
+
         // Validate phase
         let state = self.state.read().await;
         if state.phase != BuildPhaseState::Preparation {
@@ -193,23 +227,32 @@ impl AsyncOrchestrator {
         }
 
         let hardware = state.hardware.clone();
-        
+
         // Determine kernel variant from config with explicit fallback chain
         // Priority 1: Use state.config.kernel_variant if not empty (set by UI)
         // Priority 2: Use state.config.version if not empty
         // Priority 3: Default to "linux"
         let kernel_variant = if !state.config.kernel_variant.is_empty() {
-            eprintln!("[Build] [PREPARATION] ✓ Using kernel_variant from config (set by UI): {}", state.config.kernel_variant);
+            eprintln!(
+                "[Build] [PREPARATION] ✓ Using kernel_variant from config (set by UI): {}",
+                state.config.kernel_variant
+            );
             state.config.kernel_variant.clone()
         } else if !state.config.version.is_empty() {
-            eprintln!("[Build] [PREPARATION] ⚠ kernel_variant empty, falling back to version: {}", state.config.version);
+            eprintln!(
+                "[Build] [PREPARATION] ⚠ kernel_variant empty, falling back to version: {}",
+                state.config.version
+            );
             state.config.version.clone()
         } else {
             eprintln!("[Build] [PREPARATION] ⚠ Both kernel_variant and version empty, defaulting to 'linux'");
             "linux".to_string()
         };
-        eprintln!("[Build] [PREPARATION] Final kernel variant: {}", kernel_variant);
-        
+        eprintln!(
+            "[Build] [PREPARATION] Final kernel variant: {}",
+            kernel_variant
+        );
+
         drop(state);
 
         // Store kernel variant in state for access by other phases
@@ -223,27 +266,39 @@ impl AsyncOrchestrator {
         // =========================================================================
         // Before any other preparation, ensure kernel sources are available
         let pkgbuild_path = self.kernel_path.join("PKGBUILD");
-        
+
         if !pkgbuild_path.exists() {
-            self.send_log_event("Kernel sources missing. Initializing source acquisition...".to_string()).await;
-            eprintln!("[Build] [PREPARATION] PKGBUILD not found at: {:?}", pkgbuild_path);
-            
+            self.send_log_event(
+                "Kernel sources missing. Initializing source acquisition...".to_string(),
+            )
+            .await;
+            eprintln!(
+                "[Build] [PREPARATION] PKGBUILD not found at: {:?}",
+                pkgbuild_path
+            );
+
             // Get source URL from the kernel sources database
             use crate::kernel::sources::KernelSourceDB;
             let source_db = KernelSourceDB::new();
-            
-            let source_url = source_db.get_source_url(&kernel_variant)
+
+            let source_url = source_db
+                .get_source_url(&kernel_variant)
                 .ok_or_else(|| format!("Unknown kernel variant: {}", kernel_variant))?;
-            
-            eprintln!("[Build] [PREPARATION] Cloning kernel source from: {}", source_url);
-            self.send_log_event(format!("Cloning from: {}", source_url)).await;
-            
+
+            eprintln!(
+                "[Build] [PREPARATION] Cloning kernel source from: {}",
+                source_url
+            );
+            self.send_log_event(format!("Cloning from: {}", source_url))
+                .await;
+
             // Perform async git clone operation
             use crate::kernel::git::GitManager;
-            
+
             match GitManager::clone(source_url, &self.kernel_path) {
                 Ok(_) => {
-                    self.send_log_event("Sources successfully acquired.".to_string()).await;
+                    self.send_log_event("Sources successfully acquired.".to_string())
+                        .await;
                     eprintln!("[Build] [PREPARATION] ✓ Kernel sources cloned successfully");
                 }
                 Err(e) => {
@@ -253,75 +308,117 @@ impl AsyncOrchestrator {
                 }
             }
         } else {
-            eprintln!("[Build] [PREPARATION] PKGBUILD found at: {:?}", pkgbuild_path);
-            
+            eprintln!(
+                "[Build] [PREPARATION] PKGBUILD found at: {:?}",
+                pkgbuild_path
+            );
+
             // =========================================================================
             // PURGE ON VERSION MISMATCH - Validate source version against expected
             // =========================================================================
             // If PKGBUILD exists, validate its version matches expected variant version
             // If mismatch detected, purge the directory and force re-clone
-            eprintln!("[Build] [PREPARATION] Validating source version for variant: {}", kernel_variant);
-            self.send_status("Validation: Checking if source version matches expected version...".to_string()).await;
-            
+            eprintln!(
+                "[Build] [PREPARATION] Validating source version for variant: {}",
+                kernel_variant
+            );
+            self.send_status(
+                "Validation: Checking if source version matches expected version...".to_string(),
+            )
+            .await;
+
             // Fetch expected version from remote (latest version for the variant)
-            let expected_version = match crate::kernel::pkgbuild::get_latest_version_by_variant(&kernel_variant).await {
-                Ok(version) => {
-                    eprintln!("[Build] [PREPARATION] ✓ Fetched expected version for '{}': {}", kernel_variant, version);
-                    version
-                }
-                Err(e) => {
-                    eprintln!("[Build] [PREPARATION] ⚠ Failed to fetch expected version: {}", e);
-                    self.send_log_event(format!("Warning: Could not fetch expected version - proceeding with caution: {}", e)).await;
-                    // Continue without version check if fetch fails (non-fatal)
-                    String::new()
-                }
-            };
-            
+            let expected_version =
+                match crate::kernel::pkgbuild::get_latest_version_by_variant(&kernel_variant).await
+                {
+                    Ok(version) => {
+                        eprintln!(
+                            "[Build] [PREPARATION] ✓ Fetched expected version for '{}': {}",
+                            kernel_variant, version
+                        );
+                        version
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[Build] [PREPARATION] ⚠ Failed to fetch expected version: {}",
+                            e
+                        );
+                        self.send_log_event(format!(
+                        "Warning: Could not fetch expected version - proceeding with caution: {}",
+                        e
+                    ))
+                        .await;
+                        // Continue without version check if fetch fails (non-fatal)
+                        String::new()
+                    }
+                };
+
             // Validate source version against expected
             if !expected_version.is_empty() {
                 use crate::kernel::git::validate_source_version;
-                
+
                 match validate_source_version(&self.kernel_path, &expected_version) {
                     Ok(true) => {
-                        eprintln!("[Build] [PREPARATION] ✓ Source version matches expected version");
-                        self.send_log_event("Source version validated successfully.".to_string()).await;
+                        eprintln!(
+                            "[Build] [PREPARATION] ✓ Source version matches expected version"
+                        );
+                        self.send_log_event("Source version validated successfully.".to_string())
+                            .await;
                     }
                     Ok(false) => {
                         // Version mismatch detected - purge and re-clone
                         eprintln!("[Build] [PREPARATION] ✗ Version mismatch detected! Purging old source and re-cloning...");
                         self.send_log_event("Version mismatch detected. Purging old kernel sources and re-cloning...".to_string()).await;
-                        
+
                         // Remove old kernel source directory
                         match std::fs::remove_dir_all(&self.kernel_path) {
                             Ok(()) => {
-                                eprintln!("[Build] [PREPARATION] ✓ Removed old kernel source directory");
-                                self.send_log_event("Removed old kernel sources.".to_string()).await;
+                                eprintln!(
+                                    "[Build] [PREPARATION] ✓ Removed old kernel source directory"
+                                );
+                                self.send_log_event("Removed old kernel sources.".to_string())
+                                    .await;
                             }
                             Err(e) => {
-                                eprintln!("[Build] [PREPARATION] ⚠ Failed to remove old directory: {}", e);
-                                self.send_log_event(format!("Warning: Failed to remove old sources: {}", e)).await;
+                                eprintln!(
+                                    "[Build] [PREPARATION] ⚠ Failed to remove old directory: {}",
+                                    e
+                                );
+                                self.send_log_event(format!(
+                                    "Warning: Failed to remove old sources: {}",
+                                    e
+                                ))
+                                .await;
                                 // Attempt to continue anyway
                             }
                         }
-                        
+
                         // Recreate the directory for fresh clone
                         std::fs::create_dir_all(&self.kernel_path)
                             .map_err(|e| format!("Failed to recreate kernel directory: {}", e))?;
-                        
+
                         // Perform fresh clone
                         use crate::kernel::sources::KernelSourceDB;
                         let source_db = KernelSourceDB::new();
-                        let source_url = source_db.get_source_url(&kernel_variant)
+                        let source_url = source_db
+                            .get_source_url(&kernel_variant)
                             .ok_or_else(|| format!("Unknown kernel variant: {}", kernel_variant))?;
-                        
-                        eprintln!("[Build] [PREPARATION] Re-cloning kernel source from: {}", source_url);
-                        self.send_log_event(format!("Re-cloning from: {}", source_url)).await;
-                        
+
+                        eprintln!(
+                            "[Build] [PREPARATION] Re-cloning kernel source from: {}",
+                            source_url
+                        );
+                        self.send_log_event(format!("Re-cloning from: {}", source_url))
+                            .await;
+
                         use crate::kernel::git::GitManager;
                         match GitManager::clone(source_url, &self.kernel_path) {
                             Ok(_) => {
-                                self.send_log_event("Fresh kernel sources acquired.".to_string()).await;
-                                eprintln!("[Build] [PREPARATION] ✓ Kernel sources re-cloned successfully");
+                                self.send_log_event("Fresh kernel sources acquired.".to_string())
+                                    .await;
+                                eprintln!(
+                                    "[Build] [PREPARATION] ✓ Kernel sources re-cloned successfully"
+                                );
                             }
                             Err(e) => {
                                 let err_msg = format!("Failed to re-clone kernel sources: {:?}", e);
@@ -359,9 +456,10 @@ impl AsyncOrchestrator {
             {
                 Ok(status) if status.success() => {
                     // modprobed-db is available, initialize the database
-                    self.send_log_event("Initializing modprobed-db database...".to_string()).await;
+                    self.send_log_event("Initializing modprobed-db database...".to_string())
+                        .await;
                     eprintln!("[Build] [MODPROBED] Starting modprobed-db initialization");
-                    
+
                     // First execution: create/initialize the database
                     match tokio::process::Command::new("modprobed-db")
                         .arg("store")
@@ -370,10 +468,10 @@ impl AsyncOrchestrator {
                     {
                         Ok(status) if status.success() => {
                             eprintln!("[Build] [MODPROBED] ✓ First modprobed-db store completed");
-                            
+
                             // Wait 500ms before second run
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                            
+
                             // Second execution: populate/update the database
                             match tokio::process::Command::new("modprobed-db")
                                 .arg("store")
@@ -381,8 +479,14 @@ impl AsyncOrchestrator {
                                 .await
                             {
                                 Ok(status) if status.success() => {
-                                    eprintln!("[Build] [MODPROBED] ✓ Second modprobed-db store completed");
-                                    self.send_status("modprobed-db database initialized successfully".to_string()).await;
+                                    eprintln!(
+                                        "[Build] [MODPROBED] ✓ Second modprobed-db store completed"
+                                    );
+                                    self.send_status(
+                                        "modprobed-db database initialized successfully"
+                                            .to_string(),
+                                    )
+                                    .await;
                                 }
                                 _ => {
                                     eprintln!("[Build] [MODPROBED] ⚠ Second modprobed-db store failed, continuing anyway");
@@ -397,8 +501,13 @@ impl AsyncOrchestrator {
                     }
                 }
                 _ => {
-                    eprintln!("[Build] [MODPROBED] ⚠ modprobed-db not found, skipping initialization");
-                    self.send_log_event("modprobed-db not installed - skipping database initialization".to_string()).await;
+                    eprintln!(
+                        "[Build] [MODPROBED] ⚠ modprobed-db not found, skipping initialization"
+                    );
+                    self.send_log_event(
+                        "modprobed-db not installed - skipping database initialization".to_string(),
+                    )
+                    .await;
                     // Non-fatal: continue with build
                 }
             }
@@ -422,8 +531,11 @@ impl AsyncOrchestrator {
     /// Finalizes config via Rule Engine, applies GPU/driver policies.
     pub async fn configure(&self) -> Result<()> {
         // Send status update at phase start
-        self.send_status("Configuration: Finalizing kernel configuration via Rule Engine...".to_string()).await;
-        
+        self.send_status(
+            "Configuration: Finalizing kernel configuration via Rule Engine...".to_string(),
+        )
+        .await;
+
         // Validate phase
         let state = self.state.read().await;
         if state.phase != BuildPhaseState::Configuration {
@@ -447,21 +559,38 @@ impl AsyncOrchestrator {
         //
         // This ensures a single source of truth for all configuration logic.
         use crate::config::finalizer;
-        
+
         let mut finalized_config = finalizer::finalize_kernel_config(config, &hardware)
             .map_err(|e| format!("Failed to finalize configuration: {}", e))?;
 
         eprintln!("[Build] [CONFIG] ✓ Configuration finalized via Rule Engine");
         eprintln!("[Build] [CONFIG]   - Profile: {}", finalized_config.profile);
         eprintln!("[Build] [CONFIG]   - HZ: {}", finalized_config.hz);
-        eprintln!("[Build] [CONFIG]   - Preemption: {}", finalized_config.preemption);
-        eprintln!("[Build] [CONFIG]   - Clang: {}", finalized_config.force_clang);
-        eprintln!("[Build] [CONFIG]   - LTO Type: {:?}", finalized_config.lto_type);
-        eprintln!("[Build] [CONFIG]   - LTO Shield Modules: {:?}", finalized_config.lto_shield_modules);
-        eprintln!("[Build] [CONFIG]   - Driver Exclusions: {}", finalized_config.driver_exclusions.len());
+        eprintln!(
+            "[Build] [CONFIG]   - Preemption: {}",
+            finalized_config.preemption
+        );
+        eprintln!(
+            "[Build] [CONFIG]   - Clang: {}",
+            finalized_config.force_clang
+        );
+        eprintln!(
+            "[Build] [CONFIG]   - LTO Type: {:?}",
+            finalized_config.lto_type
+        );
+        eprintln!(
+            "[Build] [CONFIG]   - LTO Shield Modules: {:?}",
+            finalized_config.lto_shield_modules
+        );
+        eprintln!(
+            "[Build] [CONFIG]   - Driver Exclusions: {}",
+            finalized_config.driver_exclusions.len()
+        );
 
         // Apply GPU policy and resolve dynamic version (STEP 2: Dynamic Versioning)
-        let configured = executor::configure_build(&mut finalized_config, &hardware, self.build_tx.as_ref()).await?;
+        let configured =
+            executor::configure_build(&mut finalized_config, &hardware, self.build_tx.as_ref())
+                .await?;
 
         // Update internal state with configured kernel config
         {
@@ -481,8 +610,11 @@ impl AsyncOrchestrator {
     /// Delegates PKGBUILD and .config patching to KernelPatcher.
     pub async fn patch(&self) -> Result<()> {
         // Send status update at phase start
-        self.send_status("Patching: Applying PKGBUILD and kernel configuration patches...".to_string()).await;
-        
+        self.send_status(
+            "Patching: Applying PKGBUILD and kernel configuration patches...".to_string(),
+        )
+        .await;
+
         // Validate phase
         let state = self.state.read().await;
         if state.phase != BuildPhaseState::Patching {
@@ -500,10 +632,18 @@ impl AsyncOrchestrator {
 
         // CRITICAL FIX: Pass workspace root to patcher for MPL injection
         // This enables the patcher to inject .goatd_metadata sourcing into PKGBUILD
-        let workspace_root = self.kernel_path.canonicalize()
+        let workspace_root = self
+            .kernel_path
+            .canonicalize()
             .unwrap_or_else(|_| self.kernel_path.clone());
-        build_env_vars.insert("GOATD_WORKSPACE_ROOT".to_string(), workspace_root.to_string_lossy().to_string());
-        eprintln!("[Build] [ORCHESTRATOR] Set GOATD_WORKSPACE_ROOT={}", workspace_root.display());
+        build_env_vars.insert(
+            "GOATD_WORKSPACE_ROOT".to_string(),
+            workspace_root.to_string_lossy().to_string(),
+        );
+        eprintln!(
+            "[Build] [ORCHESTRATOR] Set GOATD_WORKSPACE_ROOT={}",
+            workspace_root.display()
+        );
 
         // LTO configuration
         let lto_level = match config.lto_type {
@@ -525,19 +665,29 @@ impl AsyncOrchestrator {
 
         // Profile name for rebranding
         build_env_vars.insert("GOATD_PROFILE_NAME".to_string(), config.profile.clone());
-        build_env_vars.insert("GOATD_PROFILE_SUFFIX".to_string(), format!("-GOATd-{}", config.profile));
+        build_env_vars.insert(
+            "GOATD_PROFILE_SUFFIX".to_string(),
+            format!("-GOATd-{}", config.profile),
+        );
 
         // Additional configuration metadata
-        build_env_vars.insert("GOATD_KERNEL_HARDENING".to_string(), config.hardening.to_string());
+        build_env_vars.insert(
+            "GOATD_KERNEL_HARDENING".to_string(),
+            config.hardening.to_string(),
+        );
         build_env_vars.insert(
             "GOATD_PREEMPTION_MODEL".to_string(),
-            config.config_options.get("_PREEMPTION_MODEL")
+            config
+                .config_options
+                .get("_PREEMPTION_MODEL")
                 .cloned()
                 .unwrap_or_else(|| "CONFIG_PREEMPT_VOLUNTARY=y".to_string()),
         );
         build_env_vars.insert(
             "GOATD_HZ_VALUE".to_string(),
-            config.config_options.get("_HZ_VALUE")
+            config
+                .config_options
+                .get("_HZ_VALUE")
                 .cloned()
                 .unwrap_or_else(|| "CONFIG_HZ=300".to_string()),
         );
@@ -549,23 +699,28 @@ impl AsyncOrchestrator {
             "GOATD_ENABLE_SECURE_BOOT".to_string(),
             if config.secure_boot { "1" } else { "0" }.to_string(),
         );
-        
+
         // Hardening flag: only set if profile specifically requests "Hardened" status
         let hardening_enabled = config.hardening == crate::models::HardeningLevel::Hardened;
         build_env_vars.insert(
             "GOATD_ENABLE_HARDENING".to_string(),
             if hardening_enabled { "1" } else { "0" }.to_string(),
         );
-        
+
         build_env_vars.insert(
             "GOATD_ENABLE_SELINUX_APPARMOR".to_string(),
             if hardening_enabled { "1" } else { "0" }.to_string(),
         );
-        
+
         // Native optimizations configuration (-march=native)
         build_env_vars.insert(
             "GOATD_NATIVE_OPTIMIZATIONS".to_string(),
-            if config.native_optimizations { "1" } else { "0" }.to_string(),
+            if config.native_optimizations {
+                "1"
+            } else {
+                "0"
+            }
+            .to_string(),
         );
         if config.native_optimizations {
             eprintln!("[Build] [ORCHESTRATOR] Native optimizations enabled (-march=native)");
@@ -578,7 +733,7 @@ impl AsyncOrchestrator {
             "GOATD_USE_POLLY".to_string(),
             if config.use_polly { "1" } else { "0" }.to_string(),
         );
-        
+
         // CRITICAL FIX: Export Polly optimization flags for PHASE G1 injection
         // These flags are used in the prebuild LTO enforcer template to append Polly
         // optimizations to CFLAGS/CXXFLAGS/LDFLAGS during the kernel build
@@ -587,12 +742,13 @@ impl AsyncOrchestrator {
             // -mllvm -polly: Enable the Polly loop optimizer
             // -mllvm -polly-vectorizer=stripmine: Use stripmine vectorizer (better for kernels)
             // -mllvm -polly-opt-fusion=max: Maximize loop fusion opportunities
-            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max".to_string()
+            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max"
+                .to_string()
         } else {
             String::new()
         };
         build_env_vars.insert("GOATD_POLLY_FLAGS".to_string(), polly_flags.clone());
-        
+
         if config.use_polly {
             eprintln!("[Build] [ORCHESTRATOR] Polly optimization enabled");
             eprintln!("[Build] [ORCHESTRATOR] Polly flags: {}", polly_flags);
@@ -603,10 +759,19 @@ impl AsyncOrchestrator {
         // MGLRU configuration
         if config.use_mglru {
             build_env_vars.insert("GOATD_USE_MGLRU".to_string(), "1".to_string());
-            build_env_vars.insert("GOATD_MGLRU_CONFIG_LRU_GEN".to_string(), "CONFIG_LRU_GEN=y".to_string());
-            build_env_vars.insert("GOATD_MGLRU_CONFIG_LRU_GEN_ENABLED".to_string(), "CONFIG_LRU_GEN_ENABLED=y".to_string());
-            build_env_vars.insert("GOATD_MGLRU_CONFIG_LRU_GEN_STATS".to_string(), "CONFIG_LRU_GEN_STATS=y".to_string());
-            
+            build_env_vars.insert(
+                "GOATD_MGLRU_CONFIG_LRU_GEN".to_string(),
+                "CONFIG_LRU_GEN=y".to_string(),
+            );
+            build_env_vars.insert(
+                "GOATD_MGLRU_CONFIG_LRU_GEN_ENABLED".to_string(),
+                "CONFIG_LRU_GEN_ENABLED=y".to_string(),
+            );
+            build_env_vars.insert(
+                "GOATD_MGLRU_CONFIG_LRU_GEN_STATS".to_string(),
+                "CONFIG_LRU_GEN_STATS=y".to_string(),
+            );
+
             // CRITICAL FIX: Construct concatenated GOATD_MGLRU_CONFIGS string
             // Concatenate all LRU_GEN* config options into a single string for patcher
             // CRITICAL: Use newlines instead of spaces to properly separate entries
@@ -616,9 +781,12 @@ impl AsyncOrchestrator {
             mglru_configs.push_str("CONFIG_LRU_GEN_ENABLED=y");
             mglru_configs.push('\n');
             mglru_configs.push_str("CONFIG_LRU_GEN_STATS=y");
-            
+
             build_env_vars.insert("GOATD_MGLRU_CONFIGS".to_string(), mglru_configs.clone());
-            eprintln!("[Build] [ORCHESTRATOR] Constructed GOATD_MGLRU_CONFIGS: {}", mglru_configs);
+            eprintln!(
+                "[Build] [ORCHESTRATOR] Constructed GOATD_MGLRU_CONFIGS: {}",
+                mglru_configs
+            );
         } else {
             build_env_vars.insert("GOATD_USE_MGLRU".to_string(), "0".to_string());
         }
@@ -637,17 +805,25 @@ impl AsyncOrchestrator {
         // determining which GPU modules need LTO shielding. The finalized config
         // contains the resolved lto_shield_modules field.
         let shield_modules = config.lto_shield_modules.clone();
-        eprintln!("[Build] [ORCHESTRATOR] Using {} LTO-shielded modules from Finalizer: {:?}",
-            shield_modules.len(), shield_modules);
+        eprintln!(
+            "[Build] [ORCHESTRATOR] Using {} LTO-shielded modules from Finalizer: {:?}",
+            shield_modules.len(),
+            shield_modules
+        );
 
         // Execute the unified patcher with finalized shield modules
         match patcher.execute_full_patch_with_env(shield_modules, config_options, build_env_vars) {
             Ok(()) => {
-                eprintln!("[Build] [SUCCESS] Unified patcher completed all PKGBUILD and .config patches");
+                eprintln!(
+                    "[Build] [SUCCESS] Unified patcher completed all PKGBUILD and .config patches"
+                );
                 self.record_patch_result(true).await;
             }
             Err(e) => {
-                eprintln!("[Build] [WARNING] Patcher error: {:?}, continuing with build anyway", e);
+                eprintln!(
+                    "[Build] [WARNING] Patcher error: {:?}, continuing with build anyway",
+                    e
+                );
                 // Don't fail the entire build - the .config and PKGBUILD may still be usable
                 self.record_patch_result(false).await;
             }
@@ -656,7 +832,10 @@ impl AsyncOrchestrator {
         // Update progress: Patching phase is 8-10%
         let progress = 10;
         self.set_progress(progress).await;
-        eprintln!("[Build] [PROGRESS] Unified patching complete: {}%", progress);
+        eprintln!(
+            "[Build] [PROGRESS] Unified patching complete: {}%",
+            progress
+        );
 
         // Transition to Building phase
         self.transition_phase(BuildPhaseState::Building).await
@@ -665,8 +844,9 @@ impl AsyncOrchestrator {
     /// Executes kernel build, maps progress to orchestration state.
     pub async fn build(&self) -> Result<()> {
         // Send status update at phase start
-        self.send_status("Building: Starting kernel compilation...".to_string()).await;
-        
+        self.send_status("Building: Starting kernel compilation...".to_string())
+            .await;
+
         // Validate phase
         let state = self.state.read().await;
         if state.phase != BuildPhaseState::Building {
@@ -683,77 +863,90 @@ impl AsyncOrchestrator {
         let cancel_rx = self.cancel_rx.clone();
 
         // CRITICAL FIX: Create callback that properly forwards logs to channel
-         // The callback is called synchronously from executor's event loop
-         // CRITICAL: The callback is the FINAL log pipe before UI - must be exempt from INITIALIZING gate
-         let callback_fn = move |output: String, progress: Option<u32>| {
-             // CRITICAL: Send to UI channel with non-blocking semantics
-             // Build/Log callbacks are explicitly EXEMPT from INITIALIZING gate
-             if let Some(ref tx) = orch.build_tx {
-                 // Use try_send for non-blocking delivery
-                 // With large buffer (65,536), try_send will not overflow
-                 
-                 // Detect if line is a high-level status message (compilation status)
-                 let is_status = output.starts_with("Compiling:")
-                     || output.starts_with("Linking:")
-                     || output.starts_with("Building:")
-                     || output.starts_with("Linking vmlinux")
-                     || output.starts_with("Compiling");
-                 
-                 let event = if is_status {
-                     crate::ui::controller::BuildEvent::StatusUpdate(output)
-                 } else {
-                     crate::ui::controller::BuildEvent::Log(output)
-                 };
-                 
-                 // try_send fails only if receiver dropped or buffer full
-                 match tx.try_send(event) {
-                     Ok(()) => {
-                         // Event successfully queued for UI delivery
-                     }
-                     Err(_) => {
-                         // Receiver was dropped or buffer full - log to stderr as final fallback
-                         eprintln!("[Build] [LOG-PIPE] WARNING: Receiver dropped or buffer full, log lost to disk fallback");
-                     }
-                 }
-             }
-            
-             // Update progress if available
-             // Map build progress 0-100% to orchestration progress 10-90%
-             if let Some(build_progress) = progress {
-                 let orchestration_progress = 10 + (build_progress * 80 / 100);
-                 eprintln!("[Build] [PROGRESS] Building: {}% (orchestration: {}%)", build_progress, orchestration_progress);
-                 
-                 // CRITICAL: Use try_write for immediate progress updates
-                 // This avoids spawning async tasks that might be lost
-                 if let Ok(mut state) = orch.state.try_write() {
-                     state.set_progress(orchestration_progress);
-                 } else {
-                     // If lock is held, spawn a task to update eventually
-                     let state_clone = orch.state.clone();
-                     tokio::spawn(async move {
-                         state_clone.write().await.set_progress(orchestration_progress);
-                     });
-                 }
-                 
-                 // CRITICAL: Emit Progress event to UI channel for real-time UI updates
-                 if let Some(ref tx) = orch.build_tx {
-                     let progress_f32 = (orchestration_progress as f32) / 100.0;
-                     let _ = tx.try_send(crate::ui::controller::BuildEvent::Progress(progress_f32));
-                 }
-             }
-         };
+        // The callback is called synchronously from executor's event loop
+        // CRITICAL: The callback is the FINAL log pipe before UI - must be exempt from INITIALIZING gate
+        let callback_fn = move |output: String, progress: Option<u32>| {
+            // CRITICAL: Send to UI channel with non-blocking semantics
+            // Only major status updates go to UI; raw logs go to LogCollector
+            if let Some(ref tx) = orch.build_tx {
+                // Detect if line is a high-level status message (compilation status)
+                let is_status = output.starts_with("Compiling:")
+                    || output.starts_with("Linking:")
+                    || output.starts_with("Building:")
+                    || output.starts_with("Linking vmlinux")
+                    || output.starts_with("Compiling");
+
+                // Only emit StatusUpdate for high-level status lines
+                // Raw logs go to LogCollector (via main.rs bridge)
+                if is_status {
+                    // try_send fails only if receiver dropped or buffer full
+                    match tx.try_send(crate::ui::controller::BuildEvent::StatusUpdate(output)) {
+                        Ok(()) => {
+                            // Event successfully queued for UI delivery
+                        }
+                        Err(_) => {
+                            // Receiver was dropped or buffer full - log to stderr as final fallback
+                            eprintln!("[Build] [LOG-PIPE] WARNING: Receiver dropped or buffer full, status update lost to disk fallback");
+                        }
+                    }
+                }
+            }
+
+            // Update progress if available
+            // Map build progress 0-100% to orchestration progress 10-90%
+            if let Some(build_progress) = progress {
+                let orchestration_progress = 10 + (build_progress * 80 / 100);
+                eprintln!(
+                    "[Build] [PROGRESS] Building: {}% (orchestration: {}%)",
+                    build_progress, orchestration_progress
+                );
+
+                // CRITICAL: Use try_write for immediate progress updates
+                // This avoids spawning async tasks that might be lost
+                if let Ok(mut state) = orch.state.try_write() {
+                    state.set_progress(orchestration_progress);
+                } else {
+                    // If lock is held, spawn a task to update eventually
+                    let state_clone = orch.state.clone();
+                    tokio::spawn(async move {
+                        state_clone
+                            .write()
+                            .await
+                            .set_progress(orchestration_progress);
+                    });
+                }
+
+                // CRITICAL: Emit Progress event to UI channel for real-time UI updates
+                if let Some(ref tx) = orch.build_tx {
+                    let progress_f32 = (orchestration_progress as f32) / 100.0;
+                    let _ = tx.try_send(crate::ui::controller::BuildEvent::Progress(progress_f32));
+                }
+            }
+        };
 
         // CRITICAL: Call the real build executor with logging callback and timeout
-         eprintln!("[Build] [EXECUTOR] Launching kernel build process");
-         executor::run_kernel_build(&self.kernel_path, &config, callback_fn, cancel_rx, self.log_collector.clone(), self.test_timeout).await?;
-         eprintln!("[Build] [EXECUTOR] Kernel build process completed");
+        eprintln!("[Build] [EXECUTOR] Launching kernel build process");
+        executor::run_kernel_build(
+            &self.kernel_path,
+            &config,
+            callback_fn,
+            cancel_rx,
+            self.log_collector.clone(),
+            self.test_timeout,
+        )
+        .await?;
+        eprintln!("[Build] [EXECUTOR] Kernel build process completed");
 
         // Transition to Validation phase
         self.transition_phase(BuildPhaseState::Validation).await
     }
 
     /// Kernel build with output streaming callbacks.
-    pub async fn build_with_output<F, G>(&self, mut output_handler: F, timer_handler: G) -> Result<()>
+    pub async fn build_with_output<F, G>(
+        &self,
+        mut output_handler: F,
+        timer_handler: G,
+    ) -> Result<()>
     where
         F: FnMut(String) + Send + 'static,
         G: FnMut(u64) + Send + 'static,
@@ -774,7 +967,7 @@ impl AsyncOrchestrator {
 
         // CRITICAL FIX: Capture self.state for progress updates in the callback
         let state_arc = self.state.clone();
-        
+
         // Capture build_tx for emitting Progress events
         let build_tx_clone = self.build_tx.clone();
 
@@ -794,35 +987,51 @@ impl AsyncOrchestrator {
         };
 
         // Call the real build executor with output streaming and timeout
-         executor::run_kernel_build(&self.kernel_path, &config, move |output, progress| {
-              // CRITICAL FIX: Build/Log callbacks are EXEMPT from INITIALIZING gate
-              // Pass output to provided handler WITHOUT diagnostic prefixes that confuse the log pipe
-              output_handler(output);
-             
-             // CRITICAL FIX: Actually update progress if provided
-             if let Some(build_progress) = progress {
-                 eprintln!("[Build] [PROGRESS] Building: {}% (orchestration: {}%)", build_progress, 10 + (build_progress * 80 / 100));
-                 // Map build progress 0-100% to orchestration progress 10-90%
-                 let orchestration_progress = 10 + (build_progress * 80 / 100);
-                 
-                 // Use try_write for immediate updates, fallback to async task
-                 if let Ok(mut state) = state_arc.try_write() {
-                     state.set_progress(orchestration_progress);
-                 } else {
-                     // If lock is held, spawn async task to update eventually
-                     let state_clone = state_arc.clone();
-                     tokio::spawn(async move {
-                         state_clone.write().await.set_progress(orchestration_progress);
-                     });
-                 }
-                 
-                 // Emit Progress event to UI channel for real-time UI updates
-                 if let Some(ref tx) = build_tx_clone {
-                     let progress_f32 = (orchestration_progress as f32) / 100.0;
-                     let _ = tx.try_send(crate::ui::controller::BuildEvent::Progress(progress_f32));
-                 }
-             }
-         }, cancel_rx, self.log_collector.clone(), self.test_timeout).await?;
+        executor::run_kernel_build(
+            &self.kernel_path,
+            &config,
+            move |output, progress| {
+                // CRITICAL FIX: Build/Log callbacks are EXEMPT from INITIALIZING gate
+                // Pass output to provided handler WITHOUT diagnostic prefixes that confuse the log pipe
+                output_handler(output);
+
+                // CRITICAL FIX: Actually update progress if provided
+                if let Some(build_progress) = progress {
+                    eprintln!(
+                        "[Build] [PROGRESS] Building: {}% (orchestration: {}%)",
+                        build_progress,
+                        10 + (build_progress * 80 / 100)
+                    );
+                    // Map build progress 0-100% to orchestration progress 10-90%
+                    let orchestration_progress = 10 + (build_progress * 80 / 100);
+
+                    // Use try_write for immediate updates, fallback to async task
+                    if let Ok(mut state) = state_arc.try_write() {
+                        state.set_progress(orchestration_progress);
+                    } else {
+                        // If lock is held, spawn async task to update eventually
+                        let state_clone = state_arc.clone();
+                        tokio::spawn(async move {
+                            state_clone
+                                .write()
+                                .await
+                                .set_progress(orchestration_progress);
+                        });
+                    }
+
+                    // Emit Progress event to UI channel for real-time UI updates
+                    if let Some(ref tx) = build_tx_clone {
+                        let progress_f32 = (orchestration_progress as f32) / 100.0;
+                        let _ =
+                            tx.try_send(crate::ui::controller::BuildEvent::Progress(progress_f32));
+                    }
+                }
+            },
+            cancel_rx,
+            self.log_collector.clone(),
+            self.test_timeout,
+        )
+        .await?;
 
         // Cancel the timer task when build completes
         timer_handle.abort();
@@ -853,14 +1062,18 @@ impl AsyncOrchestrator {
         // This ensures the Patcher has exclusive authority over filesystem access.
         use crate::kernel::patcher::KernelPatcher;
         let patcher = KernelPatcher::new(self.kernel_path.clone());
-        let artifacts = patcher.find_build_artifacts()
+        let artifacts = patcher
+            .find_build_artifacts()
             .map_err(|e| format!("Failed to discover build artifacts: {:?}", e))?;
 
         if artifacts.is_empty() {
             return Err("Kernel image not found after build: expected *.pkg.tar.zst or arch/x86/boot/bzImage".into());
         }
 
-        eprintln!("[Build] [VALIDATION] Found {} build artifacts", artifacts.len());
+        eprintln!(
+            "[Build] [VALIDATION] Found {} build artifacts",
+            artifacts.len()
+        );
 
         // Verify LTO was applied if requested
         if config.lto_type != crate::models::LtoType::None {
@@ -895,12 +1108,19 @@ impl AsyncOrchestrator {
     ///
     /// This ensures Polkit can cache authorization across all steps, preventing
     /// multiple sudo/pkexec prompts.
-    #[deprecated(since = "3.0.0", note = "Use AppController::install_kernel_async() instead")]
+    #[deprecated(
+        since = "3.0.0",
+        note = "Use AppController::install_kernel_async() instead"
+    )]
     pub async fn install(&self) -> Result<()> {
-        eprintln!("[Build] [INSTALL] ⚠ DEPRECATED: Direct AsyncOrchestrator::install() is no longer used");
+        eprintln!(
+            "[Build] [INSTALL] ⚠ DEPRECATED: Direct AsyncOrchestrator::install() is no longer used"
+        );
         eprintln!("[Build] [INSTALL] ℹ Installation is now handled by AppController::install_kernel_async()");
-        eprintln!("[Build] [INSTALL] ℹ This ensures unified privilege escalation with Polkit caching");
-        
+        eprintln!(
+            "[Build] [INSTALL] ℹ This ensures unified privilege escalation with Polkit caching"
+        );
+
         // Transition directly to Completed without doing anything
         // The actual installation will be triggered by the UI Controller
         self.transition_phase(BuildPhaseState::Completed).await
@@ -910,7 +1130,7 @@ impl AsyncOrchestrator {
     pub async fn generate_mglru_runtime_tuning(&self) -> String {
         let state = self.state.read().await;
         let config = &state.config;
-        
+
         if !config.use_mglru {
             return String::new();
         }
@@ -926,17 +1146,26 @@ impl AsyncOrchestrator {
 
         if enabled_mask > 0 {
             tuning.push_str("# Enable MGLRU subsystem\n");
-            tuning.push_str(&format!("echo {} > /sys/module/lru_gen/parameters/lru_gen_enabled\n", enabled_mask));
-            tuning.push_str(&format!("echo {} > /sys/module/lru_gen/parameters/lru_gen_min_ttl_ms\n", min_ttl_ms));
+            tuning.push_str(&format!(
+                "echo {} > /sys/module/lru_gen/parameters/lru_gen_enabled\n",
+                enabled_mask
+            ));
+            tuning.push_str(&format!(
+                "echo {} > /sys/module/lru_gen/parameters/lru_gen_min_ttl_ms\n",
+                min_ttl_ms
+            ));
             tuning.push_str("\n# Verify MGLRU is enabled\n");
             tuning.push_str("cat /sys/module/lru_gen/parameters/lru_gen_enabled\n");
-            
+
             eprintln!("[Build] [MGLRU] Generated runtime tuning for {} profile: enabled=0x{:04x}, min_ttl_ms={}",
                 config.profile, enabled_mask, min_ttl_ms);
         } else {
             tuning.push_str("# MGLRU disabled for this build\n");
             tuning.push_str("echo 0 > /sys/module/lru_gen/parameters/lru_gen_enabled\n");
-            eprintln!("[Build] [MGLRU] MGLRU disabled for {} profile", config.profile);
+            eprintln!(
+                "[Build] [MGLRU] MGLRU disabled for {} profile",
+                config.profile
+            );
         }
 
         tuning
@@ -1027,7 +1256,18 @@ mod tests {
         };
 
         let (_, cancel_rx) = tokio::sync::watch::channel(false);
-        let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp"), PathBuf::from("/tmp/kernel-source"), None, cancel_rx, None, None).await;
+        let orch = AsyncOrchestrator::new(
+            hw,
+            config,
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/kernel-source"),
+            None,
+            cancel_rx,
+            None,
+            None,
+            None,
+        )
+        .await;
         assert!(orch.is_ok());
 
         let orch = orch.unwrap();
@@ -1089,9 +1329,19 @@ mod tests {
         };
 
         let (_, cancel_rx) = tokio::sync::watch::channel(false);
-        let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp"), PathBuf::from("/tmp/kernel-source"), None, cancel_rx, None, None)
-            .await
-            .unwrap();
+        let orch = AsyncOrchestrator::new(
+            hw,
+            config,
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/kernel-source"),
+            None,
+            cancel_rx,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         orch.set_progress(50).await;
         assert_eq!(orch.current_progress().await, 50);
@@ -1154,14 +1404,30 @@ mod tests {
         };
 
         let (_, cancel_rx) = tokio::sync::watch::channel(false);
-        let orch = AsyncOrchestrator::new(hw, config, PathBuf::from("/tmp"), PathBuf::from("/tmp/kernel-source"), None, cancel_rx, None, None)
-            .await
-            .unwrap();
+        let orch = AsyncOrchestrator::new(
+            hw,
+            config,
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/kernel-source"),
+            None,
+            cancel_rx,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
-        assert!(orch.transition_phase(BuildPhaseState::Configuration).await.is_ok());
+        assert!(orch
+            .transition_phase(BuildPhaseState::Configuration)
+            .await
+            .is_ok());
         assert_eq!(orch.current_phase().await, BuildPhaseState::Configuration);
 
         // Invalid transition should fail
-        assert!(orch.transition_phase(BuildPhaseState::Validation).await.is_err());
+        assert!(orch
+            .transition_phase(BuildPhaseState::Validation)
+            .await
+            .is_err());
     }
 }

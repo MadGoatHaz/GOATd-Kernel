@@ -8,8 +8,8 @@
 //! Detection follows a priority order: NVMe > SSD > HDD, with HDD as
 //! the safe fallback if detection fails or no devices are found.
 
-use crate::models::{StorageType, DiskInfo};
 use crate::error::HardwareError;
+use crate::models::{DiskInfo, StorageType};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -45,7 +45,7 @@ pub fn detect_storage_model() -> Result<String, HardwareError> {
                 if filename.starts_with("loop") || filename.starts_with("ram") {
                     continue;
                 }
-                
+
                 // Try to read model from device directory
                 let model_path = entry.path().join("device/model");
                 if let Ok(model) = fs::read_to_string(&model_path) {
@@ -57,7 +57,7 @@ pub fn detect_storage_model() -> Result<String, HardwareError> {
             }
         }
     }
-    
+
     Ok("Unknown".to_string())
 }
 
@@ -65,10 +65,7 @@ pub fn detect_storage_model() -> Result<String, HardwareError> {
 pub fn detect_disk_free_gb() -> Result<u32, HardwareError> {
     use std::process::Command;
 
-    match Command::new("df")
-        .arg("/")
-        .output()
-    {
+    match Command::new("df").arg("/").output() {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             // Parse df output: typically: Filesystem 1K-blocks Used Available Use% Mounted on
@@ -298,7 +295,7 @@ mod tests {
         // Just verify it returns Ok with some StorageType
         let result = detect_storage_type();
         assert!(result.is_ok());
-        
+
         // Verify the returned value is a valid StorageType
         if let Ok(storage_type) = result {
             // Should be one of the three valid types

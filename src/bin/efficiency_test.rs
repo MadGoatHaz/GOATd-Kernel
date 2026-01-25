@@ -1,7 +1,7 @@
+use libc::{cpu_set_t, pipe, sched_setaffinity, CPU_SET, CPU_ZERO};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
-use libc::{pipe, sched_setaffinity, cpu_set_t, CPU_ZERO, CPU_SET};
 
 const NUM_EXCHANGES: u32 = 100_000;
 

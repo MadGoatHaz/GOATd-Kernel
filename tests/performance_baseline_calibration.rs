@@ -8,12 +8,12 @@
 //!
 //! Expected overhead: ~50µs due to cache contention and ring buffer overhead
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use goatd_kernel::system::performance::collector::{
     CollectionMode, LatencyCollector, DISABLE_MSR_POLLER,
 };
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 /// Runs a calibration cycle in the specified mode and collects statistics
 fn run_calibration_mode(
@@ -22,7 +22,8 @@ fn run_calibration_mode(
     interval_ms: u64,
     warmup_samples: u64,
 ) -> CalibrationResult {
-    println!("\n[CALIBRATION] Running {} mode for {} ms (interval: {} ms)",
+    println!(
+        "\n[CALIBRATION] Running {} mode for {} ms (interval: {} ms)",
         match mode {
             CollectionMode::Pure => "PURE",
             CollectionMode::Full => "FULL",
@@ -87,15 +88,16 @@ fn run_calibration_mode(
     };
 
     // For Pure mode, get shared references to track statistics
-    let (pure_max_latency_arc, pure_sum_latency_arc, pure_sample_count_arc) = if mode == CollectionMode::Pure {
-        (
-            Some(collector.get_max_latency_pure_arc()),
-            Some(collector.get_pure_mode_sum_latency_arc()),
-            Some(collector.get_pure_mode_sample_count_arc()),
-        )
-    } else {
-        (None, None, None)
-    };
+    let (pure_max_latency_arc, pure_sum_latency_arc, pure_sample_count_arc) =
+        if mode == CollectionMode::Pure {
+            (
+                Some(collector.get_max_latency_pure_arc()),
+                Some(collector.get_pure_mode_sum_latency_arc()),
+                Some(collector.get_pure_mode_sample_count_arc()),
+            )
+        } else {
+            (None, None, None)
+        };
 
     // Spawn collector thread
     let collector_handle = std::thread::spawn(move || {
@@ -115,7 +117,7 @@ fn run_calibration_mode(
         while let Ok(latency_ns) = consumer.pop() {
             total_samples += 1;
             samples_after_warmup += 1;
-            
+
             max_latency_ns = max_latency_ns.max(latency_ns);
             min_latency_ns = min_latency_ns.min(latency_ns);
             sum_latency_ns = sum_latency_ns.saturating_add(latency_ns);
@@ -145,7 +147,11 @@ fn run_calibration_mode(
     let spikes = spike_count.load(Ordering::Relaxed);
 
     // For Pure mode, extract statistics from arc instead of ring buffer
-    if let (Some(max_arc), Some(sum_arc), Some(count_arc)) = (&pure_max_latency_arc, &pure_sum_latency_arc, &pure_sample_count_arc) {
+    if let (Some(max_arc), Some(sum_arc), Some(count_arc)) = (
+        &pure_max_latency_arc,
+        &pure_sum_latency_arc,
+        &pure_sample_count_arc,
+    ) {
         max_latency_ns = max_arc.load(Ordering::Relaxed);
         let pure_sum = sum_arc.load(Ordering::Relaxed);
         let pure_count = count_arc.load(Ordering::Relaxed);
@@ -160,7 +166,8 @@ fn run_calibration_mode(
         0
     };
 
-    println!("[CALIBRATION] {} Mode Results:",
+    println!(
+        "[CALIBRATION] {} Mode Results:",
         match mode {
             CollectionMode::Pure => "PURE",
             CollectionMode::Full => "FULL",
@@ -170,9 +177,21 @@ fn run_calibration_mode(
     println!("  Samples after warmup: {}", samples_after_warmup);
     println!("  Dropped samples: {}", dropped);
     println!("  Spikes detected: {}", spikes);
-    println!("  Min latency: {} ns ({:.3} µs)", min_latency_ns, min_latency_ns as f32 / 1000.0);
-    println!("  Max latency: {} ns ({:.3} µs)", max_latency_ns, max_latency_ns as f32 / 1000.0);
-    println!("  Average latency: {} ns ({:.3} µs)", avg_latency_ns, avg_latency_ns as f32 / 1000.0);
+    println!(
+        "  Min latency: {} ns ({:.3} µs)",
+        min_latency_ns,
+        min_latency_ns as f32 / 1000.0
+    );
+    println!(
+        "  Max latency: {} ns ({:.3} µs)",
+        max_latency_ns,
+        max_latency_ns as f32 / 1000.0
+    );
+    println!(
+        "  Average latency: {} ns ({:.3} µs)",
+        avg_latency_ns,
+        avg_latency_ns as f32 / 1000.0
+    );
 
     CalibrationResult {
         mode,
@@ -248,7 +267,10 @@ fn test_baseline_calibration_pure_vs_full() {
 
     println!("Pure mode average latency: {:.3} µs", pure_avg);
     println!("Full mode average latency: {:.3} µs", full_avg);
-    println!("Overhead (Full - Pure): {:.3} µs ({:.1}%)", overhead_us, overhead_pct);
+    println!(
+        "Overhead (Full - Pure): {:.3} µs ({:.1}%)",
+        overhead_us, overhead_pct
+    );
 
     // Max latency comparison
     let pure_max = pure_result.max_latency_ns as f32 / 1000.0;
@@ -283,7 +305,10 @@ fn test_baseline_calibration_pure_vs_full() {
         println!("⚠ Ring buffer overhead: {:.3} µs", overhead_us);
         println!("  → This could contribute to the observed regression");
     } else {
-        println!("✗ Ring buffer overhead is significant: {:.3} µs", overhead_us);
+        println!(
+            "✗ Ring buffer overhead is significant: {:.3} µs",
+            overhead_us
+        );
         println!("  → This is likely the primary cause of latency regression");
     }
 
@@ -296,7 +321,10 @@ fn test_baseline_calibration_pure_vs_full() {
 
     // Verify warmup worked
     if pure_result.samples_after_warmup > 0 {
-        println!("✓ Warmup phase completed ({} samples skipped)", warmup_samples);
+        println!(
+            "✓ Warmup phase completed ({} samples skipped)",
+            warmup_samples
+        );
     } else {
         println!("✗ Warmup phase did not skip samples as expected");
     }
@@ -326,11 +354,17 @@ fn test_baseline_calibration_warmup_effectiveness() {
 
     println!("\nWarmup Analysis:");
     println!("Expected warmup samples skipped: {}", warmup_samples);
-    println!("Actual samples after warmup: {}", result.samples_after_warmup);
+    println!(
+        "Actual samples after warmup: {}",
+        result.samples_after_warmup
+    );
 
     // Verify cleanup happened
     if result.samples_after_warmup > 0 {
-        println!("✓ Warmup phase successfully skipped {} samples", warmup_samples);
+        println!(
+            "✓ Warmup phase successfully skipped {} samples",
+            warmup_samples
+        );
     } else {
         println!("✗ Warmup phase did not work as expected");
     }
@@ -351,12 +385,7 @@ fn test_baseline_calibration_pure_mode_minimal() {
     println!("========================================");
     println!("Purpose: Verify Pure mode is strictly minimal");
 
-    let result = run_calibration_mode(
-        CollectionMode::Pure,
-        1000,
-        1,
-        100,
-    );
+    let result = run_calibration_mode(CollectionMode::Pure, 1000, 1, 100);
 
     println!("\nPure Mode Characteristics:");
     println!("• Clock readings: ✓ (baseline timing)");
@@ -366,14 +395,29 @@ fn test_baseline_calibration_pure_mode_minimal() {
     println!("• Spike detection: Limited (no SMI lookup)");
 
     println!("\nResult Statistics:");
-    println!("Min latency: {:.3} µs", result.min_latency_ns as f32 / 1000.0);
-    println!("Max latency: {:.3} µs", result.max_latency_ns as f32 / 1000.0);
-    println!("Avg latency: {:.3} µs", result.avg_latency_ns as f32 / 1000.0);
+    println!(
+        "Min latency: {:.3} µs",
+        result.min_latency_ns as f32 / 1000.0
+    );
+    println!(
+        "Max latency: {:.3} µs",
+        result.max_latency_ns as f32 / 1000.0
+    );
+    println!(
+        "Avg latency: {:.3} µs",
+        result.avg_latency_ns as f32 / 1000.0
+    );
 
     // Pure mode should show lower max latency due to skipped operations
     if result.max_latency_ns < 100_000 {
-        println!("✓ Pure mode max latency acceptable: {:.3} µs", result.max_latency_ns as f32 / 1000.0);
+        println!(
+            "✓ Pure mode max latency acceptable: {:.3} µs",
+            result.max_latency_ns as f32 / 1000.0
+        );
     } else {
-        println!("⚠ Pure mode max latency higher than expected: {:.3} µs", result.max_latency_ns as f32 / 1000.0);
+        println!(
+            "⚠ Pure mode max latency higher than expected: {:.3} µs",
+            result.max_latency_ns as f32 / 1000.0
+        );
     }
 }

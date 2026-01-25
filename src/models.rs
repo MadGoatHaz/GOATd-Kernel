@@ -1,11 +1,11 @@
 //! Core data types for GOATd Kernel.
 
-use serde::{Deserialize, Serialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::SystemTime;
-use std::str::FromStr;
 use std::fmt;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::SystemTime;
 
 /// Hardening level for kernel security.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -21,24 +21,28 @@ impl<'de> Deserialize<'de> for HardeningLevel {
         D: Deserializer<'de>,
     {
         use serde::de::{self, Visitor};
-        
+
         struct HardeningLevelVisitor;
-        
+
         impl<'de> Visitor<'de> for HardeningLevelVisitor {
             type Value = HardeningLevel;
-            
+
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a boolean or string hardening level")
             }
-            
+
             fn visit_bool<E>(self, value: bool) -> Result<HardeningLevel, E>
             where
                 E: de::Error,
             {
                 // Backward compatibility: false -> Minimal, true -> Hardened
-                Ok(if value { HardeningLevel::Hardened } else { HardeningLevel::Minimal })
+                Ok(if value {
+                    HardeningLevel::Hardened
+                } else {
+                    HardeningLevel::Minimal
+                })
             }
-            
+
             fn visit_str<E>(self, value: &str) -> Result<HardeningLevel, E>
             where
                 E: de::Error,
@@ -47,11 +51,14 @@ impl<'de> Deserialize<'de> for HardeningLevel {
                     "minimal" => Ok(HardeningLevel::Minimal),
                     "standard" => Ok(HardeningLevel::Standard),
                     "hardened" => Ok(HardeningLevel::Hardened),
-                    _ => Err(de::Error::unknown_variant(value, &["minimal", "standard", "hardened"])),
+                    _ => Err(de::Error::unknown_variant(
+                        value,
+                        &["minimal", "standard", "hardened"],
+                    )),
                 }
             }
         }
-        
+
         deserializer.deserialize_any(HardeningLevelVisitor)
     }
 }
@@ -133,10 +140,10 @@ pub enum BootType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LtoType {
-     None,   // Renamed from Base to align with UI nomenclature ("none")
-     Thin,
-     Full,
- }
+    None, // Renamed from Base to align with UI nomenclature ("none")
+    Thin,
+    Full,
+}
 
 /// Build phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -169,18 +176,18 @@ pub enum ValidationCheck {
 /// HW capabilities.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareInfo {
-    pub cpu_model: String,     // Model
-    pub cpu_cores: u32,        // Cores
-    pub cpu_threads: u32,      // Threads
-    pub ram_gb: u32,           // RAM GiB
-    pub disk_free_gb: u32,     // Disk GiB
-    pub gpu_vendor: GpuVendor, // GPU
-    pub gpu_model: String,     // Model
+    pub cpu_model: String,         // Model
+    pub cpu_cores: u32,            // Cores
+    pub cpu_threads: u32,          // Threads
+    pub ram_gb: u32,               // RAM GiB
+    pub disk_free_gb: u32,         // Disk GiB
+    pub gpu_vendor: GpuVendor,     // GPU
+    pub gpu_model: String,         // Model
     pub storage_type: StorageType, // Type
-    pub storage_model: String, // Model
-    pub boot_type: BootType,   // Firmware
+    pub storage_model: String,     // Model
+    pub boot_type: BootType,       // Firmware
     pub boot_manager: BootManager, // Bootloader
-    pub init_system: InitSystem, // Init
+    pub init_system: InitSystem,   // Init
     pub all_drives: Vec<DiskInfo>, // All detected drives for multi-drive support
 }
 
@@ -235,34 +242,34 @@ pub struct DiskInfo {
 /// Kernel config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelConfig {
-    pub lto_type: LtoType,                // LTO
-    pub use_modprobed: bool,              // ModprobeDB
-    pub use_whitelist: bool,              // Whitelist
-    pub driver_exclusions: Vec<String>,   // Excluded
+    pub lto_type: LtoType,                       // LTO
+    pub use_modprobed: bool,                     // ModprobeDB
+    pub use_whitelist: bool,                     // Whitelist
+    pub driver_exclusions: Vec<String>,          // Excluded
     pub config_options: HashMap<String, String>, // Options
-    pub hardening: HardeningLevel,        // Level
-    pub secure_boot: bool,                // SecBoot
-    pub profile: String,                  // Profile
-    pub version: String,                  // Ver
-    pub use_polly: bool,                  // Polly
-    pub use_mglru: bool,                  // MGLRU
-    pub user_toggled_polly: bool,         // User manually toggled Polly
-    pub user_toggled_mglru: bool,         // User manually toggled MGLRU
-    pub user_toggled_hardening: bool,     // User manually toggled hardening
-    pub user_toggled_lto: bool,           // User manually toggled LTO
-    pub mglru_enabled_mask: u32,          // Mask
-    pub mglru_min_ttl_ms: u32,            // TTL
-    pub hz: u32,                          // HZ (timer frequency from profile)
-    pub preemption: String,               // Preemption model from profile
-    pub force_clang: bool,                // Force Clang compiler
-    pub lto_shield_modules: Vec<String>,  // Modules to shield from LTO
-    pub use_bore: bool,                   // Use BORE scheduler
-    pub user_toggled_bore: bool,          // User manually toggled BORE
-    pub scx_available: Vec<String>,       // Available SCX schedulers
-    pub scx_active_scheduler: Option<String>, // Currently active SCX scheduler
-    pub native_optimizations: bool,       // Enable -march=native
+    pub hardening: HardeningLevel,               // Level
+    pub secure_boot: bool,                       // SecBoot
+    pub profile: String,                         // Profile
+    pub version: String,                         // Ver
+    pub use_polly: bool,                         // Polly
+    pub use_mglru: bool,                         // MGLRU
+    pub user_toggled_polly: bool,                // User manually toggled Polly
+    pub user_toggled_mglru: bool,                // User manually toggled MGLRU
+    pub user_toggled_hardening: bool,            // User manually toggled hardening
+    pub user_toggled_lto: bool,                  // User manually toggled LTO
+    pub mglru_enabled_mask: u32,                 // Mask
+    pub mglru_min_ttl_ms: u32,                   // TTL
+    pub hz: u32,                                 // HZ (timer frequency from profile)
+    pub preemption: String,                      // Preemption model from profile
+    pub force_clang: bool,                       // Force Clang compiler
+    pub lto_shield_modules: Vec<String>,         // Modules to shield from LTO
+    pub use_bore: bool,                          // Use BORE scheduler
+    pub user_toggled_bore: bool,                 // User manually toggled BORE
+    pub scx_available: Vec<String>,              // Available SCX schedulers
+    pub scx_active_scheduler: Option<String>,    // Currently active SCX scheduler
+    pub native_optimizations: bool,              // Enable -march=native
     pub user_toggled_native_optimizations: bool, // User manually toggled native optimizations
-    pub kernel_variant: String,           // Kernel variant
+    pub kernel_variant: String,                  // Kernel variant
 }
 
 impl Default for KernelConfig {
@@ -279,23 +286,23 @@ impl Default for KernelConfig {
             version: "latest".to_string(),
             use_polly: false,
             use_mglru: false,
-            use_bore: false,              // Default: BORE disabled
-            user_toggled_polly: false,     // Not manually toggled by default
-            user_toggled_mglru: false,     // Not manually toggled by default
-            user_toggled_hardening: false, // Not manually toggled by default
-            user_toggled_lto: false,       // Not manually toggled by default
-            user_toggled_bore: false,      // Not manually toggled by default
-            mglru_enabled_mask: 0x0007,  // Default: all subsystems
-            mglru_min_ttl_ms: 1000,      // Default: 1000ms
-            hz: 300,                      // Default: 300 HZ
-            preemption: "Voluntary".to_string(), // Default: Voluntary preemption
-            force_clang: true,            // Default: use Clang
-            lto_shield_modules: Vec::new(), // No modules shielded by default
-            scx_available: Vec::new(),    // No SCX schedulers available by default
-            scx_active_scheduler: None,   // No active SCX scheduler by default
-            native_optimizations: true,   // Default: native optimizations enabled
+            use_bore: false,                          // Default: BORE disabled
+            user_toggled_polly: false,                // Not manually toggled by default
+            user_toggled_mglru: false,                // Not manually toggled by default
+            user_toggled_hardening: false,            // Not manually toggled by default
+            user_toggled_lto: false,                  // Not manually toggled by default
+            user_toggled_bore: false,                 // Not manually toggled by default
+            mglru_enabled_mask: 0x0007,               // Default: all subsystems
+            mglru_min_ttl_ms: 1000,                   // Default: 1000ms
+            hz: 300,                                  // Default: 300 HZ
+            preemption: "Voluntary".to_string(),      // Default: Voluntary preemption
+            force_clang: true,                        // Default: use Clang
+            lto_shield_modules: Vec::new(),           // No modules shielded by default
+            scx_available: Vec::new(),                // No SCX schedulers available by default
+            scx_active_scheduler: None,               // No active SCX scheduler by default
+            native_optimizations: true,               // Default: native optimizations enabled
             user_toggled_native_optimizations: false, // Not manually toggled by default
-            kernel_variant: String::new(), // Default: empty kernel variant
+            kernel_variant: String::new(),            // Default: empty kernel variant
         }
     }
 }
@@ -315,12 +322,12 @@ impl KernelConfig {
 /// Build state snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildState {
-    pub phase: BuildPhase,              // Phase
-    pub progress_percent: u32,          // Progress
-    pub hardware: HardwareInfo,         // HW
-    pub config: KernelConfig,           // Config
+    pub phase: BuildPhase,                 // Phase
+    pub progress_percent: u32,             // Progress
+    pub hardware: HardwareInfo,            // HW
+    pub config: KernelConfig,              // Config
     pub patches_applied: Vec<PatchResult>, // Patches
-    pub checkpoint_timestamp: SystemTime, // TS
+    pub checkpoint_timestamp: SystemTime,  // TS
 }
 
 impl BuildState {
@@ -340,28 +347,28 @@ impl BuildState {
 /// Kernel patch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Patch {
-    pub patch_type: PatchType,     // Type
-    pub target_file: PathBuf,      // File
-    pub pattern: String,           // Regex
-    pub replacement: String,       // Replace
+    pub patch_type: PatchType, // Type
+    pub target_file: PathBuf,  // File
+    pub pattern: String,       // Regex
+    pub replacement: String,   // Replace
 }
 
 /// Patch result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatchResult {
-    pub patch: Patch,           // Patch
-    pub success: bool,          // OK?
-    pub lines_modified: u32,    // Lines
+    pub patch: Patch,              // Patch
+    pub success: bool,             // OK?
+    pub lines_modified: u32,       // Lines
     pub error_msg: Option<String>, // Error
 }
 
 /// Build result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildResult {
-    pub success: bool,          // OK?
-    pub kernel_version: String, // Ver
-    pub lto_enabled: bool,      // LTO?
-    pub patches_applied: u32,   // # patches
+    pub success: bool,             // OK?
+    pub kernel_version: String,    // Ver
+    pub lto_enabled: bool,         // LTO?
+    pub patches_applied: u32,      // # patches
     pub error_msg: Option<String>, // Error
 }
 
@@ -407,18 +414,18 @@ impl KernelInfo {
 /// Kernel audit metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelAudit {
-    pub kernel_version: String,  // Ver
-    pub compiler: String,        // Compiler
-    pub lto_status: String,      // LTO
-    pub module_count: u32,       // # mods
-    pub module_size_mb: u32,     // Size MB
-    pub cpu_context: String,     // CPU
+    pub kernel_version: String,   // Ver
+    pub compiler: String,         // Compiler
+    pub lto_status: String,       // LTO
+    pub module_count: u32,        // # mods
+    pub module_size_mb: u32,      // Size MB
+    pub cpu_context: String,      // CPU
     pub hardening_status: String, // Hardening
-    pub timer_hz: String,        // Hz
+    pub timer_hz: String,         // Hz
     pub preemption_model: String, // Preempt
-    pub io_scheduler: String,    // IO
-    pub cpu_scheduler: String,   // Scheduler
-    pub mglru: String,           // MGLRU status
+    pub io_scheduler: String,     // IO
+    pub cpu_scheduler: String,    // Scheduler
+    pub mglru: String,            // MGLRU status
 }
 
 impl KernelAudit {
@@ -447,7 +454,6 @@ impl Default for KernelAudit {
     }
 }
 
-
 /// Metadata Persistence Layer (MPL) Metadata
 ///
 /// Immutable metadata file stored at workspace root (`.goatd_metadata`).
@@ -457,38 +463,38 @@ impl Default for KernelAudit {
 pub struct MPLMetadata {
     /// Unique build session identifier (UUID v4)
     pub build_id: String,
-    
+
     /// Exact kernel release string (from `include/config/kernel.release`)
     /// E.g., "6.19.0-goatd-gaming"
     pub kernel_release: String,
-    
+
     /// Base kernel version (e.g., "6.19.0")
     pub kernel_version: String,
-    
+
     /// Profile name (e.g., "gaming", "workstation")
     pub profile: String,
-    
+
     /// Kernel variant (e.g., "linux", "linux-zen", "linux-lts")
     pub variant: String,
-    
+
     /// LTO configuration (e.g., "full", "thin", "none")
     pub lto_level: String,
-    
+
     /// Build completion timestamp (ISO 8601)
     pub build_timestamp: String,
-    
+
     /// Canonicalized workspace root path
     pub workspace_root: PathBuf,
-    
+
     /// Kernel source directory
     pub source_dir: PathBuf,
-    
+
     /// Package version (pkgver)
     pub pkgver: String,
-    
+
     /// Package release (pkgrel)
     pub pkgrel: String,
-    
+
     /// Profile suffix for LOCALVERSION (e.g., "-goatd-gaming")
     pub profile_suffix: String,
 }
@@ -510,7 +516,7 @@ impl MPLMetadata {
             let variant_part = variant.trim_start_matches("linux-").to_string();
             format!("-goatd-{}-{}", variant_part, profile.to_lowercase())
         };
-        
+
         MPLMetadata {
             build_id,
             kernel_release: String::new(), // Will be populated after build
@@ -526,13 +532,13 @@ impl MPLMetadata {
             profile_suffix,
         }
     }
-    
+
     /// Write MPL metadata to file as shell-sourceable format
     pub fn write_to_file(&self, path: &std::path::Path) -> std::io::Result<()> {
         let content = self.to_shell_format();
         std::fs::write(path, content)
     }
-    
+
     /// Convert MPL metadata to shell-sourceable format
     pub fn to_shell_format(&self) -> String {
         format!(
@@ -569,11 +575,11 @@ GOATD_PROFILE_SUFFIX="{}"
             self.profile_suffix,
         )
     }
-    
+
     /// Read MPL metadata from shell format
     pub fn from_shell_format(content: &str) -> std::io::Result<Self> {
         let mut metadata = MPLMetadata::default();
-        
+
         for line in content.lines() {
             if line.starts_with("GOATD_BUILD_ID=") {
                 metadata.build_id = extract_value(line);
@@ -601,7 +607,7 @@ GOATD_PROFILE_SUFFIX="{}"
                 metadata.profile_suffix = extract_value(line);
             }
         }
-        
+
         Ok(metadata)
     }
 }
@@ -731,5 +737,4 @@ mod tests {
         let deserialized: LtoType = serde_json::from_str(&json).unwrap();
         assert_eq!(lto, deserialized);
     }
-
 }

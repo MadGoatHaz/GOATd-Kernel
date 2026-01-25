@@ -3,10 +3,10 @@
 //! Performs high-frequency (50µs) wakeup monitoring to capture fine-grained kernel jitter.
 //! Measures latency at P99.99 precision for real-time workload analysis.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use hdrhistogram::Histogram;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Configuration for micro-jitter monitoring
 #[derive(Clone, Debug)]
@@ -22,9 +22,9 @@ pub struct MicroJitterConfig {
 impl Default for MicroJitterConfig {
     fn default() -> Self {
         MicroJitterConfig {
-            interval_us: 50,           // 50µs high-frequency sampling
-            spike_threshold_us: 500,   // 500µs spike threshold
-            duration_secs: 10,         // 10 second test
+            interval_us: 50,         // 50µs high-frequency sampling
+            spike_threshold_us: 500, // 500µs spike threshold
+            duration_secs: 10,       // 10 second test
         }
     }
 }
@@ -65,8 +65,10 @@ impl MicroJitterCollector {
     /// Run the micro-jitter measurement test
     /// Returns MicroJitterMetrics with P99.99, max, and spike information
     pub fn run(&self) -> Result<MicroJitterMetrics, Box<dyn std::error::Error>> {
-        eprintln!("[JITTER] Starting micro-jitter test: interval={}µs, threshold={}µs, duration={}s", 
-            self.config.interval_us, self.config.spike_threshold_us, self.config.duration_secs);
+        eprintln!(
+            "[JITTER] Starting micro-jitter test: interval={}µs, threshold={}µs, duration={}s",
+            self.config.interval_us, self.config.spike_threshold_us, self.config.duration_secs
+        );
 
         // Initialize histogram with 3 decimal places (microsecond precision)
         let mut histogram = Histogram::<u64>::new(3)?;
@@ -141,8 +143,10 @@ impl MicroJitterCollector {
             sample_count,
         };
 
-        eprintln!("[JITTER] Test completed: P99.99={:.2}µs, Max={:.2}µs, Spikes={}", 
-            metrics.p99_99_us, metrics.max_us, metrics.spike_count);
+        eprintln!(
+            "[JITTER] Test completed: P99.99={:.2}µs, Max={:.2}µs, Spikes={}",
+            metrics.p99_99_us, metrics.max_us, metrics.spike_count
+        );
 
         Ok(metrics)
     }

@@ -2,17 +2,16 @@
 ///
 /// Utilities for managing tokio task spawning, channel communication,
 /// and async event handling within the egui event loop.
-
 use tokio::sync::mpsc;
 
 /// Wrapper for managing async tasks and their event channels
 pub struct AsyncBridge {
     /// Channel sender for build events
     pub build_tx: mpsc::Sender<crate::ui::controller::BuildEvent>,
-    
+
     /// Cancellation signal (watch channel)
     pub cancel_tx: tokio::sync::watch::Sender<bool>,
-    
+
     /// Cancellation receiver
     pub cancel_rx: tokio::sync::watch::Receiver<bool>,
 }
@@ -22,21 +21,21 @@ impl AsyncBridge {
     pub fn new() -> (Self, mpsc::Receiver<crate::ui::controller::BuildEvent>) {
         let (build_tx, build_rx) = mpsc::channel(100);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-        
+
         let bridge = Self {
             build_tx,
             cancel_tx,
             cancel_rx,
         };
-        
+
         (bridge, build_rx)
     }
-    
+
     /// Signal cancellation to background tasks
     pub async fn signal_cancel(&self) -> Result<(), tokio::sync::watch::error::SendError<bool>> {
         self.cancel_tx.send(true)
     }
-    
+
     /// Reset cancellation signal
     pub async fn reset_cancel(&self) -> Result<(), tokio::sync::watch::error::SendError<bool>> {
         self.cancel_tx.send(false)
@@ -78,31 +77,62 @@ pub fn request_ui_repaint(ctx: Option<&eframe::egui::Context>) {
     }
 }
 
+/// Universal task wrapper: spawns a future and automatically signals repaint on completion
+///
+/// This is the core of the Global Repaint Stability strategy. Wraps any async task
+/// with automatic UI signaling via ctx.request_repaint() after the task completes.
+///
+/// This ensures all background operations (builds, audits, version polling, etc.)
+/// automatically trigger UI updates without requiring explicit repaint calls.
+///
+/// # Pattern
+/// ```no_run
+/// spawn_ui_task(ctx, async {
+///     // Long-running async work...
+///     Ok::<(), Box<dyn std::error::Error>>(())
+/// });
+/// ```
+pub fn spawn_ui_task<F>(ctx: egui::Context, future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(async move {
+        // Execute the future
+        future.await;
+        
+        // Signal UI repaint after task completes (Acquire/Release atomic semantics)
+        // This wakes up the egui event loop even if the app is unfocused
+        ctx.request_repaint();
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_async_bridge_creation() {
         let (bridge, _rx) = AsyncBridge::new();
         assert!(bridge.signal_cancel().await.is_ok());
-        
+
         // Verify cancel signal propagated
         let mut cancel_rx = bridge.cancel_rx.clone();
         assert!(cancel_rx.changed().await.is_ok());
     }
-    
+
     #[tokio::test]
     async fn test_channel_send_receive() {
         let (bridge, mut rx) = AsyncBridge::new();
-        
+
         let tx = bridge.build_tx.clone();
         tokio::spawn(async move {
-            let _ = tx.send(crate::ui::controller::BuildEvent::Status(
-                "Test message".to_string(),
-            )).await;
+            let _ = tx
+                .send(crate::ui::controller::BuildEvent::Status(
+                    "Test message".to_string(),
+                ))
+                .await;
         });
-        
+
         // Receive event
         if let Some(event) = rx.recv().await {
             match event {

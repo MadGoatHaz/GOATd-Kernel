@@ -97,7 +97,7 @@ pub fn remove_icf_flags(content: &str) -> String {
     // Allows optional spaces around the equals sign
     let var_pattern = Regex::new(r"^(\s*)((?:export\s+)?[A-Z_]+FLAGS)\s*=\s*(.*)$")
         .expect("Invalid var_pattern regex");
-    
+
     // Pattern to match ALL forms of --icf and -flto flags.
     // This handles:
     //   -flto, -flto=thin, -flto=full (compiler flags)
@@ -106,7 +106,7 @@ pub fn remove_icf_flags(content: &str) -> String {
     // Compound pattern (without verbose mode): match either -flto or --icf variants
     let flag_pattern = Regex::new(r"-flto(?:=[a-z]+)?|(?:-Wl,)?--icf(?:=[a-z]+)?")
         .expect("Invalid flag_pattern regex");
-    
+
     // Process each line independently
     let result: Vec<String> = content
         .lines()
@@ -116,21 +116,21 @@ pub fn remove_icf_flags(content: &str) -> String {
                 let indent = &caps[1];
                 let var_name = &caps[2];
                 let var_value = &caps[3];
-                
+
                 // Remove all ICF/LTO flags from the value in one pass
                 // This removes the flags themselves, leaving surrounding whitespace
                 let new_value = flag_pattern.replace_all(var_value, "").to_string();
-                
+
                 // Collapse multiple consecutive spaces into one
                 // (handles cases where flag removal leaves extra whitespace)
                 let new_value = Regex::new(r" {2,}")
                     .expect("Invalid space_pattern regex")
                     .replace_all(&new_value, " ")
                     .to_string();
-                
+
                 // Trim leading and trailing whitespace from the value
                 let new_value = new_value.trim().to_string();
-                
+
                 // Reconstruct the assignment line with original indentation
                 format!("{}{}={}", indent, var_name, new_value)
             } else {
@@ -139,15 +139,15 @@ pub fn remove_icf_flags(content: &str) -> String {
             }
         })
         .collect();
-    
+
     // Join lines back together
     let mut output = result.join("\n");
-    
+
     // Preserve trailing newline from original if it had one
     if content.ends_with('\n') && !output.ends_with('\n') {
         output.push('\n');
     }
-    
+
     output
 }
 
@@ -231,36 +231,30 @@ pub fn shield_amd_gpu_from_lto(makefile: &str) -> String {
 /// Configuration option string ready for .config
 pub fn generate_lto_config(lto_type: crate::models::LtoType) -> String {
     match lto_type {
-        crate::models::LtoType::Full => {
-            vec![
-                "# LTO Configuration (Phase 3.5) - Full LTO",
-                "CONFIG_LTO_CLANG=y",
-                "CONFIG_LTO_CLANG_FULL=y",
-                "CONFIG_HAS_LTO_CLANG=y",
-                "CONFIG_CFI_CLANG=y",
-                "CONFIG_CFI_PERMISSIVE=n",
-            ]
-            .join("\n")
-        }
-        crate::models::LtoType::Thin => {
-            vec![
-                "# LTO Configuration (Phase 3.5) - Thin LTO",
-                "CONFIG_LTO_CLANG=y",
-                "CONFIG_LTO_CLANG_THIN=y",
-                "CONFIG_HAS_LTO_CLANG=y",
-                "CONFIG_CFI_CLANG=y",
-                "CONFIG_CFI_PERMISSIVE=n",
-            ]
-            .join("\n")
-        }
-        crate::models::LtoType::None => {
-            vec![
-                "# LTO Configuration (Phase 3.5) - LTO Disabled",
-                "CONFIG_LTO_CLANG=n",
-                "CONFIG_CFI_CLANG=n",
-            ]
-            .join("\n")
-        }
+        crate::models::LtoType::Full => vec![
+            "# LTO Configuration (Phase 3.5) - Full LTO",
+            "CONFIG_LTO_CLANG=y",
+            "CONFIG_LTO_CLANG_FULL=y",
+            "CONFIG_HAS_LTO_CLANG=y",
+            "CONFIG_CFI_CLANG=y",
+            "CONFIG_CFI_PERMISSIVE=n",
+        ]
+        .join("\n"),
+        crate::models::LtoType::Thin => vec![
+            "# LTO Configuration (Phase 3.5) - Thin LTO",
+            "CONFIG_LTO_CLANG=y",
+            "CONFIG_LTO_CLANG_THIN=y",
+            "CONFIG_HAS_LTO_CLANG=y",
+            "CONFIG_CFI_CLANG=y",
+            "CONFIG_CFI_PERMISSIVE=n",
+        ]
+        .join("\n"),
+        crate::models::LtoType::None => vec![
+            "# LTO Configuration (Phase 3.5) - LTO Disabled",
+            "CONFIG_LTO_CLANG=n",
+            "CONFIG_CFI_CLANG=n",
+        ]
+        .join("\n"),
     }
 }
 
@@ -288,7 +282,7 @@ mod tests {
     // These tests cover all 14+ edge cases for robust --icf flag removal
 
     // ========== BASIC FLAG REMOVAL TESTS (Tests 1-6) ==========
-    
+
     #[test]
     fn test_icf_remove_flto_thin() {
         let makefile = "CFLAGS = -O2 -flto=thin -march=native";
@@ -545,7 +539,8 @@ obj-y += arch/"#;
 
     #[test]
     fn test_icf_all_variants_together() {
-        let makefile = "CFLAGS = -flto -flto=thin -flto=full --icf --icf=safe --icf=auto -Wl,--icf=safe -O2";
+        let makefile =
+            "CFLAGS = -flto -flto=thin -flto=full --icf --icf=safe --icf=auto -Wl,--icf=safe -O2";
         let fixed = remove_icf_flags(makefile);
         assert!(!fixed.contains("-flto"));
         assert!(!fixed.contains("--icf"));
@@ -577,7 +572,7 @@ obj-y += arch/"#;
     fn test_shield_all_directories() {
         let makefile = "obj-y += foo.o";
         let shielded = shield_amd_gpu_from_lto(makefile);
-        
+
         // Should contain all module names
         assert!(shielded.contains("CFLAGS_amdgpu"));
         assert!(shielded.contains("CFLAGS_amdkfd"));
@@ -608,7 +603,7 @@ obj-y += arch/"#;
     fn test_shield_all_lto_variants() {
         let makefile = "obj-y += foo.o";
         let shielded = shield_amd_gpu_from_lto(makefile);
-        
+
         // Should filter out -flto=thin, -flto=full, and -flto
         assert!(shielded.contains("-flto$(comma)thin"));
         assert!(shielded.contains("-flto$(comma)full"));

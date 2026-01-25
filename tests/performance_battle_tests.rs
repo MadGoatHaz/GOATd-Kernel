@@ -50,9 +50,10 @@ mod performance_battle_tests {
         }
 
         let simulated_duration_ms = (ts.tv_sec as u64 * 1000) + (ts.tv_nsec as u64 / 1_000_000);
-        let drift_percentage =
-            ((simulated_duration_ms as f64 - expected_duration_ms as f64) / expected_duration_ms as f64).abs()
-                * 100.0;
+        let drift_percentage = ((simulated_duration_ms as f64 - expected_duration_ms as f64)
+            / expected_duration_ms as f64)
+            .abs()
+            * 100.0;
 
         eprintln!(
             "[test_nanosecond_precision] Expected: {}ms | Simulated: {}ms | Drift: {:.3}%",

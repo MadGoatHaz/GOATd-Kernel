@@ -314,7 +314,7 @@ mod tests {
         // CRITICAL SAFETY CONSTRAINT: whitelist without modprobed-db is invalid
         let config = KernelConfig {
             use_whitelist: true,
-            use_modprobed: false,  // Modprobed is disabled
+            use_modprobed: false, // Modprobed is disabled
             ..Default::default()
         };
         assert!(detect_conflicts(&config).is_err());
@@ -325,7 +325,7 @@ mod tests {
         // Whitelist WITH modprobed-db is allowed
         let config = KernelConfig {
             use_whitelist: true,
-            use_modprobed: true,  // Modprobed is enabled
+            use_modprobed: true, // Modprobed is enabled
             ..Default::default()
         };
         assert!(detect_conflicts(&config).is_ok());
@@ -335,7 +335,7 @@ mod tests {
     fn test_detect_conflicts_whitelist_and_exclusions() {
         let config = KernelConfig {
             use_whitelist: true,
-            use_modprobed: true,  // Modprobed needed for whitelist
+            use_modprobed: true, // Modprobed needed for whitelist
             driver_exclusions: vec!["nouveau".to_string()],
             ..Default::default()
         };

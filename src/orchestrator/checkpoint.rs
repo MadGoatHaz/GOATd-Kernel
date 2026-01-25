@@ -1,7 +1,7 @@
 //! Checkpoint data structures for build state serialization.
 //!
 //! **IMPORTANT**: This module contains ONLY DATA STRUCTURES.
-//! 
+//!
 //! CheckpointManager and checkpoint persistence logic is now in Python
 //! (src/core/build_orchestrator.py). This module remains for potential
 //! serialization support if needed.

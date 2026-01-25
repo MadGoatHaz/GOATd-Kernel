@@ -83,21 +83,21 @@ fn test_default_config_uses_latest() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_linux_fallback() {
     let mut config = create_dynamic_config("linux");
-    
+
     // Verify initial state
     assert!(config.is_dynamic_version());
-    
+
     // Attempt resolution
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     // Should succeed with some version
     assert!(result.is_ok());
     let resolved = result.unwrap();
-    
+
     // Should be a concrete version (not "latest")
     assert!(!resolved.contains("latest"));
     assert!(!resolved.is_empty());
-    
+
     // Config should be updated
     assert!(!config.is_dynamic_version());
     assert_eq!(config.version, resolved);
@@ -110,18 +110,18 @@ async fn test_resolve_dynamic_version_linux_fallback() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_lts_fallback() {
     let mut config = create_dynamic_config("linux-lts");
-    
+
     assert!(config.is_dynamic_version());
-    
+
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     assert!(result.is_ok());
     let resolved = result.unwrap();
-    
+
     // Any non-"latest" version is acceptable
     assert!(!resolved.contains("latest"));
     assert!(!resolved.is_empty());
-    
+
     assert!(!config.is_dynamic_version());
     assert_eq!(config.version, resolved);
 }
@@ -130,18 +130,18 @@ async fn test_resolve_dynamic_version_lts_fallback() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_hardened_fallback() {
     let mut config = create_dynamic_config("linux-hardened");
-    
+
     assert!(config.is_dynamic_version());
-    
+
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     assert!(result.is_ok());
     let resolved = result.unwrap();
-    
+
     // Should be a concrete version
     assert!(!resolved.contains("latest"));
     assert!(!resolved.is_empty());
-    
+
     assert!(!config.is_dynamic_version());
 }
 
@@ -149,18 +149,18 @@ async fn test_resolve_dynamic_version_hardened_fallback() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_zen_fallback() {
     let mut config = create_dynamic_config("linux-zen");
-    
+
     assert!(config.is_dynamic_version());
-    
+
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     assert!(result.is_ok());
     let resolved = result.unwrap();
-    
+
     // Should be concrete
     assert!(!resolved.contains("latest"));
     assert!(!resolved.is_empty());
-    
+
     assert!(!config.is_dynamic_version());
 }
 
@@ -168,18 +168,18 @@ async fn test_resolve_dynamic_version_zen_fallback() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_mainline_fallback() {
     let mut config = create_dynamic_config("linux-mainline");
-    
+
     assert!(config.is_dynamic_version());
-    
+
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     assert!(result.is_ok());
     let resolved = result.unwrap();
-    
+
     // Should be concrete version
     assert!(!resolved.contains("latest"));
     assert!(!resolved.is_empty());
-    
+
     assert!(!config.is_dynamic_version());
 }
 
@@ -187,19 +187,19 @@ async fn test_resolve_dynamic_version_mainline_fallback() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_tkg_fallback() {
     let mut config = create_dynamic_config("linux-tkg");
-    
+
     assert!(config.is_dynamic_version());
-    
+
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     assert!(result.is_ok());
     let resolved = result.unwrap();
-    
+
     // TKG may resolve to a version with variables (e.g., "${_basekernel}-273"),
     // but it should at least not be "latest" and not be empty
     assert!(!resolved.contains("latest"));
     assert!(!resolved.is_empty());
-    
+
     assert!(!config.is_dynamic_version());
 }
 
@@ -208,10 +208,10 @@ async fn test_resolve_dynamic_version_tkg_fallback() {
 async fn test_concrete_version_skips_resolution() {
     let mut config = create_concrete_config("6.11.5", "linux");
     let original_version = config.version.clone();
-    
+
     // Should return immediately without attempting resolution
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     assert!(result.is_ok());
     // Version should not change
     assert_eq!(config.version, original_version);
@@ -230,10 +230,10 @@ async fn test_concrete_version_skips_resolution() {
 #[tokio::test]
 async fn test_resolve_dynamic_version_unknown_variant() {
     let mut config = create_dynamic_config("linux-unknown-variant");
-    
+
     // Unknown variant will fail to poll, but should fall back to local PKGBUILD
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     // Result depends on whether local PKGBUILD parsing succeeds
     // If it does, the version will be resolved
     // The test verifies the fallback mechanism works
@@ -247,7 +247,10 @@ async fn test_resolve_dynamic_version_unknown_variant() {
         Err(e) => {
             // If all fallbacks exhausted, should have informative error
             let error_msg = e.to_string();
-            assert!(error_msg.contains("Unable to resolve") || error_msg.contains("linux-unknown-variant"));
+            assert!(
+                error_msg.contains("Unable to resolve")
+                    || error_msg.contains("linux-unknown-variant")
+            );
             // Version should still be "latest" if resolution completely failed
             // (depending on when the error occurred)
         }
@@ -259,11 +262,11 @@ async fn test_resolve_dynamic_version_unknown_variant() {
 async fn test_version_updated_in_config() {
     let mut config = create_dynamic_config("linux");
     let initial = config.version.clone();
-    
+
     assert_eq!(initial, "latest");
-    
+
     let _result = resolve_dynamic_version(&mut config, None).await;
-    
+
     // Config should be mutated with resolved version
     assert!(!config.is_dynamic_version());
     assert_ne!(config.version, initial);
@@ -273,17 +276,17 @@ async fn test_version_updated_in_config() {
 #[tokio::test]
 async fn test_resolution_idempotent() {
     let mut config = create_dynamic_config("linux");
-    
+
     // First resolution
     let result1 = resolve_dynamic_version(&mut config, None).await;
     assert!(result1.is_ok());
     let version1 = result1.unwrap();
-    
+
     // Second resolution should be a no-op since version is now concrete
     let result2 = resolve_dynamic_version(&mut config, None).await;
     assert!(result2.is_ok());
     let version2 = result2.unwrap();
-    
+
     // Should return same version both times
     assert_eq!(version1, version2);
 }
@@ -291,8 +294,15 @@ async fn test_resolution_idempotent() {
 /// Test hardcoded baseline versions cover all known variants
 #[test]
 fn test_hardcoded_baselines_complete() {
-    let variants = vec!["linux", "linux-lts", "linux-hardened", "linux-mainline", "linux-zen", "linux-tkg"];
-    
+    let variants = vec![
+        "linux",
+        "linux-lts",
+        "linux-hardened",
+        "linux-mainline",
+        "linux-zen",
+        "linux-tkg",
+    ];
+
     for variant in variants {
         let _config = create_dynamic_config(variant);
         // This test documents which baselines are supported
@@ -312,25 +322,31 @@ fn test_hardcoded_baselines_complete() {
 async fn test_fallback_hierarchy_progression() {
     // Create a dynamic config for a variant that has fallback support
     let mut config = create_dynamic_config("linux");
-    
+
     // Trace through the fallback hierarchy
     eprintln!("[TEST] Starting fallback hierarchy test");
     eprintln!("[TEST] Initial config.version: {}", config.version);
-    eprintln!("[TEST] Initial config.is_dynamic_version(): {}", config.is_dynamic_version());
-    
+    eprintln!(
+        "[TEST] Initial config.is_dynamic_version(): {}",
+        config.is_dynamic_version()
+    );
+
     let result = resolve_dynamic_version(&mut config, None).await;
-    
+
     eprintln!("[TEST] After resolution:");
     eprintln!("[TEST] Result: {:?}", result.is_ok());
     eprintln!("[TEST] Final config.version: {}", config.version);
-    eprintln!("[TEST] Final config.is_dynamic_version(): {}", config.is_dynamic_version());
-    
+    eprintln!(
+        "[TEST] Final config.is_dynamic_version(): {}",
+        config.is_dynamic_version()
+    );
+
     // Should succeed with some version
     assert!(result.is_ok());
-    
+
     // Version should no longer be "latest"
     assert!(!config.is_dynamic_version());
-    
+
     // Version should be non-empty and valid
     assert!(!config.version.is_empty());
     assert!(!config.version.contains("latest"));

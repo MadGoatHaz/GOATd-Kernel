@@ -87,21 +87,21 @@
 //! - Implement workspace health checks during preparation to verify mount accessibility
 //! - Add warnings when workspace is on slow storage (fallback detection)
 
-pub mod templates;
-pub mod pkgbuild;
-pub mod kconfig;
 pub mod env;
+pub mod kconfig;
+pub mod pkgbuild;
+pub mod templates;
 
-use std::fs;
-use std::path::PathBuf;
-use std::collections::HashMap;
-use once_cell::sync::Lazy;
-use regex::Regex;
 use crate::error::PatchError;
-use std::process::Command;
+use crate::hardware::gpu;
 use crate::kernel::lto;
 use crate::models::GpuVendor;
-use crate::hardware::gpu;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 
 /// Phase-aware patch hook system
 ///
@@ -148,27 +148,24 @@ impl PatchHook {
             config_options: HashMap::new(),
         }
     }
-    
+
     /// Add a CONFIG option to be injected by this hook
     pub fn with_config(mut self, key: &str, value: &str) -> Self {
-        self.config_options.insert(key.to_string(), value.to_string());
+        self.config_options
+            .insert(key.to_string(), value.to_string());
         self
     }
 }
 
 // Pre-compiled regex patterns (compiled once at startup)
-static FLTO_THIN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\s*-flto=thin\s*").expect("Invalid -flto=thin regex")
-});
-static FLTO_FULL_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\s*-flto=full\s*").expect("Invalid -flto=full regex")
-});
-static ICF_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\s*--icf[=a-zA-Z0-9]*\s*").expect("Invalid --icf regex")
-});
-static SPACE_CLEANUP_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r" {2,}").expect("Invalid space cleanup regex")
-});
+static FLTO_THIN_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\s*-flto=thin\s*").expect("Invalid -flto=thin regex"));
+static FLTO_FULL_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\s*-flto=full\s*").expect("Invalid -flto=full regex"));
+static ICF_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\s*--icf[=a-zA-Z0-9]*\s*").expect("Invalid --icf regex"));
+static SPACE_CLEANUP_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r" {2,}").expect("Invalid space cleanup regex"));
 static CC_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)^\s*(?:export\s+)?CC\s*=\s*(?:gcc|cc)[^\n]*").expect("Invalid CC regex")
 });
@@ -182,22 +179,22 @@ static LTO_REMOVAL_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)^(?:CONFIG_LTO_|CONFIG_HAS_LTO_|# CONFIG_LTO_|# CONFIG_HAS_LTO_)[^\n]*$")
         .expect("Invalid LTO removal regex")
 });
-static SPACE_COLLAPSE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\n\n+").expect("Invalid space collapse regex")
-});
-static MAKE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\bmake\b").expect("Invalid make regex")
-});
+static SPACE_COLLAPSE_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\n\n+").expect("Invalid space collapse regex"));
+static MAKE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\bmake\b").expect("Invalid make regex"));
 static GCC_PATTERN_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)^\s*(?:export\s+)?(GCC|CFLAGS|CXXFLAGS|LDFLAGS)_[A-Z0-9_]*\s*=")
         .expect("Invalid GCC pattern regex")
 });
 static OLDCONFIG_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)(make\s+(?:old)?config|make\s+syncconfig)").expect("Invalid oldconfig pattern regex")
+    Regex::new(r"(?m)(make\s+(?:old)?config|make\s+syncconfig)")
+        .expect("Invalid oldconfig pattern regex")
 });
 static POLLY_REMOVAL_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)\s*# ===+\s*\n\s*# POLLY LOOP OPTIMIZATION.*?export LDFLAGS.*?\n")
-        .unwrap_or_else(|_| Regex::new(r"(?m)^\s*# POLLY LOOP OPTIMIZATION.*?^export LDFLAGS").unwrap())
+        .unwrap_or_else(|_| {
+            Regex::new(r"(?m)^\s*# POLLY LOOP OPTIMIZATION.*?^export LDFLAGS").unwrap()
+        })
 });
 static G1_REMOVAL_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)\s*# ===+\s*\n\s*# PHASE G1 PREBUILD:.*?fi\s*\n")
@@ -226,27 +223,44 @@ pub type PatchResult<T> = std::result::Result<T, PatchError>;
 fn find_toolchain_binary(name: &str) -> String {
     // STEP 1: Try LLVM-19 variant first (highest priority for consistency)
     let llvm19_variant = format!("llvm-19-{}", name);
-    if Command::new(&llvm19_variant).arg("--version").output().is_ok() {
-        eprintln!("[Patcher] [TOOLCHAIN] Found LLVM-19 variant: {}", llvm19_variant);
+    if Command::new(&llvm19_variant)
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        eprintln!(
+            "[Patcher] [TOOLCHAIN] Found LLVM-19 variant: {}",
+            llvm19_variant
+        );
         return llvm19_variant;
     }
-    
+
     // STEP 2: Try generic LLVM variant (fallback for latest LLVM)
     let llvm_variant = format!("llvm-{}", name);
-    if Command::new(&llvm_variant).arg("--version").output().is_ok() {
+    if Command::new(&llvm_variant)
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
         eprintln!("[Patcher] [TOOLCHAIN] Found LLVM variant: {}", llvm_variant);
         return llvm_variant;
     }
-    
+
     // STEP 3: Try standard /usr/bin location
     let standard_path = format!("/usr/bin/{}", name);
     if std::path::Path::new(&standard_path).exists() {
-        eprintln!("[Patcher] [TOOLCHAIN] Found at standard location: {}", standard_path);
+        eprintln!(
+            "[Patcher] [TOOLCHAIN] Found at standard location: {}",
+            standard_path
+        );
         return standard_path;
     }
-    
+
     // STEP 4: Fallback to just the command name (rely on PATH)
-    eprintln!("[Patcher] [TOOLCHAIN] Using {} from PATH (final fallback)", name);
+    eprintln!(
+        "[Patcher] [TOOLCHAIN] Using {} from PATH (final fallback)",
+        name
+    );
     name.to_string()
 }
 
@@ -288,7 +302,11 @@ fn find_source_file(src_dir: &PathBuf, relative_path: &str) -> PathBuf {
     // STRATEGY 1: Check root directory first
     let root_path = src_dir.join(relative_path);
     if root_path.exists() {
-        eprintln!("[Patcher] [FILE-DISCOVERY] Found {} at root: {}", relative_path, root_path.display());
+        eprintln!(
+            "[Patcher] [FILE-DISCOVERY] Found {} at root: {}",
+            relative_path,
+            root_path.display()
+        );
         return root_path;
     }
 
@@ -301,8 +319,11 @@ fn find_source_file(src_dir: &PathBuf, relative_path: &str) -> PathBuf {
                 // Look for nested file matching the relative path
                 let nested_path = path.join(relative_path);
                 if nested_path.exists() {
-                    eprintln!("[Patcher] [FILE-DISCOVERY] Found {} in nested src/: {}",
-                        relative_path, nested_path.display());
+                    eprintln!(
+                        "[Patcher] [FILE-DISCOVERY] Found {} in nested src/: {}",
+                        relative_path,
+                        nested_path.display()
+                    );
                     return nested_path;
                 }
             }
@@ -310,7 +331,10 @@ fn find_source_file(src_dir: &PathBuf, relative_path: &str) -> PathBuf {
     }
 
     // FALLBACK: Return original path (caller can handle with graceful degradation)
-    eprintln!("[Patcher] [FILE-DISCOVERY] [WARNING] Could not locate {} in root or src/ subdirectories", relative_path);
+    eprintln!(
+        "[Patcher] [FILE-DISCOVERY] [WARNING] Could not locate {} in root or src/ subdirectories",
+        relative_path
+    );
     root_path
 }
 
@@ -395,8 +419,9 @@ impl KernelPatcher {
                 if let Some(filename) = path.file_name() {
                     let name = filename.to_string_lossy().to_string();
                     // Look for the main linux kernel package or kernel headers
-                    if (name.starts_with("linux-") && name.ends_with(".pkg.tar.zst")) ||
-                       (name.contains("linux-headers-") && name.ends_with(".pkg.tar.zst")) {
+                    if (name.starts_with("linux-") && name.ends_with(".pkg.tar.zst"))
+                        || (name.contains("linux-headers-") && name.ends_with(".pkg.tar.zst"))
+                    {
                         eprintln!("[Patcher] [ARTIFACTS] Found kernel package: {}", name);
                         artifacts.push(path);
                     }
@@ -435,14 +460,17 @@ impl KernelPatcher {
     pub fn sanitize_build_environment(env_vars: &mut HashMap<String, String>) {
         // STEP 1: Remove variables that commonly leak $srcdir paths
         let srcdir_leak_patterns = vec![
-            "TMPDIR",      // Temporary directories often contain $srcdir
-            "TEMP",        // Alternative temp
-            "TMP",         // Short form
+            "TMPDIR", // Temporary directories often contain $srcdir
+            "TEMP",   // Alternative temp
+            "TMP",    // Short form
         ];
-        
+
         for var_name in srcdir_leak_patterns {
             if let Some(_) = env_vars.remove(var_name) {
-                eprintln!("[Patcher] [SANITIZE] Removed {} to prevent $srcdir leak", var_name);
+                eprintln!(
+                    "[Patcher] [SANITIZE] Removed {} to prevent $srcdir leak",
+                    var_name
+                );
             }
         }
 
@@ -457,18 +485,18 @@ impl KernelPatcher {
                     if *p == "/usr/bin" || *p == "/bin" || *p == "/usr/local/bin" {
                         return true;
                     }
-                    
+
                     // Remove only paths that contain gcc/llvm/clang installations
-                    !(p.contains("/gcc") ||
-                      p.contains("/g++") ||
-                      p.contains("/cc") ||
-                      p.contains("/c++") ||
-                      p.contains("/llvm") ||
-                      p.contains("/clang")) &&
-                    !p.is_empty()
+                    !(p.contains("/gcc")
+                        || p.contains("/g++")
+                        || p.contains("/cc")
+                        || p.contains("/c++")
+                        || p.contains("/llvm")
+                        || p.contains("/clang"))
+                        && !p.is_empty()
                 })
                 .collect();
-            
+
             let new_path = filtered.join(":");
             if new_path != original_path {
                 eprintln!("[Patcher] [SANITIZE] Cleaned PATH: removed GCC-related directories while preserving /usr/bin and /bin");
@@ -482,13 +510,16 @@ impl KernelPatcher {
                 let original = flags.clone();
                 // Remove any GCC-specific flags
                 *flags = flags
-                    .replace("-Wl,--as-needed", "")  // GCC linker marker
-                    .replace("-Wl,--no-undefined", "")  // GCC linker marker
+                    .replace("-Wl,--as-needed", "") // GCC linker marker
+                    .replace("-Wl,--no-undefined", "") // GCC linker marker
                     .trim()
                     .to_string();
-                
+
                 if original != *flags {
-                    eprintln!("[Patcher] [SANITIZE] Cleaned {}: removed GCC-specific flags", flag_var);
+                    eprintln!(
+                        "[Patcher] [SANITIZE] Cleaned {}: removed GCC-specific flags",
+                        flag_var
+                    );
                 }
             }
         }
@@ -515,7 +546,7 @@ impl KernelPatcher {
     /// HashMap of environment variable names to values
     pub fn prepare_build_environment(&self, native_optimizations: bool) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
-        
+
         // CRITICAL: Sanitize environment FIRST to remove leaked paths and GCC contamination
         eprintln!("[Patcher] [ENV] STEP 0: Sanitizing build environment for cleanliness");
         Self::sanitize_build_environment(&mut env_vars);
@@ -528,23 +559,23 @@ impl KernelPatcher {
         env_vars.insert("CC".to_string(), "clang".to_string());
         env_vars.insert("CXX".to_string(), "clang++".to_string());
         env_vars.insert("LD".to_string(), "ld.lld".to_string());
-        
+
         // DYNAMIC TOOLCHAIN DISCOVERY: All toolchain binaries use LLVM-19 prioritization
         let ar_cmd = find_toolchain_binary("ar");
         env_vars.insert("AR".to_string(), ar_cmd);
-        
+
         let nm_cmd = find_toolchain_binary("nm");
         env_vars.insert("NM".to_string(), nm_cmd);
-        
+
         let strip_cmd = find_toolchain_binary("strip");
         env_vars.insert("STRIP".to_string(), strip_cmd);
-        
+
         let objcopy_cmd = find_toolchain_binary("objcopy");
         env_vars.insert("OBJCOPY".to_string(), objcopy_cmd);
-        
+
         let objdump_cmd = find_toolchain_binary("objdump");
         env_vars.insert("OBJDUMP".to_string(), objdump_cmd);
-        
+
         let readelf_cmd = find_toolchain_binary("readelf");
         env_vars.insert("READELF".to_string(), readelf_cmd);
         env_vars.insert("GCC".to_string(), "clang".to_string());
@@ -555,7 +586,9 @@ impl KernelPatcher {
         // ============================================================================
         env_vars.insert("HOSTCC".to_string(), "clang".to_string());
         env_vars.insert("HOSTCXX".to_string(), "clang++".to_string());
-        eprintln!("[Patcher] [ENV] Injected HOSTCC=clang, HOSTCXX=clang++ for host tool enforcement");
+        eprintln!(
+            "[Patcher] [ENV] Injected HOSTCC=clang, HOSTCXX=clang++ for host tool enforcement"
+        );
 
         // ============================================================================
         // NATIVE OPTIMIZATIONS (-march=native support)
@@ -564,7 +597,9 @@ impl KernelPatcher {
             env_vars.insert("KCFLAGS".to_string(), "\"-march=native\"".to_string());
             eprintln!("[Patcher] [ENV] Injected KCFLAGS=\"-march=native\" for native host-optimized kernel compilation");
         } else {
-            eprintln!("[Patcher] [ENV] Native optimizations disabled, KCFLAGS not set to -march=native");
+            eprintln!(
+                "[Patcher] [ENV] Native optimizations disabled, KCFLAGS not set to -march=native"
+            );
         }
 
         eprintln!("[Patcher] [ENV] Prepared LLVM/Clang toolchain enforcement");
@@ -574,12 +609,7 @@ impl KernelPatcher {
         // CRITICAL FIX: Preserve /usr/bin and /bin for make and essential tools
         // ============================================================================
         let llvm_bin_path = self.src_dir.join(".llvm_bin").to_string_lossy().to_string();
-        let safe_paths = vec![
-            llvm_bin_path.as_str(),
-            "/usr/bin",
-            "/bin",
-            "/usr/local/bin",
-        ];
+        let safe_paths = vec![llvm_bin_path.as_str(), "/usr/bin", "/bin", "/usr/local/bin"];
 
         let current_path = std::env::var("PATH").unwrap_or_default();
         let filtered_path: Vec<&str> = current_path
@@ -590,17 +620,18 @@ impl KernelPatcher {
                     return true; // Keep these always
                 }
                 // Remove only paths that contain gcc/llvm/clang installations
-                !(p.contains("/gcc") ||
-                  p.contains("/g++") ||
-                  p.contains("/cc") ||
-                  p.contains("/c++") ||
-                  p.contains("/llvm") ||
-                  p.contains("/clang")) &&
-                !p.is_empty()
+                !(p.contains("/gcc")
+                    || p.contains("/g++")
+                    || p.contains("/cc")
+                    || p.contains("/c++")
+                    || p.contains("/llvm")
+                    || p.contains("/clang"))
+                    && !p.is_empty()
             })
             .collect();
 
-        let new_path = format!("{}{}{}",
+        let new_path = format!(
+            "{}{}{}",
             safe_paths.join(":"),
             if filtered_path.is_empty() { "" } else { ":" },
             filtered_path.join(":")
@@ -608,7 +639,7 @@ impl KernelPatcher {
 
         env_vars.insert("PATH".to_string(), new_path.clone());
         eprintln!("[Patcher] [ENV] Purified PATH: {} and /usr/bin:/bin (removed gcc/llvm/clang installations)", llvm_bin_path);
-        
+
         // Verify make is available
         if let Ok(make_cmd) = std::process::Command::new("make").arg("--version").output() {
             if make_cmd.status.success() {
@@ -649,7 +680,10 @@ impl KernelPatcher {
             let makefile_path = find_source_file(&self.src_dir, &relative_makefile_path);
 
             if !makefile_path.exists() {
-                eprintln!("[Patcher] [LTO-SHIELD] Skipping {} - Makefile not found", shield_dir);
+                eprintln!(
+                    "[Patcher] [LTO-SHIELD] Skipping {} - Makefile not found",
+                    shield_dir
+                );
                 continue;
             }
 
@@ -658,15 +692,21 @@ impl KernelPatcher {
 
             // Skip if already shielded
             if content.contains("CFLAGS_amdgpu") && content.contains("filter-out -flto") {
-                eprintln!("[Patcher] [LTO-SHIELD] {} already shielded (idempotent)", shield_dir);
+                eprintln!(
+                    "[Patcher] [LTO-SHIELD] {} already shielded (idempotent)",
+                    shield_dir
+                );
                 shielded_count += 1;
                 continue;
             }
 
             // Create backup
-            let backup_path = self.backup_dir.join(format!("Makefile.{}.bak", shield_dir.replace('/', "_")));
-            fs::create_dir_all(&self.backup_dir)
-                .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup dir: {}", e)))?;
+            let backup_path = self
+                .backup_dir
+                .join(format!("Makefile.{}.bak", shield_dir.replace('/', "_")));
+            fs::create_dir_all(&self.backup_dir).map_err(|e| {
+                PatchError::PatchFailed(format!("Failed to create backup dir: {}", e))
+            })?;
             fs::write(&backup_path, &content)
                 .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup: {}", e)))?;
 
@@ -703,9 +743,10 @@ impl KernelPatcher {
         let makefile_path = find_source_file(&self.src_dir, "Makefile");
 
         if !makefile_path.exists() {
-            return Err(PatchError::FileNotFound(
-                format!("Makefile not found: {}", makefile_path.display())
-            ));
+            return Err(PatchError::FileNotFound(format!(
+                "Makefile not found: {}",
+                makefile_path.display()
+            )));
         }
 
         let original_content = fs::read_to_string(&makefile_path)
@@ -737,7 +778,9 @@ export LLVM LLVM_IAS
         fs::write(&makefile_path, &new_content)
             .map_err(|e| PatchError::PatchFailed(format!("Failed to write Makefile: {}", e)))?;
 
-        eprintln!("[Patcher] [MAKEFILE] Prepended toolchain enforcement block (LLVM=1, LLVM_IAS=1)");
+        eprintln!(
+            "[Patcher] [MAKEFILE] Prepended toolchain enforcement block (LLVM=1, LLVM_IAS=1)"
+        );
         Ok(())
     }
 
@@ -768,58 +811,65 @@ export LLVM LLVM_IAS
         let dkms_conf_dir = "/etc/dkms/framework.conf.d";
         let dkms_conf_file = format!("{}/goatd-toolchain.conf", dkms_conf_dir);
 
-        eprintln!("[Patcher] [DKMS] Target configuration file: {}", dkms_conf_file);
+        eprintln!(
+            "[Patcher] [DKMS] Target configuration file: {}",
+            dkms_conf_file
+        );
 
         // STEP 1: Check if we have root privileges (required for /etc operations)
         if unsafe { libc::getuid() } != 0 {
             eprintln!("[Patcher] [DKMS] WARNING: Not running as root - DKMS config injection requires elevated privileges");
             eprintln!("[Patcher] [DKMS] The configuration file will not be created, but this is not fatal");
-            eprintln!("[Patcher] [DKMS] DKMS builds may fail if run without proper toolchain environment");
+            eprintln!(
+                "[Patcher] [DKMS] DKMS builds may fail if run without proper toolchain environment"
+            );
             return Ok(()); // Not an error - gracefully degrade if not root
         }
 
         // STEP 2: Create /etc/dkms/framework.conf.d directory if it doesn't exist
         eprintln!("[Patcher] [DKMS] Creating directory: {}", dkms_conf_dir);
-        
+
         // Use mkdir -p with sudo to ensure directory creation with proper permissions
-        match Command::new("mkdir")
-            .arg("-p")
-            .arg(dkms_conf_dir)
-            .output()
-        {
+        match Command::new("mkdir").arg("-p").arg(dkms_conf_dir).output() {
             Ok(output) => {
                 if output.status.success() {
-                    eprintln!("[Patcher] [DKMS] ✓ Directory created (or already exists): {}", dkms_conf_dir);
+                    eprintln!(
+                        "[Patcher] [DKMS] ✓ Directory created (or already exists): {}",
+                        dkms_conf_dir
+                    );
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(PatchError::PatchFailed(
-                        format!("Failed to create DKMS config directory: {}", stderr)
-                    ));
+                    return Err(PatchError::PatchFailed(format!(
+                        "Failed to create DKMS config directory: {}",
+                        stderr
+                    )));
                 }
             }
             Err(e) => {
-                return Err(PatchError::PatchFailed(
-                    format!("Failed to execute mkdir for DKMS config directory: {}", e)
-                ));
+                return Err(PatchError::PatchFailed(format!(
+                    "Failed to execute mkdir for DKMS config directory: {}",
+                    e
+                )));
             }
         }
 
         // STEP 3: Set proper permissions on the directory (755 - rwxr-xr-x)
         eprintln!("[Patcher] [DKMS] Setting directory permissions to 755");
-        match Command::new("chmod")
-            .arg("755")
-            .arg(dkms_conf_dir)
-            .output()
-        {
+        match Command::new("chmod").arg("755").arg(dkms_conf_dir).output() {
             Ok(output) => {
                 if output.status.success() {
                     eprintln!("[Patcher] [DKMS] ✓ Directory permissions set to 755");
                 } else {
-                    eprintln!("[Patcher] [DKMS] WARNING: Failed to set directory permissions (non-fatal)");
+                    eprintln!(
+                        "[Patcher] [DKMS] WARNING: Failed to set directory permissions (non-fatal)"
+                    );
                 }
             }
             Err(e) => {
-                eprintln!("[Patcher] [DKMS] WARNING: Failed to chmod directory: {} (non-fatal)", e);
+                eprintln!(
+                    "[Patcher] [DKMS] WARNING: Failed to chmod directory: {} (non-fatal)",
+                    e
+                );
             }
         }
 
@@ -855,16 +905,20 @@ export READELF=llvm-readelf
 "#;
 
         // STEP 5: Write the configuration file
-        eprintln!("[Patcher] [DKMS] Writing configuration to: {}", dkms_conf_file);
-        
+        eprintln!(
+            "[Patcher] [DKMS] Writing configuration to: {}",
+            dkms_conf_file
+        );
+
         match std::fs::write(&dkms_conf_file, config_content) {
             Ok(()) => {
                 eprintln!("[Patcher] [DKMS] ✓ Configuration file written successfully");
             }
             Err(e) => {
-                return Err(PatchError::PatchFailed(
-                    format!("Failed to write DKMS toolchain config: {}", e)
-                ));
+                return Err(PatchError::PatchFailed(format!(
+                    "Failed to write DKMS toolchain config: {}",
+                    e
+                )));
             }
         }
 
@@ -879,11 +933,16 @@ export READELF=llvm-readelf
                 if output.status.success() {
                     eprintln!("[Patcher] [DKMS] ✓ File permissions set to 644");
                 } else {
-                    eprintln!("[Patcher] [DKMS] WARNING: Failed to set file permissions (non-fatal)");
+                    eprintln!(
+                        "[Patcher] [DKMS] WARNING: Failed to set file permissions (non-fatal)"
+                    );
                 }
             }
             Err(e) => {
-                eprintln!("[Patcher] [DKMS] WARNING: Failed to chmod file: {} (non-fatal)", e);
+                eprintln!(
+                    "[Patcher] [DKMS] WARNING: Failed to chmod file: {} (non-fatal)",
+                    e
+                );
             }
         }
 
@@ -897,15 +956,14 @@ export READELF=llvm-readelf
                     Ok(())
                 } else {
                     Err(PatchError::PatchFailed(
-                        "DKMS config file written but content verification failed".to_string()
+                        "DKMS config file written but content verification failed".to_string(),
                     ))
                 }
             }
-            Err(e) => {
-                Err(PatchError::PatchFailed(
-                    format!("Failed to verify DKMS config file after writing: {}", e)
-                ))
-            }
+            Err(e) => Err(PatchError::PatchFailed(format!(
+                "Failed to verify DKMS config file after writing: {}",
+                e
+            ))),
         }
     }
 
@@ -917,9 +975,10 @@ export READELF=llvm-readelf
         let makefile_path = find_source_file(&self.src_dir, "Makefile");
 
         if !makefile_path.exists() {
-            return Err(PatchError::FileNotFound(
-                format!("Makefile not found: {}", makefile_path.display())
-            ));
+            return Err(PatchError::FileNotFound(format!(
+                "Makefile not found: {}",
+                makefile_path.display()
+            )));
         }
 
         let original_content = fs::read_to_string(&makefile_path)
@@ -966,15 +1025,16 @@ export READELF=llvm-readelf
         let pkgbuild_path = self.src_dir.join("PKGBUILD");
 
         if !pkgbuild_path.exists() {
-           return Err(PatchError::FileNotFound(
-                format!("PKGBUILD not found: {}", pkgbuild_path.display())
-           ));
+            return Err(PatchError::FileNotFound(format!(
+                "PKGBUILD not found: {}",
+                pkgbuild_path.display()
+            )));
         }
 
         let original_content = fs::read_to_string(&pkgbuild_path)
             .map_err(|e| PatchError::PatchFailed(format!("Failed to read PKGBUILD: {}", e)))?;
 
-       // Check if the problematic pattern exists (try both patterns)
+        // Check if the problematic pattern exists (try both patterns)
         // The glob pattern `rust/*.rmeta` in install command is the problem we're fixing
         if !original_content.contains("rust/*.rmeta") && !original_content.contains("rust/*.so") {
             return Ok(0); // Fix not needed
@@ -996,22 +1056,22 @@ export READELF=llvm-readelf
         let new_pattern = templates::RUST_RMETA_FIX;
 
         let mut content = original_content.clone();
-        
+
         // Apply the fix if we can find the exact pattern
         if content.contains(old_pattern) {
             content = content.replace(old_pattern, new_pattern);
             eprintln!("[Patcher] [RUST-RMETA] Fixed _package-headers() Rust file installation with safe find pattern");
-            
+
             fs::write(&pkgbuild_path, &content)
                 .map_err(|e| PatchError::PatchFailed(format!("Failed to write PKGBUILD: {}", e)))?;
-            
+
             return Ok(1);
         }
 
         // Fallback: Try a more flexible pattern match
         let rmeta_line = "install -Dt \"$builddir/rust\" -m644 rust/*.rmeta";
         let so_line = "install -Dt \"$builddir/rust\" rust/*.so";
-        
+
         if content.contains(rmeta_line) || content.contains(so_line) {
             let lines: Vec<String> = content
                 .lines()
@@ -1025,24 +1085,24 @@ export READELF=llvm-readelf
                     }
                 })
                 .collect();
-            
+
             content = lines.join("\n");
             if !content.ends_with('\n') {
                 content.push('\n');
             }
-            
+
             eprintln!("[Patcher] [RUST-RMETA] Fixed _package-headers() Rust file installation with flexible pattern");
-            
+
             fs::write(&pkgbuild_path, &content)
                 .map_err(|e| PatchError::PatchFailed(format!("Failed to write PKGBUILD: {}", e)))?;
-            
+
             return Ok(1);
         }
 
-       Ok(0) // Pattern not found, fix not applied
+        Ok(0) // Pattern not found, fix not applied
     }
 
-   /// Surgically remove `-v` flag from all `strip` calls in PKGBUILD
+    /// Surgically remove `-v` flag from all `strip` calls in PKGBUILD
     ///
     /// This targets the incompatibility between llvm-strip and the `-v` flag.
     /// llvm-strip doesn't support `-v` for verbose output, so this method:
@@ -1058,9 +1118,10 @@ export READELF=llvm-readelf
         let pkgbuild_path = self.src_dir.join("PKGBUILD");
 
         if !pkgbuild_path.exists() {
-            return Err(PatchError::FileNotFound(
-                format!("PKGBUILD not found: {}", pkgbuild_path.display())
-            ));
+            return Err(PatchError::FileNotFound(format!(
+                "PKGBUILD not found: {}",
+                pkgbuild_path.display()
+            )));
         }
 
         let original_content = fs::read_to_string(&pkgbuild_path)
@@ -1090,7 +1151,9 @@ export READELF=llvm-readelf
 
         // Replace `strip -v` with `strip`
         let mut content = original_content.clone();
-        content = strip_verbose_regex.replace_all(&content, "strip").to_string();
+        content = strip_verbose_regex
+            .replace_all(&content, "strip")
+            .to_string();
 
         // Write back only if changed
         if content != original_content {
@@ -1099,316 +1162,396 @@ export READELF=llvm-readelf
         }
 
         Ok(match_count)
-     }
+    }
 
-   /// Patch NVIDIA DKMS configurations to enforce Clang/LLVM toolchain
-   ///
-   /// Scans `/usr/src` for NVIDIA DKMS driver directories (matching `nvidia-*`)
-   /// and patches their `dkms.conf` files to inject `LLVM=1 CC=clang` into MAKE commands.
-   ///
-   /// # Implementation Strategy
-   /// 1. Scan `/usr/src` for directories matching `nvidia-*`
-   /// 2. For each NVIDIA source directory, read its `dkms.conf`
-   /// 3. Find `MAKE[0]=...` or `MAKE=...` configuration lines
-   /// 4. Inject `LLVM=1 CC=clang` into the command if not already present
-   /// 5. If no MAKE line exists, append `MAKE[0]="make LLVM=1 CC=clang HOSTCC=clang ..."`
-   /// 6. Ensure idempotency by checking for existing `LLVM=1` presence
-   /// 7. Handle root privilege requirements gracefully
-   /// 8. Log all operations for debugging and verification
-   ///
-   /// # Requires
-   /// - Root privilege (UID 0) to read and write files in `/usr/src`
-   /// - NVIDIA DKMS sources to be present in `/usr/src`
-   ///
-   /// # Idempotency
-   /// - Checks if `LLVM=1` is already in the MAKE command before patching
-   /// - Skips patching if `LLVM=1` is detected (already applied)
-   /// - Creates backups of original dkms.conf files for rollback
-   ///
-   /// # Returns
-   /// Number of NVIDIA DKMS configurations patched, or PatchError on failure
-   pub fn patch_nvidia_dkms_config(&self) -> PatchResult<u32> {
-       log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Starting NVIDIA DKMS configuration patching");
+    /// Patch NVIDIA DKMS configurations to enforce Clang/LLVM toolchain
+    ///
+    /// Scans `/usr/src` for NVIDIA DKMS driver directories (matching `nvidia-*`)
+    /// and patches their `dkms.conf` files to inject `LLVM=1 CC=clang` into MAKE commands.
+    ///
+    /// # Implementation Strategy
+    /// 1. Scan `/usr/src` for directories matching `nvidia-*`
+    /// 2. For each NVIDIA source directory, read its `dkms.conf`
+    /// 3. Find `MAKE[0]=...` or `MAKE=...` configuration lines
+    /// 4. Inject `LLVM=1 CC=clang` into the command if not already present
+    /// 5. If no MAKE line exists, append `MAKE[0]="make LLVM=1 CC=clang HOSTCC=clang ..."`
+    /// 6. Ensure idempotency by checking for existing `LLVM=1` presence
+    /// 7. Handle root privilege requirements gracefully
+    /// 8. Log all operations for debugging and verification
+    ///
+    /// # Requires
+    /// - Root privilege (UID 0) to read and write files in `/usr/src`
+    /// - NVIDIA DKMS sources to be present in `/usr/src`
+    ///
+    /// # Idempotency
+    /// - Checks if `LLVM=1` is already in the MAKE command before patching
+    /// - Skips patching if `LLVM=1` is detected (already applied)
+    /// - Creates backups of original dkms.conf files for rollback
+    ///
+    /// # Returns
+    /// Number of NVIDIA DKMS configurations patched, or PatchError on failure
+    pub fn patch_nvidia_dkms_config(&self) -> PatchResult<u32> {
+        log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Starting NVIDIA DKMS configuration patching");
 
-       // STEP 1: Check root privilege requirement
-       if unsafe { libc::getuid() } != 0 {
-           log::warn!("[Patcher] [NVIDIA-DKMS-CONFIG] WARNING: Not running as root - NVIDIA DKMS config patching requires elevated privileges");
-           log::warn!("[Patcher] [NVIDIA-DKMS-CONFIG] Skipping NVIDIA DKMS config patches (non-fatal)");
-           return Ok(0); // Graceful degradation if not root
-       }
+        // STEP 1: Check root privilege requirement
+        if unsafe { libc::getuid() } != 0 {
+            log::warn!("[Patcher] [NVIDIA-DKMS-CONFIG] WARNING: Not running as root - NVIDIA DKMS config patching requires elevated privileges");
+            log::warn!(
+                "[Patcher] [NVIDIA-DKMS-CONFIG] Skipping NVIDIA DKMS config patches (non-fatal)"
+            );
+            return Ok(0); // Graceful degradation if not root
+        }
 
-       // STEP 2: Scan /usr/src for nvidia-* directories
-       log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Scanning /usr/src for NVIDIA DKMS driver directories");
-       
-       let usr_src_path = std::path::PathBuf::from("/usr/src");
-       if !usr_src_path.exists() {
-           log::warn!("[Patcher] [NVIDIA-DKMS-CONFIG] WARNING: /usr/src does not exist - skipping NVIDIA DKMS config patching");
-           return Ok(0);
-       }
+        // STEP 2: Scan /usr/src for nvidia-* directories
+        log::info!(
+            "[Patcher] [NVIDIA-DKMS-CONFIG] Scanning /usr/src for NVIDIA DKMS driver directories"
+        );
 
-       let mut patched_count = 0u32;
-       let mut nvidia_dirs = Vec::new();
+        let usr_src_path = std::path::PathBuf::from("/usr/src");
+        if !usr_src_path.exists() {
+            log::warn!("[Patcher] [NVIDIA-DKMS-CONFIG] WARNING: /usr/src does not exist - skipping NVIDIA DKMS config patching");
+            return Ok(0);
+        }
 
-       // Enumerate all directories in /usr/src
-       if let Ok(entries) = fs::read_dir(&usr_src_path) {
-           for entry in entries.flatten() {
-               let path = entry.path();
-               if path.is_dir() {
-                   if let Some(dir_name) = path.file_name() {
-                       let name = dir_name.to_string_lossy();
-                       if name.starts_with("nvidia-") {
-                           log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Found NVIDIA source directory: {}", name);
-                           nvidia_dirs.push(path);
-                       }
-                   }
-               }
-           }
-       }
+        let mut patched_count = 0u32;
+        let mut nvidia_dirs = Vec::new();
 
-       if nvidia_dirs.is_empty() {
-           log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] No NVIDIA DKMS source directories found in /usr/src");
-           return Ok(0);
-       }
+        // Enumerate all directories in /usr/src
+        if let Ok(entries) = fs::read_dir(&usr_src_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(dir_name) = path.file_name() {
+                        let name = dir_name.to_string_lossy();
+                        if name.starts_with("nvidia-") {
+                            log::info!(
+                                "[Patcher] [NVIDIA-DKMS-CONFIG] Found NVIDIA source directory: {}",
+                                name
+                            );
+                            nvidia_dirs.push(path);
+                        }
+                    }
+                }
+            }
+        }
 
-       log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Found {} NVIDIA source directories", nvidia_dirs.len());
+        if nvidia_dirs.is_empty() {
+            log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] No NVIDIA DKMS source directories found in /usr/src");
+            return Ok(0);
+        }
 
-       // STEP 3: Process each NVIDIA directory
-       for nvidia_dir in nvidia_dirs {
-           let dkms_conf_path = nvidia_dir.join("dkms.conf");
-           
-           if !dkms_conf_path.exists() {
-               log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] [SKIP] {} - dkms.conf not found", nvidia_dir.display());
-               continue;
-           }
+        log::info!(
+            "[Patcher] [NVIDIA-DKMS-CONFIG] Found {} NVIDIA source directories",
+            nvidia_dirs.len()
+        );
 
-           // EXACT PATH LOGGING: Clear logging of the dkms.conf file being patched
-           let exact_path = dkms_conf_path.canonicalize()
-               .unwrap_or_else(|_| dkms_conf_path.clone());
-           log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] [EXACT-PATH] Processing dkms.conf at: {}", exact_path.display());
-           log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] [PROCESS] Patching: {}", dkms_conf_path.display());
+        // STEP 3: Process each NVIDIA directory
+        for nvidia_dir in nvidia_dirs {
+            let dkms_conf_path = nvidia_dir.join("dkms.conf");
 
-           // Read the original dkms.conf
-           let original_content = match fs::read_to_string(&dkms_conf_path) {
-               Ok(content) => content,
-               Err(e) => {
-                   log::error!("[Patcher] [NVIDIA-DKMS-CONFIG] [ERROR] Failed to read {}: {}", dkms_conf_path.display(), e);
-                   continue;
-               }
-           };
+            if !dkms_conf_path.exists() {
+                log::info!(
+                    "[Patcher] [NVIDIA-DKMS-CONFIG] [SKIP] {} - dkms.conf not found",
+                    nvidia_dir.display()
+                );
+                continue;
+            }
 
-           // STEP 4: Check idempotency - skip if LLVM=1 already present
-           if original_content.contains("LLVM=1") {
-               log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] [SKIP] {} - LLVM=1 already present (idempotent)", dkms_conf_path.display());
-               continue;
-           }
+            // EXACT PATH LOGGING: Clear logging of the dkms.conf file being patched
+            let exact_path = dkms_conf_path
+                .canonicalize()
+                .unwrap_or_else(|_| dkms_conf_path.clone());
+            log::info!(
+                "[Patcher] [NVIDIA-DKMS-CONFIG] [EXACT-PATH] Processing dkms.conf at: {}",
+                exact_path.display()
+            );
+            log::info!(
+                "[Patcher] [NVIDIA-DKMS-CONFIG] [PROCESS] Patching: {}",
+                dkms_conf_path.display()
+            );
 
-           // Create backup before modification
-           let backup_path = self.backup_dir.join(
-               format!("dkms.conf.{}.bak",
-                   nvidia_dir.file_name()
-                       .unwrap_or_default()
-                       .to_string_lossy()
-                       .replace('/', "_"))
-           );
-           fs::create_dir_all(&self.backup_dir)
-               .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup dir: {}", e)))?;
-           
-           if let Err(e) = fs::write(&backup_path, &original_content) {
-               log::warn!("[Patcher] [NVIDIA-DKMS-CONFIG] [WARNING] Failed to create backup for {}: {}", dkms_conf_path.display(), e);
-               // Continue anyway - backup failure is non-fatal
-           }
+            // Read the original dkms.conf
+            let original_content = match fs::read_to_string(&dkms_conf_path) {
+                Ok(content) => content,
+                Err(e) => {
+                    log::error!(
+                        "[Patcher] [NVIDIA-DKMS-CONFIG] [ERROR] Failed to read {}: {}",
+                        dkms_conf_path.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
 
-           // STEP 5: Find and patch MAKE lines
-           let mut new_content = original_content.clone();
-           let mut found_make_line = false;
+            // STEP 4: Check idempotency - skip if LLVM=1 already present
+            if original_content.contains("LLVM=1") {
+                log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] [SKIP] {} - LLVM=1 already present (idempotent)", dkms_conf_path.display());
+                continue;
+            }
 
-           // Try to find MAKE[0]= or MAKE= line and patch it
-           if let Some(caps) = NVIDIA_MAKE_REGEX.captures(&new_content) {
-               found_make_line = true;
-               let full_match = caps.get(0).unwrap();
-               let original_line = full_match.as_str();
-               let make_command = caps.get(2).unwrap().as_str().trim();
-               
-               log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Found MAKE line: {}", original_line);
+            // Create backup before modification
+            let backup_path = self.backup_dir.join(format!(
+                "dkms.conf.{}.bak",
+                nvidia_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .replace('/', "_")
+            ));
+            fs::create_dir_all(&self.backup_dir).map_err(|e| {
+                PatchError::PatchFailed(format!("Failed to create backup dir: {}", e))
+            })?;
 
-               // Inject LLVM=1 CC=clang at the beginning of the make command
-               let patched_line = if make_command.starts_with('"') && make_command.ends_with('"') {
-                   // Remove surrounding quotes, inject flags, re-quote
-                   let inner = &make_command[1..make_command.len()-1];
-                   format!(r#"MAKE[0]="LLVM=1 CC=clang HOSTCC=clang {}"#, inner)
-               } else {
-                   format!(r#"MAKE[0]="LLVM=1 CC=clang HOSTCC=clang {}"#, make_command)
-               };
+            if let Err(e) = fs::write(&backup_path, &original_content) {
+                log::warn!(
+                    "[Patcher] [NVIDIA-DKMS-CONFIG] [WARNING] Failed to create backup for {}: {}",
+                    dkms_conf_path.display(),
+                    e
+                );
+                // Continue anyway - backup failure is non-fatal
+            }
 
-               new_content = new_content.replace(original_line, &patched_line);
-               log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Patched MAKE line with LLVM=1 CC=clang");
-           }
+            // STEP 5: Find and patch MAKE lines
+            let mut new_content = original_content.clone();
+            let mut found_make_line = false;
 
-           // STEP 6: If no MAKE line found, append one
-           if !found_make_line {
-               log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] No MAKE line found - appending default");
-               
-               // Append a properly formatted MAKE[0] line at the end
-               if !new_content.ends_with('\n') {
-                   new_content.push('\n');
-               }
-               new_content.push_str(r#"MAKE[0]="make LLVM=1 CC=clang HOSTCC=clang LLVM_IAS=1""#);
-               new_content.push('\n');
-           }
+            // Try to find MAKE[0]= or MAKE= line and patch it
+            if let Some(caps) = NVIDIA_MAKE_REGEX.captures(&new_content) {
+                found_make_line = true;
+                let full_match = caps.get(0).unwrap();
+                let original_line = full_match.as_str();
+                let make_command = caps.get(2).unwrap().as_str().trim();
 
-           // STEP 7: Write the patched configuration back
-           if let Err(e) = fs::write(&dkms_conf_path, &new_content) {
-               log::error!("[Patcher] [NVIDIA-DKMS-CONFIG] [ERROR] Failed to write patched dkms.conf: {}", e);
-               continue;
-           }
+                log::info!(
+                    "[Patcher] [NVIDIA-DKMS-CONFIG] Found MAKE line: {}",
+                    original_line
+                );
 
-           log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] [SUCCESS] Patched: {}", dkms_conf_path.display());
-           patched_count += 1;
-       }
+                // Inject LLVM=1 CC=clang at the beginning of the make command
+                let patched_line = if make_command.starts_with('"') && make_command.ends_with('"') {
+                    // Remove surrounding quotes, inject flags, re-quote
+                    let inner = &make_command[1..make_command.len() - 1];
+                    format!(r#"MAKE[0]="LLVM=1 CC=clang HOSTCC=clang {}"#, inner)
+                } else {
+                    format!(r#"MAKE[0]="LLVM=1 CC=clang HOSTCC=clang {}"#, make_command)
+                };
 
-       log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Patched {} NVIDIA DKMS configuration(s)", patched_count);
-       Ok(patched_count)
-   }
+                new_content = new_content.replace(original_line, &patched_line);
+                log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] Patched MAKE line with LLVM=1 CC=clang");
+            }
 
-   /// Apply NVIDIA DKMS compatibility shim for memremap.h (page_free field)
-   ///
-   /// Kernel 6.19 removed `page_free` from `struct dev_pagemap_ops`.
-   /// NVIDIA 590.48.01 (nvidia-open) still references this field, causing DKMS failures.
-   /// This method injects a backward compatibility shim into the kernel headers.
-   ///
-   /// CRITICAL: This shim MUST be applied for NVIDIA DKMS builds to succeed.
-   /// The method uses multiple strategies to locate and patch the struct definition,
-   /// ensuring the page_free field is restored for out-of-tree module compatibility.
-   ///
-   /// # Implementation Details
-   /// 1. Locates `struct dev_pagemap_ops` in include/linux/memremap.h (source tree)
-   /// 2. Uses find_source_file helper to handle nested src/ directories from makepkg
-   /// 3. Injects `void (*page_free)(struct page *page);` before struct closing brace
-   /// 4. Idempotent: Checks if field already exists to avoid duplicate additions
-   /// 5. Tries multiple struct closure patterns to handle kernel version variations
-   /// 6. Creates backup of original file for rollback if needed
-   ///
-   /// # Returns
-   /// Number of shims applied (0 or 1) or PatchError on failure
-   pub fn apply_nvidia_dkms_memremap_shim(&self) -> PatchResult<u32> {
-       // Use find_source_file helper to locate memremap.h in root or nested src/ directories
-       let memremap_path = find_source_file(&self.src_dir, "include/linux/memremap.h");
+            // STEP 6: If no MAKE line found, append one
+            if !found_make_line {
+                log::info!("[Patcher] [NVIDIA-DKMS-CONFIG] No MAKE line found - appending default");
 
-       if !memremap_path.exists() {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [CRITICAL] memremap.h not found at: {}", memremap_path.display());
-           eprintln!("[Patcher] [NVIDIA-DKMS] [WARNING] Skipping NVIDIA DKMS shim - this may cause DKMS failures");
-           return Ok(0); // Not a failure - header might not be needed in this kernel
-       }
+                // Append a properly formatted MAKE[0] line at the end
+                if !new_content.ends_with('\n') {
+                    new_content.push('\n');
+                }
+                new_content.push_str(r#"MAKE[0]="make LLVM=1 CC=clang HOSTCC=clang LLVM_IAS=1""#);
+                new_content.push('\n');
+            }
 
-       let original_content = fs::read_to_string(&memremap_path)
-           .map_err(|e| PatchError::PatchFailed(format!("Failed to read memremap.h: {}", e)))?;
+            // STEP 7: Write the patched configuration back
+            if let Err(e) = fs::write(&dkms_conf_path, &new_content) {
+                log::error!(
+                    "[Patcher] [NVIDIA-DKMS-CONFIG] [ERROR] Failed to write patched dkms.conf: {}",
+                    e
+                );
+                continue;
+            }
 
-       eprintln!("[Patcher] [NVIDIA-DKMS] [DEBUG] memremap.h contains {} bytes", original_content.len());
+            log::info!(
+                "[Patcher] [NVIDIA-DKMS-CONFIG] [SUCCESS] Patched: {}",
+                dkms_conf_path.display()
+            );
+            patched_count += 1;
+        }
 
-       // Check if struct dev_pagemap_ops exists
-       if !original_content.contains("struct dev_pagemap_ops") {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [WARNING] struct dev_pagemap_ops not found in memremap.h");
-           eprintln!("[Patcher] [NVIDIA-DKMS] [WARNING] Skipping shim - this kernel version may not need it");
-           return Ok(0); // Not a failure - struct might not exist in this kernel version
-       }
+        log::info!(
+            "[Patcher] [NVIDIA-DKMS-CONFIG] Patched {} NVIDIA DKMS configuration(s)",
+            patched_count
+        );
+        Ok(patched_count)
+    }
 
-       // Check if page_free already exists (idempotent)
-       if original_content.contains("page_free") {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [INFO] page_free field already present (idempotent - already patched)");
-           return Ok(0); // Already patched
-       }
+    /// Apply NVIDIA DKMS compatibility shim for memremap.h (page_free field)
+    ///
+    /// Kernel 6.19 removed `page_free` from `struct dev_pagemap_ops`.
+    /// NVIDIA 590.48.01 (nvidia-open) still references this field, causing DKMS failures.
+    /// This method injects a backward compatibility shim into the kernel headers.
+    ///
+    /// CRITICAL: This shim MUST be applied for NVIDIA DKMS builds to succeed.
+    /// The method uses multiple strategies to locate and patch the struct definition,
+    /// ensuring the page_free field is restored for out-of-tree module compatibility.
+    ///
+    /// # Implementation Details
+    /// 1. Locates `struct dev_pagemap_ops` in include/linux/memremap.h (source tree)
+    /// 2. Uses find_source_file helper to handle nested src/ directories from makepkg
+    /// 3. Injects `void (*page_free)(struct page *page);` before struct closing brace
+    /// 4. Idempotent: Checks if field already exists to avoid duplicate additions
+    /// 5. Tries multiple struct closure patterns to handle kernel version variations
+    /// 6. Creates backup of original file for rollback if needed
+    ///
+    /// # Returns
+    /// Number of shims applied (0 or 1) or PatchError on failure
+    pub fn apply_nvidia_dkms_memremap_shim(&self) -> PatchResult<u32> {
+        // Use find_source_file helper to locate memremap.h in root or nested src/ directories
+        let memremap_path = find_source_file(&self.src_dir, "include/linux/memremap.h");
 
-       eprintln!("[Patcher] [NVIDIA-DKMS] [INFO] page_free field not found - will inject shim");
+        if !memremap_path.exists() {
+            eprintln!(
+                "[Patcher] [NVIDIA-DKMS] [CRITICAL] memremap.h not found at: {}",
+                memremap_path.display()
+            );
+            eprintln!("[Patcher] [NVIDIA-DKMS] [WARNING] Skipping NVIDIA DKMS shim - this may cause DKMS failures");
+            return Ok(0); // Not a failure - header might not be needed in this kernel
+        }
 
-       // Create backup
-       let backup_path = self.backup_dir.join("memremap.h.nvidia_compat.bak");
-       fs::create_dir_all(&self.backup_dir)
-           .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup dir: {}", e)))?;
-       fs::write(&backup_path, &original_content)
-           .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup: {}", e)))?;
+        let original_content = fs::read_to_string(&memremap_path)
+            .map_err(|e| PatchError::PatchFailed(format!("Failed to read memremap.h: {}", e)))?;
 
-       eprintln!("[Patcher] [NVIDIA-DKMS] [BACKUP] Created backup at: {}", backup_path.display());
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [DEBUG] memremap.h contains {} bytes",
+            original_content.len()
+        );
 
-       // Compatibility field definition
-       // This is injected into the struct to allow NVIDIA driver to compile
-       let compat_member = "    void (*page_free)(struct page *page);  /* NVIDIA DKMS compat: restored for 6.19 */";
-       let mut new_content = original_content.clone();
-       
-       // =====================================================================
-       // STRATEGY 1: Find "} dev_pagemap_ops;" pattern (most specific match)
-       // =====================================================================
-       eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-1] Looking for struct closing: '}} dev_pagemap_ops'");
-       if let Some(pos) = new_content.rfind("} dev_pagemap_ops") {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-1] ✓ Found at position {}", pos);
-           new_content.insert_str(pos, &format!("{}\n", compat_member));
-           
-           fs::write(&memremap_path, &new_content)
-               .map_err(|e| PatchError::PatchFailed(format!("Failed to write memremap.h: {}", e)))?;
+        // Check if struct dev_pagemap_ops exists
+        if !original_content.contains("struct dev_pagemap_ops") {
+            eprintln!(
+                "[Patcher] [NVIDIA-DKMS] [WARNING] struct dev_pagemap_ops not found in memremap.h"
+            );
+            eprintln!("[Patcher] [NVIDIA-DKMS] [WARNING] Skipping shim - this kernel version may not need it");
+            return Ok(0); // Not a failure - struct might not exist in this kernel version
+        }
 
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-1] ✓ SUCCESS: Injected page_free field (exact match pattern)");
-           return Ok(1);
-       }
-       eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-1] ✗ Pattern not found, trying Strategy 2...");
+        // Check if page_free already exists (idempotent)
+        if original_content.contains("page_free") {
+            eprintln!("[Patcher] [NVIDIA-DKMS] [INFO] page_free field already present (idempotent - already patched)");
+            return Ok(0); // Already patched
+        }
 
-       // =====================================================================
-       // STRATEGY 2: Find "};" within the struct context (fallback for variations)
-       // =====================================================================
-       eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] Looking for struct closing: '}}; pattern");
-       if let Some(struct_start) = new_content.rfind("struct dev_pagemap_ops") {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✓ Found struct at position {}", struct_start);
-           
-           // Find the first closing brace AFTER struct definition (handles opening brace)
-           if let Some(closing_pos) = new_content[struct_start..].find("};") {
-               let absolute_pos = struct_start + closing_pos;
-               eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✓ Found closing brace at position {}", absolute_pos);
-               new_content.insert_str(absolute_pos, &format!("{}\n", compat_member));
-               
-               fs::write(&memremap_path, &new_content)
-                   .map_err(|e| PatchError::PatchFailed(format!("Failed to write memremap.h: {}", e)))?;
+        eprintln!("[Patcher] [NVIDIA-DKMS] [INFO] page_free field not found - will inject shim");
 
-               eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✓ SUCCESS: Injected page_free field (closing brace pattern)");
-               return Ok(1);
-           }
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✗ Could not find closing brace after struct begin");
-       } else {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✗ struct dev_pagemap_ops not found");
-       }
+        // Create backup
+        let backup_path = self.backup_dir.join("memremap.h.nvidia_compat.bak");
+        fs::create_dir_all(&self.backup_dir)
+            .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup dir: {}", e)))?;
+        fs::write(&backup_path, &original_content)
+            .map_err(|e| PatchError::PatchFailed(format!("Failed to create backup: {}", e)))?;
 
-       // =====================================================================
-       // STRATEGY 3: Use last "};" as fallback (if struct is at EOF)
-       // =====================================================================
-       eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] Trying fallback: searching for last '}}; in file");
-       if let Some(pos) = new_content.rfind("};") {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✓ Found potential match at position {}", pos);
-           // Verify this is likely the dev_pagemap_ops struct by checking context
-           let context_start = if pos > 500 { pos - 500 } else { 0 };
-           let context = &new_content[context_start..pos];
-           
-           if context.contains("struct dev_pagemap_ops") {
-               eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✓ Context confirms this is dev_pagemap_ops struct");
-               new_content.insert_str(pos, &format!("{}\n", compat_member));
-               
-               fs::write(&memremap_path, &new_content)
-                   .map_err(|e| PatchError::PatchFailed(format!("Failed to write memremap.h: {}", e)))?;
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [BACKUP] Created backup at: {}",
+            backup_path.display()
+        );
 
-               eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✓ SUCCESS: Injected page_free field (context-aware fallback)");
-               return Ok(1);
-           }
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✗ Context check failed - not the target struct");
-       } else {
-           eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✗ No '}}; pattern found in file");
-       }
+        // Compatibility field definition
+        // This is injected into the struct to allow NVIDIA driver to compile
+        let compat_member = "    void (*page_free)(struct page *page);  /* NVIDIA DKMS compat: restored for 6.19 */";
+        let mut new_content = original_content.clone();
 
-       // =====================================================================
-       // CRITICAL FAILURE: Could not apply shim with any strategy
-       // =====================================================================
-       eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] CRITICAL: Could not inject page_free field");
-       eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] Tried 3 strategies with different struct location patterns");
-       eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] Struct found: {}", original_content.contains("struct dev_pagemap_ops"));
-       eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] This will likely cause NVIDIA DKMS build failures");
-       eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] Backup available at: {}", backup_path.display());
-       
-       Ok(0) // Return 0 to indicate shim was not applied, but don't fail the build
+        // =====================================================================
+        // STRATEGY 1: Find "} dev_pagemap_ops;" pattern (most specific match)
+        // =====================================================================
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [STRATEGY-1] Looking for struct closing: '}} dev_pagemap_ops'"
+        );
+        if let Some(pos) = new_content.rfind("} dev_pagemap_ops") {
+            eprintln!(
+                "[Patcher] [NVIDIA-DKMS] [STRATEGY-1] ✓ Found at position {}",
+                pos
+            );
+            new_content.insert_str(pos, &format!("{}\n", compat_member));
+
+            fs::write(&memremap_path, &new_content).map_err(|e| {
+                PatchError::PatchFailed(format!("Failed to write memremap.h: {}", e))
+            })?;
+
+            eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-1] ✓ SUCCESS: Injected page_free field (exact match pattern)");
+            return Ok(1);
+        }
+        eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-1] ✗ Pattern not found, trying Strategy 2...");
+
+        // =====================================================================
+        // STRATEGY 2: Find "};" within the struct context (fallback for variations)
+        // =====================================================================
+        eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] Looking for struct closing: '}}; pattern");
+        if let Some(struct_start) = new_content.rfind("struct dev_pagemap_ops") {
+            eprintln!(
+                "[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✓ Found struct at position {}",
+                struct_start
+            );
+
+            // Find the first closing brace AFTER struct definition (handles opening brace)
+            if let Some(closing_pos) = new_content[struct_start..].find("};") {
+                let absolute_pos = struct_start + closing_pos;
+                eprintln!(
+                    "[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✓ Found closing brace at position {}",
+                    absolute_pos
+                );
+                new_content.insert_str(absolute_pos, &format!("{}\n", compat_member));
+
+                fs::write(&memremap_path, &new_content).map_err(|e| {
+                    PatchError::PatchFailed(format!("Failed to write memremap.h: {}", e))
+                })?;
+
+                eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✓ SUCCESS: Injected page_free field (closing brace pattern)");
+                return Ok(1);
+            }
+            eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✗ Could not find closing brace after struct begin");
+        } else {
+            eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-2] ✗ struct dev_pagemap_ops not found");
+        }
+
+        // =====================================================================
+        // STRATEGY 3: Use last "};" as fallback (if struct is at EOF)
+        // =====================================================================
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [STRATEGY-3] Trying fallback: searching for last '}}; in file"
+        );
+        if let Some(pos) = new_content.rfind("};") {
+            eprintln!(
+                "[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✓ Found potential match at position {}",
+                pos
+            );
+            // Verify this is likely the dev_pagemap_ops struct by checking context
+            let context_start = if pos > 500 { pos - 500 } else { 0 };
+            let context = &new_content[context_start..pos];
+
+            if context.contains("struct dev_pagemap_ops") {
+                eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✓ Context confirms this is dev_pagemap_ops struct");
+                new_content.insert_str(pos, &format!("{}\n", compat_member));
+
+                fs::write(&memremap_path, &new_content).map_err(|e| {
+                    PatchError::PatchFailed(format!("Failed to write memremap.h: {}", e))
+                })?;
+
+                eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✓ SUCCESS: Injected page_free field (context-aware fallback)");
+                return Ok(1);
+            }
+            eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✗ Context check failed - not the target struct");
+        } else {
+            eprintln!("[Patcher] [NVIDIA-DKMS] [STRATEGY-3] ✗ No '}}; pattern found in file");
+        }
+
+        // =====================================================================
+        // CRITICAL FAILURE: Could not apply shim with any strategy
+        // =====================================================================
+        eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] CRITICAL: Could not inject page_free field");
+        eprintln!("[Patcher] [NVIDIA-DKMS] [ERROR] Tried 3 strategies with different struct location patterns");
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [ERROR] Struct found: {}",
+            original_content.contains("struct dev_pagemap_ops")
+        );
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [ERROR] This will likely cause NVIDIA DKMS build failures"
+        );
+        eprintln!(
+            "[Patcher] [NVIDIA-DKMS] [ERROR] Backup available at: {}",
+            backup_path.display()
+        );
+
+        Ok(0) // Return 0 to indicate shim was not applied, but don't fail the build
     }
 
     /// Main orchestration entry point for the full kernel patching sequence.
@@ -1459,33 +1602,45 @@ export READELF=llvm-readelf
         eprintln!("[Patcher] [FORCE-CLEAN] Purpose: Reset workspace to known good state");
         eprintln!("[Patcher] [FORCE-CLEAN] Prevents stale/corrupted artifacts from persisting");
         eprintln!("[Patcher] [FORCE-CLEAN] ========================================");
-        
+
         // STEP 1: Remove old build artifacts (.pkg.tar.zst files)
         eprintln!("[Patcher] [FORCE-CLEAN] STEP 1: Removing old build artifacts");
         match self.cleanup_previous_artifacts() {
             Ok(count) => {
-                eprintln!("[Patcher] [FORCE-CLEAN] ✓ Removed {} old artifact(s)", count);
+                eprintln!(
+                    "[Patcher] [FORCE-CLEAN] ✓ Removed {} old artifact(s)",
+                    count
+                );
             }
             Err(e) => {
-                eprintln!("[Patcher] [FORCE-CLEAN] ⚠ WARNING: Failed to clean artifacts: {}", e);
+                eprintln!(
+                    "[Patcher] [FORCE-CLEAN] ⚠ WARNING: Failed to clean artifacts: {}",
+                    e
+                );
                 // Non-fatal - continue with patching
             }
         }
-        
+
         // STEP 2: Clean up old patcher backup directory (accumulates over time)
         eprintln!("[Patcher] [FORCE-CLEAN] STEP 2: Cleaning up patcher backup directory");
         if self.backup_dir.exists() {
             match fs::remove_dir_all(&self.backup_dir) {
                 Ok(()) => {
-                    eprintln!("[Patcher] [FORCE-CLEAN] ✓ Removed backup directory: {}", self.backup_dir.display());
+                    eprintln!(
+                        "[Patcher] [FORCE-CLEAN] ✓ Removed backup directory: {}",
+                        self.backup_dir.display()
+                    );
                 }
                 Err(e) => {
-                    eprintln!("[Patcher] [FORCE-CLEAN] ⚠ WARNING: Failed to clean backup dir: {}", e);
+                    eprintln!(
+                        "[Patcher] [FORCE-CLEAN] ⚠ WARNING: Failed to clean backup dir: {}",
+                        e
+                    );
                     // Non-fatal
                 }
             }
         }
-        
+
         // STEP 3: Remove .kernelrelease files (will be regenerated after successful build)
         eprintln!("[Patcher] [FORCE-CLEAN] STEP 3: Removing stale .kernelrelease files");
         let kernelrelease_path = self.src_dir.join(".kernelrelease");
@@ -1495,11 +1650,14 @@ export READELF=llvm-readelf
                     eprintln!("[Patcher] [FORCE-CLEAN] ✓ Removed stale .kernelrelease");
                 }
                 Err(e) => {
-                    eprintln!("[Patcher] [FORCE-CLEAN] ⚠ WARNING: Could not remove .kernelrelease: {}", e);
+                    eprintln!(
+                        "[Patcher] [FORCE-CLEAN] ⚠ WARNING: Could not remove .kernelrelease: {}",
+                        e
+                    );
                 }
             }
         }
-        
+
         // STEP 4: Verify PKGBUILD consistency (detect corruption early)
         eprintln!("[Patcher] [FORCE-CLEAN] STEP 4: Verifying PKGBUILD consistency");
         let pkgbuild_path = self.src_dir.join("PKGBUILD");
@@ -1517,9 +1675,10 @@ export READELF=llvm-readelf
                             }
                             Err(e) => {
                                 eprintln!("[Patcher] [FORCE-CLEAN] ⚠ ERROR: Could not remove corrupted PKGBUILD: {}", e);
-                                return Err(PatchError::PatchFailed(
-                                    format!("Corrupted PKGBUILD detected but cannot be removed: {}", e)
-                                ));
+                                return Err(PatchError::PatchFailed(format!(
+                                    "Corrupted PKGBUILD detected but cannot be removed: {}",
+                                    e
+                                )));
                             }
                         }
                     } else {
@@ -1527,11 +1686,14 @@ export READELF=llvm-readelf
                     }
                 }
                 Err(e) => {
-                    eprintln!("[Patcher] [FORCE-CLEAN] ⚠ WARNING: Could not verify PKGBUILD: {}", e);
+                    eprintln!(
+                        "[Patcher] [FORCE-CLEAN] ⚠ WARNING: Could not verify PKGBUILD: {}",
+                        e
+                    );
                 }
             }
         }
-        
+
         eprintln!("[Patcher] [FORCE-CLEAN] ========================================");
         eprintln!("[Patcher] [FORCE-CLEAN] WORKSPACE FORCE CLEAN COMPLETE");
         eprintln!("[Patcher] [FORCE-CLEAN] ========================================");
@@ -1539,7 +1701,7 @@ export READELF=llvm-readelf
         // ====================================================================
         // DETECT CONFIGURATION FROM ENVIRONMENT
         // ====================================================================
-        
+
         // Determine LTO Type from environment variable
         let lto_type = match build_env_vars.get("GOATD_LTO_LEVEL").map(|s| s.as_str()) {
             Some("full") => crate::models::LtoType::Full,
@@ -1553,18 +1715,25 @@ export READELF=llvm-readelf
             .get("GOATD_USE_MODPROBED_DB")
             .map(|v| v == "1")
             .unwrap_or(false);
-        
+
         let use_whitelist = build_env_vars
             .get("GOATD_USE_KERNEL_WHITELIST")
             .map(|v| v == "1")
             .unwrap_or(false);
 
         // Extract kernel version and profile for Priority 0 injection
-        let kernel_version = build_env_vars.get("GOATD_KERNELRELEASE").map(|s| s.as_str());
-        let workspace_root = build_env_vars.get("GOATD_WORKSPACE_ROOT").map(|s| s.as_str());
+        let kernel_version = build_env_vars
+            .get("GOATD_KERNELRELEASE")
+            .map(|s| s.as_str());
+        let workspace_root = build_env_vars
+            .get("GOATD_WORKSPACE_ROOT")
+            .map(|s| s.as_str());
         let profile_name = build_env_vars.get("GOATD_PROFILE_NAME").map(|s| s.as_str());
 
-        eprintln!("[Patcher] [ORCHESTRATION] Features: modprobed={}, whitelist={}", use_modprobed, use_whitelist);
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] Features: modprobed={}, whitelist={}",
+            use_modprobed, use_whitelist
+        );
         if let Some(v) = kernel_version {
             eprintln!("[Patcher] [ORCHESTRATION] Kernel Version: {}", v);
         }
@@ -1575,9 +1744,11 @@ export READELF=llvm-readelf
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 1: Starting PKGBUILD surgical injections");
 
         // PHASE 1.A: Module directory creation with Priority 0 version injection
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.A: Injecting module directory creation (PHASE-E2)");
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] PHASE 1.A: Injecting module directory creation (PHASE-E2)"
+        );
         pkgbuild::inject_module_directory_creation(&self.src_dir, kernel_version)?;
-        
+
         // PHASE 1.A: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1586,8 +1757,12 @@ export READELF=llvm-readelf
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.A-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
                         // Show context
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.A-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.A-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.A-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.A-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1596,7 +1771,7 @@ export READELF=llvm-readelf
         // PHASE 1.A.1: Environment variable preservation for fakeroot survival
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.A.1: Injecting environment variable preservation (fakeroot survival)");
         self.inject_variable_preservation(kernel_version)?;
-        
+
         // PHASE 1.A.1: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1604,8 +1779,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.A.1-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.A.1-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.A.1-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.A.1-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.A.1-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1613,12 +1792,17 @@ export READELF=llvm-readelf
 
         // PHASE 1.B: MPL (Metadata Persistence Layer) sourcing
         if let Some(ws_root) = workspace_root {
-            eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.B: Injecting MPL sourcing from workspace: {}", ws_root);
+            eprintln!(
+                "[Patcher] [ORCHESTRATION] PHASE 1.B: Injecting MPL sourcing from workspace: {}",
+                ws_root
+            );
             pkgbuild::inject_mpl_sourcing(&self.src_dir, std::path::Path::new(ws_root))?;
         } else {
-            eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.B: Skipped (GOATD_WORKSPACE_ROOT not set)");
+            eprintln!(
+                "[Patcher] [ORCHESTRATION] PHASE 1.B: Skipped (GOATD_WORKSPACE_ROOT not set)"
+            );
         }
-        
+
         // PHASE 1.B: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1626,8 +1810,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.B-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.B-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.B-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.B-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.B-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1636,7 +1824,7 @@ export READELF=llvm-readelf
         // PHASE 1.C: Clang/LLVM toolchain injection
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.C: Injecting Clang/LLVM toolchain exports");
         self.inject_clang_into_pkgbuild()?;
-        
+
         // PHASE 1.C: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1644,17 +1832,24 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.C-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.C-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.C-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.C-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.C-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
         }
 
         // PHASE 1.D: Modprobed-db localmodconfig logic (if enabled)
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.D: Injecting modprobed-db logic (enabled={})", use_modprobed);
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] PHASE 1.D: Injecting modprobed-db logic (enabled={})",
+            use_modprobed
+        );
         self.inject_modprobed_localmodconfig(use_modprobed)?;
-        
+
         // PHASE 1.D: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1662,8 +1857,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.D-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.D-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.D-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.D-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.D-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1672,7 +1871,7 @@ export READELF=llvm-readelf
         // PHASE 1.E: Kernel whitelist protection (if enabled)
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.E: Injecting kernel whitelist protection (enabled={})", use_whitelist);
         self.inject_kernel_whitelist()?;
-        
+
         // PHASE 1.E: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1680,8 +1879,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.E-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.E-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.E-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.E-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.E-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1690,7 +1893,7 @@ export READELF=llvm-readelf
         // PHASE G1: Prebuild LTO hard enforcer into build()
         eprintln!("[Patcher] [ORCHESTRATION] PHASE G1: Injecting prebuild LTO hard enforcer (lto_type={:?})", lto_type);
         self.inject_prebuild_lto_hard_enforcer(lto_type)?;
-        
+
         // PHASE G1: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1698,8 +1901,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-G1-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-G1-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-G1-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-G1-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-G1-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1708,7 +1915,7 @@ export READELF=llvm-readelf
         // PHASE G2: Post-modprobed hard enforcer into prepare()
         eprintln!("[Patcher] [ORCHESTRATION] PHASE G2: Injecting post-modprobed hard enforcer (enabled={})", use_modprobed);
         self.inject_post_modprobed_hard_enforcer(use_modprobed)?;
-        
+
         // PHASE G2: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1716,8 +1923,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-G2-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-G2-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-G2-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-G2-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-G2-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1726,7 +1937,7 @@ export READELF=llvm-readelf
         // PHASE G2.5: Post-setting-config restorer into prepare()
         eprintln!("[Patcher] [ORCHESTRATION] PHASE G2.5: Injecting post-setting-config restorer (enabled={})", use_modprobed);
         self.inject_post_setting_config_restorer(use_modprobed)?;
-        
+
         // PHASE G2.5: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1734,8 +1945,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-G2.5-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-G2.5-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-G2.5-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-G2.5-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-G2.5-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1743,12 +1958,19 @@ export READELF=llvm-readelf
 
         // PHASE 1.F: Kernel variant rebranding (if profile specified)
         if let Some(profile) = profile_name {
-            eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.F: Applying PKGBUILD rebranding (profile={})", profile);
+            eprintln!(
+                "[Patcher] [ORCHESTRATION] PHASE 1.F: Applying PKGBUILD rebranding (profile={})",
+                profile
+            );
             pkgbuild::patch_pkgbuild_for_rebranding(&self.src_dir, profile)?;
+            
+            // PHASE 1.F.2: Inject Polly optimization flags if present
+            eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.F.2: Checking for Polly optimization flags");
+            pkgbuild::inject_polly_flags(&self.src_dir, &build_env_vars)?;
         } else {
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 1.F: Skipped (GOATD_PROFILE_NAME not set)");
         }
-        
+
         // PHASE 1.F: DIAGNOSTIC LOGGING
         if let Ok(pkgbuild_content) = fs::read_to_string(self.src_dir.join("PKGBUILD")) {
             if pkgbuild_content.contains("pkgrel") {
@@ -1756,8 +1978,12 @@ export READELF=llvm-readelf
                 for (i, line) in lines.iter().enumerate() {
                     if line.contains("pkgrel") && (line.contains("(") || line.contains("()")) {
                         eprintln!("[Patcher] [PHASE-1.F-DIAG] Found pkgrel line (potentially corrupted): Line {}: {}", i+1, line);
-                        if i > 0 { eprintln!("[Patcher] [PHASE-1.F-DIAG]   Previous: {}", lines[i-1]); }
-                        if i < lines.len()-1 { eprintln!("[Patcher] [PHASE-1.F-DIAG]   Next: {}", lines[i+1]); }
+                        if i > 0 {
+                            eprintln!("[Patcher] [PHASE-1.F-DIAG]   Previous: {}", lines[i - 1]);
+                        }
+                        if i < lines.len() - 1 {
+                            eprintln!("[Patcher] [PHASE-1.F-DIAG]   Next: {}", lines[i + 1]);
+                        }
                     }
                 }
             }
@@ -1771,7 +1997,9 @@ export READELF=llvm-readelf
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 2: Starting kernel configuration");
 
         // PHASE 2.A: Apply Kconfig with Clang/LTO enforcement and baked-in cmdline
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 2.A: Applying Kconfig with Phase 5 LTO hard enforcer");
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] PHASE 2.A: Applying Kconfig with Phase 5 LTO hard enforcer"
+        );
         self.apply_kconfig(config_options.clone(), lto_type)?;
 
         // PHASE 2.B: Generate .config.override for KCONFIG_ALLCONFIG safety net
@@ -1780,7 +2008,9 @@ export READELF=llvm-readelf
 
         // PHASE 2.C: Inject modular LOCALVERSION for naming consistency
         if let Some(profile) = profile_name {
-            let variant = self.detect_kernel_variant().unwrap_or_else(|_| "linux".to_string());
+            let variant = self
+                .detect_kernel_variant()
+                .unwrap_or_else(|_| "linux".to_string());
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 2.C: Injecting modular LOCALVERSION (variant={}, profile={})", variant, profile);
             self.inject_modular_localversion(&variant, profile)?;
         }
@@ -1794,15 +2024,23 @@ export READELF=llvm-readelf
 
         // PHASE 3.A: AMD GPU LTO shielding (if shield modules specified)
         if !shield_modules.is_empty() {
-            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.A: Shielding {} AMD GPU modules from LTO", shield_modules.len());
+            eprintln!(
+                "[Patcher] [ORCHESTRATION] PHASE 3.A: Shielding {} AMD GPU modules from LTO",
+                shield_modules.len()
+            );
             let shielded = self.shield_lto(shield_modules)?;
-            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.A: Shielded {} GPU Makefiles", shielded);
+            eprintln!(
+                "[Patcher] [ORCHESTRATION] PHASE 3.A: Shielded {} GPU Makefiles",
+                shielded
+            );
         } else {
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.A: Skipped (no shield modules specified)");
         }
 
         // PHASE 3.B: Patch root Makefile to enforce LLVM=1
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B: Patching root Makefile with LLVM=1 enforcement");
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] PHASE 3.B: Patching root Makefile with LLVM=1 enforcement"
+        );
         self.patch_root_makefile()?;
 
         // PHASE 3.B.1: Inject DKMS toolchain configuration for out-of-tree module enforcement
@@ -1822,7 +2060,7 @@ export READELF=llvm-readelf
         let has_nvidia = gpu::detect_gpu_vendor()
             .map(|vendor| vendor == GpuVendor::Nvidia)
             .unwrap_or(false);
-        
+
         if has_nvidia {
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.B.2: NVIDIA GPU detected - patching NVIDIA DKMS driver configurations");
             match self.patch_nvidia_dkms_config() {
@@ -1845,12 +2083,18 @@ export READELF=llvm-readelf
         // PHASE 3.D: Fix Rust .rmeta and .so installation
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.D: Fixing Rust .rmeta/.so installation for cross-environment compatibility");
         let rust_fixes = self.fix_rust_rmeta_installation()?;
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.D: Applied {} Rust fixes", rust_fixes);
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] PHASE 3.D: Applied {} Rust fixes",
+            rust_fixes
+        );
 
         // PHASE 3.E: Remove strip -v flag for llvm-strip compatibility
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.E: Removing -v flag from strip calls (llvm-strip compatibility)");
         let strip_fixes = self.remove_strip_verbose_flag()?;
-        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.E: Applied {} strip fixes", strip_fixes);
+        eprintln!(
+            "[Patcher] [ORCHESTRATION] PHASE 3.E: Applied {} strip fixes",
+            strip_fixes
+        );
 
         // PHASE 3.F: Apply NVIDIA DKMS compatibility shim (only if NVIDIA GPU detected)
         if has_nvidia {
@@ -1865,30 +2109,32 @@ export READELF=llvm-readelf
         if has_nvidia {
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: NVIDIA GPU detected - injecting NVIDIA DKMS shim into headers package function");
             let header_shim_count = self.inject_nvidia_dkms_shim_into_headers_package()?;
-            eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: Injected {} header package shim(s)", header_shim_count);
+            eprintln!(
+                "[Patcher] [ORCHESTRATION] PHASE 3.G: Injected {} header package shim(s)",
+                header_shim_count
+            );
         } else {
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: Skipped - no NVIDIA GPU detected (header shim not needed)");
         }
 
-         // PHASE 3.H: Inject post-install repair hook for module symlink integrity (PHASE 15)
-         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: Injecting post-install repair hook for module symlinks (PHASE 15)");
-         match self.inject_post_install_repair_hook() {
-             Ok(()) => {
-                 eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: ✓ Post-install repair hook injected successfully");
-             }
-             Err(e) => {
-                 eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: WARNING - Post-install repair hook injection failed (non-fatal): {}", e);
-                 // Continue with patching even if repair hook fails
-             }
-         }
+        // PHASE 3.H: Inject post-install repair hook for module symlink integrity (PHASE 15)
+        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: Injecting post-install repair hook for module symlinks (PHASE 15)");
+        match self.inject_post_install_repair_hook() {
+            Ok(()) => {
+                eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: ✓ Post-install repair hook injected successfully");
+            }
+            Err(e) => {
+                eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.H: WARNING - Post-install repair hook injection failed (non-fatal): {}", e);
+                // Continue with patching even if repair hook fails
+            }
+        }
 
-         eprintln!("[Patcher] [ORCHESTRATION] PHASE 3: Final build system patches complete");
+        eprintln!("[Patcher] [ORCHESTRATION] PHASE 3: Final build system patches complete");
 
-         eprintln!("[Patcher] [ORCHESTRATION] ✓ Full patching sequence completed successfully");
-         Ok(())
+        eprintln!("[Patcher] [ORCHESTRATION] ✓ Full patching sequence completed successfully");
+        Ok(())
     }
-
- }
+}
 
 #[cfg(test)]
 mod tests;

@@ -16,8 +16,10 @@
 //! The `BenchmarkRunManager` stores analyzed benchmark runs with scoring results in
 //! `~/.config/goatd/benchmarks/run_{timestamp}.json` for historical comparison.
 
-use super::{PerformanceMetrics, PerformanceRecord, KernelContext, HistogramBucket, SessionSummary};
 use super::scoring::ScoringResult;
+use super::{
+    HistogramBucket, KernelContext, PerformanceMetrics, PerformanceRecord, SessionSummary,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs;
@@ -44,7 +46,9 @@ impl PerformanceRecordMetadata {
             Ok(duration) => {
                 // Format as YYYY-MM-DD HH:MM:SS
                 let secs = duration.as_secs();
-                let datetime = chrono::DateTime::<chrono::Utc>::from(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs));
+                let datetime = chrono::DateTime::<chrono::Utc>::from(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+                );
                 datetime.format("%Y-%m-%d %H:%M:%S").to_string()
             }
             Err(_) => "Unknown".to_string(),
@@ -75,10 +79,7 @@ pub struct PerformanceSnapshot {
 
 impl PerformanceSnapshot {
     /// Create a new performance snapshot
-    pub fn new(
-        metrics: PerformanceMetrics,
-        kernel_context: KernelContext,
-    ) -> Self {
+    pub fn new(metrics: PerformanceMetrics, kernel_context: KernelContext) -> Self {
         PerformanceSnapshot {
             timestamp: SystemTime::now(),
             metrics,
@@ -98,18 +99,18 @@ impl PerformanceSnapshot {
 /// Instead of allocating Vec per percentile call, uses pre-allocated sorted buckets
 /// that are maintained incrementally as samples arrive. O(1) percentile lookup.
 pub struct RollingWindow {
-     /// Latency samples (microseconds) - 10k samples for precision
-     pub latency_samples: VecDeque<f32>,
-     /// Throughput samples (operations per second) - 20 samples for real-time updates
-     pub throughput_samples: VecDeque<f32>,
-     /// Efficiency samples (microseconds or normalized units) - 20 samples for real-time updates
-     pub efficiency_samples: VecDeque<f32>,
-     /// Consistency samples (P99.9 - P99 delta for rolling consistency tracking) - 10k samples
-     pub consistency_samples: VecDeque<f32>,
-     /// Maximum window size for latency/consistency (10000 samples = 10.0 seconds at 1000Hz)
-     const_max_size: usize,
-     /// Maximum window size for throughput/efficiency (20 samples for ~5s collection frequency)
-     const_throughput_efficiency_max: usize,
+    /// Latency samples (microseconds) - 10k samples for precision
+    pub latency_samples: VecDeque<f32>,
+    /// Throughput samples (operations per second) - 20 samples for real-time updates
+    pub throughput_samples: VecDeque<f32>,
+    /// Efficiency samples (microseconds or normalized units) - 20 samples for real-time updates
+    pub efficiency_samples: VecDeque<f32>,
+    /// Consistency samples (P99.9 - P99 delta for rolling consistency tracking) - 10k samples
+    pub consistency_samples: VecDeque<f32>,
+    /// Maximum window size for latency/consistency (10000 samples = 10.0 seconds at 1000Hz)
+    const_max_size: usize,
+    /// Maximum window size for throughput/efficiency (20 samples for ~5s collection frequency)
+    const_throughput_efficiency_max: usize,
     /// Exponential Moving Average (EMA) of consistency for stability (alpha=0.1 for 50-sample smoothing)
     consistency_ema: f32,
     /// EMA alpha factor for smoothing (0.1 = ~50-sample window equivalent)
@@ -123,24 +124,24 @@ pub struct RollingWindow {
 }
 
 impl RollingWindow {
-      /// Create a new rolling window buffer
-      pub fn new() -> Self {
-          RollingWindow {
-              latency_samples: VecDeque::with_capacity(10000),
-              throughput_samples: VecDeque::with_capacity(20),
-              efficiency_samples: VecDeque::with_capacity(20),
-              consistency_samples: VecDeque::with_capacity(10000),
-              const_max_size: 10000,
-              const_throughput_efficiency_max: 20,
-              consistency_ema: 0.0,
-              consistency_ema_alpha: 0.1, // EMA smoothing factor (alpha=0.1 ~ 50-sample window)
-              // LABORATORY-GRADE: Pre-allocated buckets for future incremental sorting optimization
-              // Currently percentile methods use select_nth_unstable which requires temporary Vec allocation
-              sorted_latency_buckets: Vec::with_capacity(100),
-              sorted_throughput_buckets: Vec::with_capacity(20),
-              sorted_efficiency_buckets: Vec::with_capacity(20),
-          }
-      }
+    /// Create a new rolling window buffer
+    pub fn new() -> Self {
+        RollingWindow {
+            latency_samples: VecDeque::with_capacity(10000),
+            throughput_samples: VecDeque::with_capacity(20),
+            efficiency_samples: VecDeque::with_capacity(20),
+            consistency_samples: VecDeque::with_capacity(10000),
+            const_max_size: 10000,
+            const_throughput_efficiency_max: 20,
+            consistency_ema: 0.0,
+            consistency_ema_alpha: 0.1, // EMA smoothing factor (alpha=0.1 ~ 50-sample window)
+            // LABORATORY-GRADE: Pre-allocated buckets for future incremental sorting optimization
+            // Currently percentile methods use select_nth_unstable which requires temporary Vec allocation
+            sorted_latency_buckets: Vec::with_capacity(100),
+            sorted_throughput_buckets: Vec::with_capacity(20),
+            sorted_efficiency_buckets: Vec::with_capacity(20),
+        }
+    }
 
     /// Add a latency sample and maintain 1000-sample window
     pub fn add_latency(&mut self, value: f32) {
@@ -173,7 +174,7 @@ impl RollingWindow {
         if self.consistency_samples.len() > self.const_max_size {
             self.consistency_samples.pop_front();
         }
-        
+
         // Update EMA: smoother = (1 - alpha) * previous + alpha * new
         // With alpha=0.1, this provides ~50-sample smoothing window
         if self.consistency_ema == 0.0 {
@@ -181,7 +182,7 @@ impl RollingWindow {
             self.consistency_ema = value;
         } else {
             self.consistency_ema = (1.0 - self.consistency_ema_alpha) * self.consistency_ema
-                                 + self.consistency_ema_alpha * value;
+                + self.consistency_ema_alpha * value;
         }
     }
 
@@ -192,18 +193,20 @@ impl RollingWindow {
         if self.latency_samples.is_empty() {
             return 0.0;
         }
-        
+
         // LABORATORY-GRADE: Use incremental sorted bucket for O(1) percentile lookup
         // instead of allocating Vec and sorting every call
         // For now, fall back to select_nth_unstable (O(N)) but with inline allocation
         // Future: maintain sorted_latency_buckets incrementally as samples arrive
-        
+
         let mut samples: Vec<f32> = self.latency_samples.iter().copied().collect();
         let p99_index = (samples.len() as f32 * 0.99) as usize;
         let index = p99_index.min(samples.len().saturating_sub(1));
-        
+
         if index < samples.len() {
-            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            });
             v
         } else {
             0.0
@@ -217,15 +220,17 @@ impl RollingWindow {
         if self.latency_samples.is_empty() {
             return 0.0;
         }
-        
+
         // LABORATORY-GRADE: More aggressive percentile (99.9% vs 99%)
         // Captures extreme tail behavior with minimal allocation impact
         let mut samples: Vec<f32> = self.latency_samples.iter().copied().collect();
         let p99_9_index = (samples.len() as f32 * 0.999) as usize;
         let index = p99_9_index.min(samples.len().saturating_sub(1));
-        
+
         if index < samples.len() {
-            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            });
             v
         } else {
             0.0
@@ -238,11 +243,11 @@ impl RollingWindow {
     pub fn calculate_p99_consistency(&self) -> f32 {
         let p99 = self.calculate_p99_latency();
         let p99_9 = self.calculate_p99_9_latency();
-        
+
         // Consistency KPI = delta between P99.9 and P99
         p99_9 - p99
     }
-    
+
     /// Get smoothed consistency value using exponential moving average
     /// Returns EMA-smoothed consistency to prevent "jumping" metric display
     /// Applies ~50-sample smoothing window for stable visual feedback
@@ -258,20 +263,23 @@ impl RollingWindow {
         if self.latency_samples.len() < 2 {
             return 0.0;
         }
-        
+
         // Calculate mean
         let mean = self.latency_samples.iter().sum::<f32>() / self.latency_samples.len() as f32;
-        
+
         if mean == 0.0 {
             return 0.0;
         }
-        
+
         // Calculate standard deviation
-        let variance = self.latency_samples.iter()
+        let variance = self
+            .latency_samples
+            .iter()
             .map(|x| (x - mean).powi(2))
-            .sum::<f32>() / self.latency_samples.len() as f32;
+            .sum::<f32>()
+            / self.latency_samples.len() as f32;
         let std_dev = variance.sqrt();
-        
+
         // Calculate and return CV
         std_dev / mean
     }
@@ -284,16 +292,19 @@ impl RollingWindow {
         if self.latency_samples.len() < 2 {
             return 0.0;
         }
-        
+
         // Calculate mean
         let mean = self.latency_samples.iter().sum::<f32>() / self.latency_samples.len() as f32;
-        
+
         // Calculate standard deviation directly
-        let variance = self.latency_samples.iter()
+        let variance = self
+            .latency_samples
+            .iter()
             .map(|x| (x - mean).powi(2))
-            .sum::<f32>() / self.latency_samples.len() as f32;
+            .sum::<f32>()
+            / self.latency_samples.len() as f32;
         let std_dev = variance.sqrt();
-        
+
         // Return standard deviation in microseconds (already in µs from input samples)
         std_dev
     }
@@ -306,10 +317,15 @@ impl RollingWindow {
         if self.latency_samples.is_empty() {
             return 0.0;
         }
-        
+
         // Return the absolute maximum from the rolling window
         // Clamp to 10,000µs (10ms) to align with gauge ceiling
-        self.latency_samples.iter().copied().fold(f32::NEG_INFINITY, f32::max).min(10000.0).max(0.0)
+        self.latency_samples
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max)
+            .min(10000.0)
+            .max(0.0)
     }
 
     /// Calculate P99 from the throughput window
@@ -318,15 +334,17 @@ impl RollingWindow {
         if self.throughput_samples.is_empty() {
             return 0.0;
         }
-        
+
         let mut samples: Vec<f32> = self.throughput_samples.iter().copied().collect();
-        
+
         let p99_index = (samples.len() as f32 * 0.99) as usize;
         let index = p99_index.min(samples.len() - 1);
-        
+
         // select_nth_unstable is O(N) instead of O(N log N) for sort
         if index < samples.len() {
-            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            });
             v
         } else {
             0.0
@@ -339,15 +357,17 @@ impl RollingWindow {
         if self.efficiency_samples.is_empty() {
             return 0.0;
         }
-        
+
         let mut samples: Vec<f32> = self.efficiency_samples.iter().copied().collect();
-        
+
         let p99_index = (samples.len() as f32 * 0.99) as usize;
         let index = p99_index.min(samples.len() - 1);
-        
+
         // select_nth_unstable is O(N) instead of O(N log N) for sort
         if index < samples.len() {
-            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let (_, &mut v, _) = samples.select_nth_unstable_by(index, |a, b| {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            });
             v
         } else {
             0.0
@@ -361,7 +381,7 @@ impl RollingWindow {
         self.efficiency_samples.clear();
         self.consistency_samples.clear();
         self.consistency_ema = 0.0; // Reset EMA on clear
-        // CRITICAL: Also clear pre-allocated sorted buckets for zero-allocation state
+                                    // CRITICAL: Also clear pre-allocated sorted buckets for zero-allocation state
         self.sorted_latency_buckets.clear();
         self.sorted_throughput_buckets.clear();
         self.sorted_efficiency_buckets.clear();
@@ -429,8 +449,8 @@ impl PerformanceHistory {
         metrics.rolling_efficiency_p99 = self.rolling_window.calculate_p99_efficiency();
         // Use EMA-smoothed consistency to prevent "jumping" metric display (alpha=0.1 ~ 50-sample smoothing)
         metrics.rolling_consistency_us = self.rolling_window.get_smoothed_consistency();
-        metrics.rolling_jitter_us = self.rolling_window.calculate_max_jitter();  // Peak jitter from rolling window
-        
+        metrics.rolling_jitter_us = self.rolling_window.calculate_max_jitter(); // Peak jitter from rolling window
+
         // Create snapshot with complete metric data
         PerformanceSnapshot::new(metrics, kernel_context)
     }
@@ -488,45 +508,62 @@ impl PerformanceHistory {
     /// Save history to disk as JSON
     pub fn save_to_disk(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
         let path_ref = path.as_ref();
-        eprintln!("[HISTORY] Saving {} snapshots to {}", self.snapshots.len(), path_ref.display());
-        
+        eprintln!(
+            "[HISTORY] Saving {} snapshots to {}",
+            self.snapshots.len(),
+            path_ref.display()
+        );
+
         // Ensure parent directory exists
         if let Some(parent) = path_ref.parent() {
-            eprintln!("[HISTORY] Ensuring parent directory exists: {}", parent.display());
+            eprintln!(
+                "[HISTORY] Ensuring parent directory exists: {}",
+                parent.display()
+            );
             fs::create_dir_all(parent)?;
             eprintln!("[HISTORY] ✓ Parent directory ready");
         }
-        
+
         let json = serde_json::to_string_pretty(&self.snapshots)?;
         eprintln!("[HISTORY] Serialized JSON size: {} bytes", json.len());
-        
+
         fs::write(path_ref, &json)?;
         eprintln!("[HISTORY] ✓ Successfully persisted history to disk");
         Ok(())
     }
 
     /// Load history from disk
-    pub fn load_from_disk(&mut self, path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn load_from_disk(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let path_ref = path.as_ref();
         eprintln!("[HISTORY] Loading history from {}", path_ref.display());
-        
+
         if !path_ref.exists() {
             eprintln!("[HISTORY] File does not exist yet (new profile), skipping load");
             return Ok(());
         }
-        
+
         let json = fs::read_to_string(path_ref)?;
         eprintln!("[HISTORY] Loaded JSON file: {} bytes", json.len());
-        
+
         let loaded: Vec<PerformanceSnapshot> = serde_json::from_str(&json)?;
-        eprintln!("[HISTORY] Deserialized {} snapshots from JSON", loaded.len());
+        eprintln!(
+            "[HISTORY] Deserialized {} snapshots from JSON",
+            loaded.len()
+        );
 
         self.snapshots.clear();
         for snapshot in loaded.into_iter().take(self.max_snapshots) {
             self.snapshots.push_back(snapshot);
         }
-        
-        eprintln!("[HISTORY] ✓ Loaded {} snapshots (limited to max {})", self.snapshots.len(), self.max_snapshots);
+
+        eprintln!(
+            "[HISTORY] ✓ Loaded {} snapshots (limited to max {})",
+            self.snapshots.len(),
+            self.max_snapshots
+        );
         Ok(())
     }
 
@@ -548,15 +585,13 @@ impl PerformanceHistory {
         active_stressors: Vec<String>,
         histogram_buckets: Vec<HistogramBucket>,
     ) -> Option<PerformanceRecord> {
-        self.latest().map(|snapshot| {
-            PerformanceRecord {
-                timestamp: snapshot.timestamp,
-                kernel_context: snapshot.kernel_context,
-                metrics: snapshot.metrics,
-                active_stressors,
-                histogram_buckets,
-                label: None,
-            }
+        self.latest().map(|snapshot| PerformanceRecord {
+            timestamp: snapshot.timestamp,
+            kernel_context: snapshot.kernel_context,
+            metrics: snapshot.metrics,
+            active_stressors,
+            histogram_buckets,
+            label: None,
         })
     }
 }
@@ -594,27 +629,27 @@ impl HistoryManager {
             .ok()
             .map(PathBuf::from)
             .or_else(|| {
-                std::env::var("HOME").ok().map(|h| {
-                    PathBuf::from(h).join(".config")
-                })
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| PathBuf::from(h).join(".config"))
             })
             .unwrap_or_else(|| PathBuf::from("/tmp/.config"))
             .join("goatdkernel")
             .join("performance")
             .join("records");
-        
+
         config_dir
     }
 
     /// Generate a unique filename based on timestamp and session ID
     fn generate_filename() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        
+
         format!("perf_record_{}.json", now)
     }
 
@@ -625,7 +660,11 @@ impl HistoryManager {
     /// Preserves the custom label from the SessionSummary for later display.
     ///
     /// Returns the ID (filename) of the saved record.
-    pub fn save_record(&self, summary: SessionSummary, histogram_buckets: Vec<HistogramBucket>) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn save_record(
+        &self,
+        summary: SessionSummary,
+        histogram_buckets: Vec<HistogramBucket>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         // Build the complete performance record, preserving the label
         let record = PerformanceRecord {
             timestamp: summary.timestamp_start,
@@ -640,18 +679,28 @@ impl HistoryManager {
         let filename = Self::generate_filename();
         let filepath = self.records_dir.join(&filename);
 
-        eprintln!("[HISTORY_MANAGER] Saving performance record to: {}", filepath.display());
+        eprintln!(
+            "[HISTORY_MANAGER] Saving performance record to: {}",
+            filepath.display()
+        );
         if let Some(ref lbl) = record.label {
             eprintln!("[HISTORY_MANAGER] Record label: {}", lbl);
         }
 
         // Serialize to pretty JSON for user readability
         let json = serde_json::to_string_pretty(&record)?;
-        eprintln!("[HISTORY_MANAGER] Serialized record size: {} bytes", json.len());
+        eprintln!(
+            "[HISTORY_MANAGER] Serialized record size: {} bytes",
+            json.len()
+        );
 
         // Write to disk
         fs::write(&filepath, &json)?;
-        eprintln!("[HISTORY_MANAGER] ✓ Record persisted: {} (label: {})", filename, record.label.as_ref().unwrap_or(&"None".to_string()));
+        eprintln!(
+            "[HISTORY_MANAGER] ✓ Record persisted: {} (label: {})",
+            filename,
+            record.label.as_ref().unwrap_or(&"None".to_string())
+        );
 
         Ok(filename)
     }
@@ -663,7 +712,10 @@ impl HistoryManager {
         let mut records = Vec::new();
 
         if !self.records_dir.exists() {
-            eprintln!("[HISTORY_MANAGER] Records directory does not exist: {}", self.records_dir.display());
+            eprintln!(
+                "[HISTORY_MANAGER] Records directory does not exist: {}",
+                self.records_dir.display()
+            );
             return Ok(records);
         }
 
@@ -692,7 +744,9 @@ impl HistoryManager {
     ///
     /// Returns a sorted list of `PerformanceRecordMetadata` with display names in reverse chronological order.
     /// This method performs minimal JSON parsing to extract only label and timestamp without loading full metrics.
-    pub fn list_records_metadata(&self) -> Result<Vec<PerformanceRecordMetadata>, Box<dyn std::error::Error>> {
+    pub fn list_records_metadata(
+        &self,
+    ) -> Result<Vec<PerformanceRecordMetadata>, Box<dyn std::error::Error>> {
         #[derive(Deserialize)]
         struct LabeledRecord {
             timestamp: SystemTime,
@@ -703,7 +757,10 @@ impl HistoryManager {
         let mut metadata = Vec::new();
 
         if !self.records_dir.exists() {
-            eprintln!("[HISTORY_MANAGER] Records directory does not exist: {}", self.records_dir.display());
+            eprintln!(
+                "[HISTORY_MANAGER] Records directory does not exist: {}",
+                self.records_dir.display()
+            );
             return Ok(metadata);
         }
 
@@ -717,23 +774,24 @@ impl HistoryManager {
                     if filename_str.starts_with("perf_record_") && filename_str.ends_with(".json") {
                         // Read and parse minimal fields
                         match fs::read_to_string(&path) {
-                            Ok(json) => {
-                                match serde_json::from_str::<LabeledRecord>(&json) {
-                                    Ok(record) => {
-                                        let meta = PerformanceRecordMetadata::new(
-                                            filename_str.to_string(),
-                                            record.label,
-                                            record.timestamp,
-                                        );
-                                        metadata.push(meta);
-                                    }
-                                    Err(e) => {
-                                        eprintln!("[HISTORY_MANAGER] Warning: Failed to parse metadata from {}: {}", filename_str, e);
-                                    }
+                            Ok(json) => match serde_json::from_str::<LabeledRecord>(&json) {
+                                Ok(record) => {
+                                    let meta = PerformanceRecordMetadata::new(
+                                        filename_str.to_string(),
+                                        record.label,
+                                        record.timestamp,
+                                    );
+                                    metadata.push(meta);
                                 }
-                            }
+                                Err(e) => {
+                                    eprintln!("[HISTORY_MANAGER] Warning: Failed to parse metadata from {}: {}", filename_str, e);
+                                }
+                            },
                             Err(e) => {
-                                eprintln!("[HISTORY_MANAGER] Warning: Failed to read {}: {}", filename_str, e);
+                                eprintln!(
+                                    "[HISTORY_MANAGER] Warning: Failed to read {}: {}",
+                                    filename_str, e
+                                );
                             }
                         }
                     }
@@ -743,7 +801,10 @@ impl HistoryManager {
 
         // Sort in reverse order by timestamp (newest first)
         metadata.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        eprintln!("[HISTORY_MANAGER] Listed {} record metadata entries", metadata.len());
+        eprintln!(
+            "[HISTORY_MANAGER] Listed {} record metadata entries",
+            metadata.len()
+        );
 
         Ok(metadata)
     }
@@ -754,7 +815,10 @@ impl HistoryManager {
     pub fn load_record(&self, id: &str) -> Result<PerformanceRecord, Box<dyn std::error::Error>> {
         let filepath = self.records_dir.join(id);
 
-        eprintln!("[HISTORY_MANAGER] Loading record from: {}", filepath.display());
+        eprintln!(
+            "[HISTORY_MANAGER] Loading record from: {}",
+            filepath.display()
+        );
 
         if !filepath.exists() {
             return Err(format!("Record not found: {}", id).into());
@@ -864,26 +928,26 @@ impl BenchmarkRunManager {
             .ok()
             .map(PathBuf::from)
             .or_else(|| {
-                std::env::var("HOME").ok().map(|h| {
-                    PathBuf::from(h).join(".config")
-                })
+                std::env::var("HOME")
+                    .ok()
+                    .map(|h| PathBuf::from(h).join(".config"))
             })
             .unwrap_or_else(|| PathBuf::from("/tmp/.config"))
             .join("goatd")
             .join("benchmarks");
-        
+
         config_dir
     }
 
     /// Generate unique filename based on timestamp
     fn generate_filename() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        
+
         format!("run_{}.json", now)
     }
 
@@ -895,15 +959,24 @@ impl BenchmarkRunManager {
         let filename = Self::generate_filename();
         let filepath = self.benchmarks_dir.join(&filename);
 
-        eprintln!("[BENCHMARK_MANAGER] Saving benchmark run to: {}", filepath.display());
+        eprintln!(
+            "[BENCHMARK_MANAGER] Saving benchmark run to: {}",
+            filepath.display()
+        );
 
         // Serialize to pretty JSON for user readability
         let json = serde_json::to_string_pretty(&run)?;
-        eprintln!("[BENCHMARK_MANAGER] Serialized run size: {} bytes", json.len());
+        eprintln!(
+            "[BENCHMARK_MANAGER] Serialized run size: {} bytes",
+            json.len()
+        );
 
         // Write to disk
         fs::write(&filepath, &json)?;
-        eprintln!("[BENCHMARK_MANAGER] ✓ Benchmark run persisted: {}", filename);
+        eprintln!(
+            "[BENCHMARK_MANAGER] ✓ Benchmark run persisted: {}",
+            filename
+        );
 
         // Return ID without extension for consistency with HistoryManager
         Ok(filename.replace(".json", ""))
@@ -916,7 +989,10 @@ impl BenchmarkRunManager {
         let mut runs = Vec::new();
 
         if !self.benchmarks_dir.exists() {
-            eprintln!("[BENCHMARK_MANAGER] Benchmarks directory does not exist: {}", self.benchmarks_dir.display());
+            eprintln!(
+                "[BENCHMARK_MANAGER] Benchmarks directory does not exist: {}",
+                self.benchmarks_dir.display()
+            );
             return Ok(runs);
         }
 
@@ -951,10 +1027,13 @@ impl BenchmarkRunManager {
         } else {
             format!("{}.json", id)
         };
-        
+
         let filepath = self.benchmarks_dir.join(&filename);
 
-        eprintln!("[BENCHMARK_MANAGER] Loading benchmark run from: {}", filepath.display());
+        eprintln!(
+            "[BENCHMARK_MANAGER] Loading benchmark run from: {}",
+            filepath.display()
+        );
 
         if !filepath.exists() {
             return Err(format!("Benchmark run not found: {}", id).into());
@@ -976,7 +1055,7 @@ impl BenchmarkRunManager {
         } else {
             format!("{}.json", id)
         };
-        
+
         let filepath = self.benchmarks_dir.join(&filename);
 
         if !filepath.exists() {
@@ -1078,7 +1157,10 @@ mod tests {
 
         history.add_snapshot(snapshot.clone());
         assert!(history.latest().is_some());
-        assert_eq!(history.latest().unwrap().metrics.max_us, snapshot.metrics.max_us);
+        assert_eq!(
+            history.latest().unwrap().metrics.max_us,
+            snapshot.metrics.max_us
+        );
     }
 
     #[test]
@@ -1120,7 +1202,7 @@ mod tests {
     #[test]
     fn test_benchmark_run_creation() {
         use crate::system::performance::scoring::PersonalityType;
-        
+
         let run = BenchmarkRun::new(
             KernelContext {
                 version: "6.7.0".to_string(),

@@ -33,13 +33,19 @@ impl PmQosGuard {
                 let fd = file.as_raw_fd();
                 let val: i32 = 0;
                 unsafe {
-                    libc::write(fd, &val as *const i32 as *const libc::c_void, std::mem::size_of::<i32>());
+                    libc::write(
+                        fd,
+                        &val as *const i32 as *const libc::c_void,
+                        std::mem::size_of::<i32>(),
+                    );
                 }
                 Ok(Some(file))
             }
             Err(e) => {
                 eprintln!("Warning: Could not open /dev/cpu_dma_latency: {}", e);
-                eprintln!("C-states will not be disabled. Run with elevated privileges for full effect.");
+                eprintln!(
+                    "C-states will not be disabled. Run with elevated privileges for full effect."
+                );
                 Ok(None)
             }
         }
@@ -77,16 +83,21 @@ impl Tuner {
     /// This must be called on the thread that will perform measurement.
     /// The returned Tuner must be kept alive for the entire measurement duration
     /// to maintain the PM QoS file handle open.
-    pub fn apply_realtime_settings(&mut self, core: usize) -> Result<(), Box<dyn std::error::Error>> {
-        eprintln!("[TUNER] Starting real-time settings application for core {}", core);
-        
+    pub fn apply_realtime_settings(
+        &mut self,
+        core: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        eprintln!(
+            "[TUNER] Starting real-time settings application for core {}",
+            core
+        );
+
         // 1. Lock memory to prevent page faults
         eprintln!("[TUNER] Step 1: mlockall (MCL_CURRENT | MCL_FUTURE)");
-        mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE)
-            .map_err(|e| {
-                eprintln!("[TUNER] ✗ mlockall failed: {}", e);
-                format!("mlockall failed: {}", e)
-            })?;
+        mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE).map_err(|e| {
+            eprintln!("[TUNER] ✗ mlockall failed: {}", e);
+            format!("mlockall failed: {}", e)
+        })?;
         eprintln!("[TUNER] ✓ Memory locked");
 
         // 2. Prefault the stack by writing to an 8KB buffer
@@ -144,7 +155,11 @@ impl Tuner {
 
             let ret = libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set);
             if ret < 0 {
-                return Err(format!("sched_setaffinity failed with errno: {}", std::io::Error::last_os_error()).into());
+                return Err(format!(
+                    "sched_setaffinity failed with errno: {}",
+                    std::io::Error::last_os_error()
+                )
+                .into());
             }
         }
 
@@ -160,7 +175,11 @@ impl Tuner {
 
             let ret = libc::sched_setscheduler(0, libc::SCHED_FIFO, &param);
             if ret < 0 {
-                return Err(format!("sched_setscheduler failed with errno: {}", std::io::Error::last_os_error()).into());
+                return Err(format!(
+                    "sched_setscheduler failed with errno: {}",
+                    std::io::Error::last_os_error()
+                )
+                .into());
             }
         }
 
@@ -184,12 +203,10 @@ pub fn ensure_msr_module_loaded() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     eprintln!("[MSR_MODULE] MSR module not detected, attempting to load via modprobe...");
-    
+
     // Try to load the msr module
-    let output = std::process::Command::new("modprobe")
-        .arg("msr")
-        .output()?;
-    
+    let output = std::process::Command::new("modprobe").arg("msr").output()?;
+
     if output.status.success() {
         eprintln!("[MSR_MODULE] ✓ Successfully loaded MSR module");
         Ok(())

@@ -53,11 +53,11 @@ impl LtoDecision {
 /// Driver policy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriverPolicy {
-    pub name: String,                 // Name
-    pub include: Vec<String>,         // Include
-    pub exclude: Vec<String>,         // Exclude
-    pub requires_lto_shield: bool,    // Shield?
-    pub reason: String,               // Reason
+    pub name: String,              // Name
+    pub include: Vec<String>,      // Include
+    pub exclude: Vec<String>,      // Exclude
+    pub requires_lto_shield: bool, // Shield?
+    pub reason: String,            // Reason
 }
 
 impl DriverPolicy {
@@ -92,12 +92,12 @@ impl DriverPolicy {
 /// HW policy output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwarePolicy {
-    pub gpu_decision: GpuDecision,     // GPU
-    pub lto_decision: LtoDecision,     // LTO
-    pub driver_policy: DriverPolicy,   // Drivers
-    pub lto_auto_downgraded: bool,     // Downgraded?
+    pub gpu_decision: GpuDecision,         // GPU
+    pub lto_decision: LtoDecision,         // LTO
+    pub driver_policy: DriverPolicy,       // Drivers
+    pub lto_auto_downgraded: bool,         // Downgraded?
     pub mutual_exclusivity_enforced: bool, // MutEx?
-    pub rationale: String,             // Reason
+    pub rationale: String,                 // Reason
 }
 
 impl HardwarePolicy {
@@ -132,10 +132,10 @@ impl HardwarePolicy {
 /// Policy application result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyApplicationResult {
-    pub success: bool,                  // OK?
-    pub policy: HardwarePolicy,         // Policy
-    pub drivers_excluded: Vec<String>,  // Excluded
-    pub error: Option<String>,          // Error
+    pub success: bool,                 // OK?
+    pub policy: HardwarePolicy,        // Policy
+    pub drivers_excluded: Vec<String>, // Excluded
+    pub error: Option<String>,         // Error
 }
 
 /// GPU detection info.
@@ -212,13 +212,7 @@ mod tests {
         let policy = HardwarePolicy::new(
             GpuDecision::NvidiaOnly,
             LtoDecision::FullLto,
-            DriverPolicy::new(
-                "nvidia_only",
-                vec![],
-                vec![],
-                false,
-                "Test",
-            ),
+            DriverPolicy::new("nvidia_only", vec![], vec![], false, "Test"),
         );
         let json = serde_json::to_string(&policy).unwrap();
         let deserialized: HardwarePolicy = serde_json::from_str(&json).unwrap();

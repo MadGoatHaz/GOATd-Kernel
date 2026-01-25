@@ -10,10 +10,9 @@
 //! - **Personality Analysis**: Derives personality type based on metric strengths
 //! - **Balanced Override**: Detects versatile kernels with no dominant weakness
 
+use crate::system::performance::{BenchmarkMetrics, PerformanceMetrics};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use crate::system::performance::{BenchmarkMetrics, PerformanceMetrics};
-
 
 /// Personality profile for a kernel configuration
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,12 +49,24 @@ impl PersonalityType {
     /// Get a brief description of this personality
     pub fn description(&self) -> &'static str {
         match self {
-            PersonalityType::Gaming => "Optimized for fast, responsive gaming and interactive workloads",
-            PersonalityType::RealTime => "Ultra-precise real-time performance with micro-latency focus",
-            PersonalityType::Workstation => "Balanced performance suitable for creative and development work",
-            PersonalityType::Throughput => "Optimized for high syscall throughput and parallel workloads",
-            PersonalityType::Balanced => "Versatile all-around performance with no dominant weakness",
-            PersonalityType::Server => "Optimized for stable task scheduling and long-term efficiency",
+            PersonalityType::Gaming => {
+                "Optimized for fast, responsive gaming and interactive workloads"
+            }
+            PersonalityType::RealTime => {
+                "Ultra-precise real-time performance with micro-latency focus"
+            }
+            PersonalityType::Workstation => {
+                "Balanced performance suitable for creative and development work"
+            }
+            PersonalityType::Throughput => {
+                "Optimized for high syscall throughput and parallel workloads"
+            }
+            PersonalityType::Balanced => {
+                "Versatile all-around performance with no dominant weakness"
+            }
+            PersonalityType::Server => {
+                "Optimized for stable task scheduling and long-term efficiency"
+            }
         }
     }
 
@@ -124,8 +135,8 @@ pub struct ReferenceBenchmarks {
 impl Default for ReferenceBenchmarks {
     fn default() -> Self {
         ReferenceBenchmarks {
-            p99_latency_us: 50.0,           // 50µs P99 baseline (very responsive)
-            p99_9_latency_us: 100.0,        // 100µs P99.9 baseline
+            p99_latency_us: 50.0,                    // 50µs P99 baseline (very responsive)
+            p99_9_latency_us: 100.0,                 // 100µs P99.9 baseline
             micro_jitter_p99_99_us: 1000.0, // 1000µs (1ms) jitter baseline (Excellent threshold, aligned with 0-10ms gauge range)
             context_switch_rtt_us: 150.0,   // 150µs context-switch baseline
             syscall_throughput_per_sec: 1_000_000.0, // 1M syscalls/sec baseline
@@ -172,19 +183,17 @@ impl PerformanceScorer {
     ) -> ScoringResult {
         // Normalize 7 metrics to 0-100 scale
         // FAIRNESS: Apply noise floor offset if latency is below detected hardware noise
-        let latency_score = self.normalize_responsiveness_with_fairness(
-            raw_metrics.p99_us,
-            raw_metrics.noise_floor_us,
-        );
-        let consistency_score = self.normalize_consistency_cv(
-            raw_metrics.p99_us,
-            raw_metrics.rolling_consistency_us,
-        );
-        let jitter_score = self.normalize_micro_precision(
-            benchmark.micro_jitter.as_ref().map(|m| m.p99_99_us),
-        );
+        let latency_score = self
+            .normalize_responsiveness_with_fairness(raw_metrics.p99_us, raw_metrics.noise_floor_us);
+        let consistency_score =
+            self.normalize_consistency_cv(raw_metrics.p99_us, raw_metrics.rolling_consistency_us);
+        let jitter_score =
+            self.normalize_micro_precision(benchmark.micro_jitter.as_ref().map(|m| m.p99_99_us));
         let throughput_score = self.normalize_syscall_performance(
-            benchmark.syscall_saturation.as_ref().map(|m| m.calls_per_second),
+            benchmark
+                .syscall_saturation
+                .as_ref()
+                .map(|m| m.calls_per_second),
         );
         let efficiency_score = self.normalize_context_efficiency(
             benchmark.context_switch_rtt.as_ref().map(|m| m.avg_rtt_us),
@@ -196,32 +205,32 @@ impl PerformanceScorer {
         );
 
         // Calculate GOAT Score using 7-metric weights
-         // Latency (27%), Consistency (18%), Jitter (15%), Throughput (10%),
-         // Efficiency (10%), Thermal (10%), SMI Res (10%)
-         let weighted_score =
-             (latency_score * 0.27) +
-             (consistency_score * 0.18) +
-             (jitter_score * 0.15) +
-             (throughput_score * 0.10) +
-             (efficiency_score * 0.10) +
-             (thermal_score * 0.10) +
-             (smi_score * 0.10);
-         
-         // weighted_score is already on 0-100 scale, multiply by 10.0 to get 0-1000
-         let goat_score = ((weighted_score * 10.0).min(1000.0)) as u16;
+        // Latency (27%), Consistency (18%), Jitter (15%), Throughput (10%),
+        // Efficiency (10%), Thermal (10%), SMI Res (10%)
+        let weighted_score = (latency_score * 0.27)
+            + (consistency_score * 0.18)
+            + (jitter_score * 0.15)
+            + (throughput_score * 0.10)
+            + (efficiency_score * 0.10)
+            + (thermal_score * 0.10)
+            + (smi_score * 0.10);
 
-         // Determine personality based on dominant metrics
-         let metrics_vec = vec![
-             ("Latency", latency_score),
-             ("Consistency", consistency_score),
-             ("Jitter", jitter_score),
-             ("Throughput", throughput_score),
-             ("Efficiency", efficiency_score),
-             ("Thermal", thermal_score),
-             ("SMI-Resilience", smi_score),
-         ];
-        
-        let (primary_name, primary_score) = metrics_vec.iter()
+        // weighted_score is already on 0-100 scale, multiply by 10.0 to get 0-1000
+        let goat_score = ((weighted_score * 10.0).min(1000.0)) as u16;
+
+        // Determine personality based on dominant metrics
+        let metrics_vec = vec![
+            ("Latency", latency_score),
+            ("Consistency", consistency_score),
+            ("Jitter", jitter_score),
+            ("Throughput", throughput_score),
+            ("Efficiency", efficiency_score),
+            ("Thermal", thermal_score),
+            ("SMI-Resilience", smi_score),
+        ];
+
+        let (primary_name, primary_score) = metrics_vec
+            .iter()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(n, s)| (*n, *s))
             .unwrap_or(("Balanced", 50.0));
@@ -229,11 +238,13 @@ impl PerformanceScorer {
         let mut sorted_metrics = metrics_vec.clone();
         sorted_metrics.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let (secondary_name, secondary_score) = sorted_metrics.get(1)
+        let (secondary_name, secondary_score) = sorted_metrics
+            .get(1)
             .map(|(n, s)| (*n, *s))
             .unwrap_or(("Balanced", 50.0));
 
-        let (improvement_name, improvement_score) = sorted_metrics.last()
+        let (improvement_name, improvement_score) = sorted_metrics
+            .last()
             .map(|(n, s)| (*n, *s))
             .unwrap_or(("Balanced", 50.0));
 
@@ -287,7 +298,7 @@ impl PerformanceScorer {
                 p99_us, noise_floor_us);
             return 50.0; // Return neutral score instead of critical red
         }
-        
+
         // Otherwise, use standard normalization
         self.normalize_responsiveness(p99_us)
     }
@@ -304,7 +315,7 @@ impl PerformanceScorer {
     /// Values above 10000µs (10ms) are clamped to 0.0.
     pub fn normalize_responsiveness(&self, p99_us: f32) -> f32 {
         let clamped = p99_us.max(0.0).min(10000.0);
-        
+
         if clamped <= 100.0 {
             // 0-100µs: 100.0 down to 60.0 (high-precision sub-µs region)
             100.0 - ((clamped / 100.0) * 40.0)
@@ -316,7 +327,8 @@ impl PerformanceScorer {
             // 1000-10000µs: 40.0 down to 0.0 (millisecond region)
             let progress = (clamped - 1000.0) / 9000.0;
             40.0 - (progress * 40.0)
-        }.max(0.0)
+        }
+        .max(0.0)
     }
 
     /// Normalize Consistency using Coefficient of Variation (CV)
@@ -333,13 +345,13 @@ impl PerformanceScorer {
         if mean_latency_us <= 0.0 || std_dev_us < 0.0 {
             return 50.0; // Default to middle if data invalid
         }
-        
+
         // Calculate Coefficient of Variation
         let cv = std_dev_us / mean_latency_us;
-        
+
         // Linear normalization: 1.0 - (CV - 0.05) / 0.25, clamped to [0.001, 1.0]
         let normalized = (1.0 - ((cv - 0.05) / 0.25)).max(0.001).min(1.0);
-        
+
         // Convert to 0-100 scale
         normalized * 100.0
     }
@@ -398,7 +410,7 @@ impl PerformanceScorer {
             Some(val) => {
                 // EXPANDED RANGE: 0.5µs (Perfect) to 50µs (Floor)
                 let clamped = val.max(0.5).min(50.0);
-                
+
                 if clamped <= 0.5 {
                     // Perfect ultra-low overhead: 0.5µs = 100 score
                     100.0
@@ -443,9 +455,11 @@ impl PerformanceScorer {
     /// Normalize task wakeup latency to 0-100 task agility score
     fn normalize_task_agility(&self, latency_us: Option<f32>) -> f32 {
         match latency_us {
-            Some(val) => {
-                self.normalize_lower_is_better(val, self.reference_benchmarks.task_wakeup_latency_us, 500.0)
-            }
+            Some(val) => self.normalize_lower_is_better(
+                val,
+                self.reference_benchmarks.task_wakeup_latency_us,
+                500.0,
+            ),
             None => 50.0,
         }
     }
@@ -502,7 +516,7 @@ impl PerformanceScorer {
                 return 100.0; // -Infinity → best case
             }
         }
-        
+
         if actual <= reference {
             100.0 // Better than reference
         } else if actual >= worst_case {
@@ -526,7 +540,7 @@ impl PerformanceScorer {
                 return 0.0; // -Infinity → worst case (negative throughput)
             }
         }
-        
+
         if actual >= reference {
             100.0 // Better than reference
         } else if actual <= worst_case {
@@ -551,7 +565,12 @@ impl PerformanceScorer {
     }
 
     /// Generate brief from 7-metric spectrum
-    fn generate_brief_from_metrics(&self, personality: &PersonalityType, primary_metric: &str, goat_score: u16) -> String {
+    fn generate_brief_from_metrics(
+        &self,
+        personality: &PersonalityType,
+        primary_metric: &str,
+        goat_score: u16,
+    ) -> String {
         let score_descriptor = match goat_score {
             850..=1000 => "exceptional",
             750..=849 => "outstanding",
@@ -606,38 +625,38 @@ mod tests {
     #[test]
     fn test_normalize_responsiveness() {
         let scorer = PerformanceScorer::new();
-        
+
         // Segment 1: 0-100µs
         // At 0µs (best case): 100 points
         let score = scorer.normalize_responsiveness(0.0);
         assert_eq!(score, 100.0);
-        
+
         // At 50µs (mid-segment 1): 80 points
         let score = scorer.normalize_responsiveness(50.0);
         assert_eq!(score, 80.0);
-        
+
         // At 100µs (boundary): 60 points
         let score = scorer.normalize_responsiveness(100.0);
         assert_eq!(score, 60.0);
-        
+
         // Segment 2: 100-1000µs
         // At 550µs (mid-segment 2): 50 points (60 - (450/900)*20 = 60 - 10 = 50)
         let score = scorer.normalize_responsiveness(550.0);
         assert!(score > 49.0 && score < 51.0); // Allow small floating point error
-        
+
         // At 1000µs (boundary): 40 points
         let score = scorer.normalize_responsiveness(1000.0);
         assert_eq!(score, 40.0);
-        
+
         // Segment 3: 1000-10000µs
         // At 5500µs (mid-segment 3): 20 points (40 - (4500/9000)*40 = 40 - 20 = 20)
         let score = scorer.normalize_responsiveness(5500.0);
         assert_eq!(score, 20.0);
-        
+
         // At 10000µs (worst case): 0 points
         let score = scorer.normalize_responsiveness(10000.0);
         assert_eq!(score, 0.0);
-        
+
         // Above ceiling: 0 points
         let score = scorer.normalize_responsiveness(15000.0);
         assert_eq!(score, 0.0);
@@ -646,17 +665,17 @@ mod tests {
     #[test]
     fn test_thermal_efficiency_normalization() {
         let scorer = PerformanceScorer::new();
-        
+
         // Cold temperature
         let cold_temps = vec![30.0, 35.0];
         let score = scorer.normalize_thermal_efficiency(&cold_temps);
         assert_eq!(score, 100.0);
-        
+
         // Warm temperature
         let warm_temps = vec![60.0, 65.0];
         let score = scorer.normalize_thermal_efficiency(&warm_temps);
         assert!(score > 10.0 && score < 100.0);
-        
+
         // Very hot (throttling)
         let hot_temps = vec![90.0, 95.0];
         let score = scorer.normalize_thermal_efficiency(&hot_temps);
@@ -666,11 +685,11 @@ mod tests {
     #[test]
     fn test_smi_resistance() {
         let scorer = PerformanceScorer::new();
-        
+
         // No spikes = perfect
         let score = scorer.normalize_smi_resistance(0, 0);
         assert_eq!(score, 100.0);
-        
+
         // 50% SMI-correlated
         let score = scorer.normalize_smi_resistance(100, 50);
         assert_eq!(score, 50.0);

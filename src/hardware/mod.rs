@@ -4,25 +4,26 @@
 //! a unified entry point for complete system hardware detection.
 
 // Module declarations for all hardware detection submodules
-pub mod cpu;
-pub mod ram;
-pub mod gpu;
-pub mod storage;
 pub mod boot;
+pub mod cpu;
+pub mod gpu;
 pub mod init;
+pub mod ram;
+pub mod storage;
 
 // Re-export detection functions for convenient access
-pub use cpu::{detect_cpu_model, detect_cpu_cores, detect_cpu_threads};
-pub use ram::detect_ram_gb;
-pub use gpu::{detect_gpu_vendor, detect_gpu_model};
-pub use storage::{detect_storage_type, detect_storage_model, detect_disk_free_gb, detect_all_storage_drives, format_drives_list};
-pub use boot::{detect_boot_type, detect_boot_manager};
+pub use boot::{detect_boot_manager, detect_boot_type};
+pub use cpu::{detect_cpu_cores, detect_cpu_model, detect_cpu_threads};
+pub use gpu::{detect_gpu_model, detect_gpu_vendor};
 pub use init::detect_init_system;
+pub use ram::detect_ram_gb;
+pub use storage::{
+    detect_all_storage_drives, detect_disk_free_gb, detect_storage_model, detect_storage_type,
+    format_drives_list,
+};
 
 use crate::error::HardwareError;
-use crate::models::{
-    BootManager, BootType, GpuVendor, HardwareInfo, InitSystem, StorageType,
-};
+use crate::models::{BootManager, BootType, GpuVendor, HardwareInfo, InitSystem, StorageType};
 
 /// Hardware detector aggregate for complete system detection.
 ///
@@ -155,16 +156,14 @@ impl HardwareDetector {
         let boot_type = detect_boot_type().unwrap_or(BootType::Bios);
 
         // Detect boot manager with graceful fallback
-        let boot_manager_str =
-            detect_boot_manager().unwrap_or_else(|_| "unknown".to_string());
+        let boot_manager_str = detect_boot_manager().unwrap_or_else(|_| "unknown".to_string());
         let boot_manager = BootManager {
             detector: boot_manager_str,
             is_efi: boot_type == BootType::Efi,
         };
 
         // Detect init system with graceful fallback
-        let init_system_str =
-            detect_init_system().unwrap_or_else(|_| "unknown".to_string());
+        let init_system_str = detect_init_system().unwrap_or_else(|_| "unknown".to_string());
         let init_system = InitSystem {
             name: init_system_str,
         };
@@ -235,10 +234,7 @@ mod tests {
         // GPU should have a valid value (including Unknown)
         matches!(
             hw_info.gpu_vendor,
-            GpuVendor::Nvidia
-                | GpuVendor::Amd
-                | GpuVendor::Intel
-                | GpuVendor::Unknown
+            GpuVendor::Nvidia | GpuVendor::Amd | GpuVendor::Intel | GpuVendor::Unknown
         );
 
         // Storage type should have a valid value
@@ -272,13 +268,17 @@ mod tests {
     #[test]
     fn test_caching_static_hardware_info() {
         let mut detector = HardwareDetector::new();
-        
+
         // First call should detect all hardware
-        let hw1 = detector.detect_all().expect("First detection should succeed");
-        
+        let hw1 = detector
+            .detect_all()
+            .expect("First detection should succeed");
+
         // Second call should use cached values for CPU, RAM, and GPU model
-        let hw2 = detector.detect_all().expect("Second detection should succeed");
-        
+        let hw2 = detector
+            .detect_all()
+            .expect("Second detection should succeed");
+
         // Verify cached values are the same
         assert_eq!(hw1.cpu_model, hw2.cpu_model, "CPU model should be cached");
         assert_eq!(hw1.ram_gb, hw2.ram_gb, "RAM should be cached");

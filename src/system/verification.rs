@@ -55,10 +55,10 @@ impl DkmsCompatibility {
     pub fn new(kernel_version: &str) -> Self {
         let is_rc_kernel = kernel_version.contains("-rc");
         let (rc_version, base_kernel_version) = Self::parse_rc_version(kernel_version);
-        
+
         eprintln!("[DKMS-COMPAT] Analyzing kernel: {}", kernel_version);
         eprintln!("[DKMS-COMPAT] RC kernel detected: {}", is_rc_kernel);
-        
+
         if is_rc_kernel {
             if let Some(rc_num) = rc_version {
                 eprintln!("[DKMS-COMPAT] RC version: rc{}", rc_num);
@@ -67,7 +67,7 @@ impl DkmsCompatibility {
                 eprintln!("[DKMS-COMPAT] Base kernel version: {}", base);
             }
         }
-        
+
         Self {
             kernel_version: kernel_version.to_string(),
             is_rc_kernel,
@@ -78,7 +78,7 @@ impl DkmsCompatibility {
             compat_reason: String::new(),
         }
     }
-    
+
     /// Parse RC version from kernel version string
     /// Returns (rc_version, base_kernel_version)
     /// Example: "6.19-rc6" -> (Some(6), Some("6.19"))
@@ -86,25 +86,29 @@ impl DkmsCompatibility {
         if let Some(rc_pos) = kernel_version.find("-rc") {
             let base = &kernel_version[..rc_pos];
             let rc_str = &kernel_version[rc_pos + 3..];
-            
+
             // Try to extract numeric RC version (e.g., "6" from "rc6")
-            let rc_num = rc_str.chars()
+            let rc_num = rc_str
+                .chars()
                 .take_while(|c| c.is_ascii_digit())
                 .collect::<String>()
                 .parse::<u32>()
                 .ok();
-            
+
             (rc_num, Some(base.to_string()))
         } else {
             (None, None)
         }
     }
-    
+
     /// Check NVIDIA driver compatibility with RC kernel
     pub fn check_nvidia_compatibility(&mut self, nvidia_version: &str) {
         self.nvidia_driver_version = Some(nvidia_version.to_string());
-        eprintln!("[DKMS-COMPAT] Checking NVIDIA {} against kernel {}", nvidia_version, self.kernel_version);
-        
+        eprintln!(
+            "[DKMS-COMPAT] Checking NVIDIA {} against kernel {}",
+            nvidia_version, self.kernel_version
+        );
+
         if !self.is_rc_kernel {
             // Stable kernels are generally compatible
             self.nvidia_compat_status = true;
@@ -112,25 +116,38 @@ impl DkmsCompatibility {
             eprintln!("[DKMS-COMPAT] ✓ Stable kernel - NVIDIA compatible");
             return;
         }
-        
+
         // RC kernel compatibility check
         // NVIDIA 590.48.01 has known issues with Linux 6.19-rc6+ (memremap.h struct changes)
-        let nvidia_major = nvidia_version.split('.').next().unwrap_or("0").parse::<u32>().unwrap_or(0);
-        let nvidia_minor = nvidia_version.split('.').nth(1).unwrap_or("0").parse::<u32>().unwrap_or(0);
-        
+        let nvidia_major = nvidia_version
+            .split('.')
+            .next()
+            .unwrap_or("0")
+            .parse::<u32>()
+            .unwrap_or(0);
+        let nvidia_minor = nvidia_version
+            .split('.')
+            .nth(1)
+            .unwrap_or("0")
+            .parse::<u32>()
+            .unwrap_or(0);
+
         if let Some(rc_num) = self.rc_version {
             if let Some(base) = &self.base_kernel_version {
                 // Detect problematic kernel versions
                 // 6.19-rc6+ has memremap.h struct changes that affect NVIDIA 590.x
                 let is_problematic_kernel = base.starts_with("6.19") && rc_num >= 6;
-                
+
                 if is_problematic_kernel && nvidia_major == 590 && nvidia_minor < 100 {
                     self.nvidia_compat_status = false;
                     self.compat_reason = format!(
                         "KNOWN ISSUE: NVIDIA {}.{} has memremap.h compatibility issue on kernel {}-rc{}. Shim will be applied.",
                         nvidia_major, nvidia_minor, base, rc_num
                     );
-                    eprintln!("[DKMS-COMPAT] ⚠ KNOWN ISSUE: NVIDIA 590.x incompatible with {}-rc{}", base, rc_num);
+                    eprintln!(
+                        "[DKMS-COMPAT] ⚠ KNOWN ISSUE: NVIDIA 590.x incompatible with {}-rc{}",
+                        base, rc_num
+                    );
                     eprintln!("[DKMS-COMPAT] Reason: memremap.h struct changes in 6.19-rc6+");
                 } else {
                     self.nvidia_compat_status = true;
@@ -143,27 +160,29 @@ impl DkmsCompatibility {
             }
         }
     }
-    
+
     /// Get compatibility status summary
     pub fn summary(&self) -> String {
         if !self.is_rc_kernel {
             return format!("Stable kernel {} - DKMS ready", self.kernel_version);
         }
-        
+
         let rc_info = if let Some(rc) = self.rc_version {
             format!(" (rc{})", rc)
         } else {
             String::new()
         };
-        
+
         let compat = if self.nvidia_compat_status {
             "✓ Compatible"
         } else {
             "⚠ Incompatible"
         };
-        
-        format!("RC kernel {}{} - {}: {}",
-            self.kernel_version, rc_info, compat, self.compat_reason)
+
+        format!(
+            "RC kernel {}{} - {}: {}",
+            self.kernel_version, rc_info, compat, self.compat_reason
+        )
     }
 }
 
@@ -222,123 +241,152 @@ impl std::error::Error for KernelInstallationError {}
 /// # Returns
 /// `Option<PathBuf>` pointing to the discovered headers directory, or `None` if not found
 pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
-     eprintln!("[DISCOVER_HEADERS] [UNIFIED-NAMING] Searching for headers for kernel version: {}", kernel_version);
-     
-     // Extract base version (remove profile suffix if present)
-     // E.g., "6.18.3-arch1-2-goatd-gaming" -> "6.18.3-arch1-2"
-     let base_version = if let Some(dash_pos) = kernel_version.rfind('-') {
-         let potential_suffix = &kernel_version[dash_pos + 1..];
-         // If the suffix looks like a profile name (all lowercase letters), strip it
-         if potential_suffix.chars().all(|c| c.is_ascii_lowercase() || c == '-') &&
-            potential_suffix.len() > 2 {
-             &kernel_version[..dash_pos]
-         } else {
-             kernel_version
-         }
-     } else {
-         kernel_version
-     };
-     
-     eprintln!("[DISCOVER_HEADERS] [UNIFIED-NAMING] Base version extracted: {}", base_version);
-     
-     // STRATEGY 0 (PRIORITY): Try GOATd-branded path directly if kernel_version contains "-goatd-"
-     // This prioritizes GOATd-branded headers installation paths
-     if kernel_version.contains("-goatd-") {
-         eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] PRIORITY: Detected GOATd-branded version, trying exact match first: /usr/src/linux-{}", kernel_version);
-         let goatd_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
-         if goatd_path.exists() && goatd_path.is_dir() {
-             if goatd_path.join("include/linux/kernel.h").exists() {
-                 eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] ✓ Found GOATd-branded headers at: {}", goatd_path.display());
-                 return Some(goatd_path);
-             }
-         }
-     }
-     
-     // STRATEGY 1: Try exact match with full kernel version (unified naming)
-     // This matches files installed using the exact .kernelrelease string
-     eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] Trying exact match: /usr/src/linux-{}", kernel_version);
-     let exact_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
-     if exact_path.exists() && exact_path.is_dir() {
-         if exact_path.join("include/linux/kernel.h").exists() {
-             eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✓ Found headers at (unified naming - exact match): {}", exact_path.display());
-             return Some(exact_path);
-         }
-     }
-     
-     // STRATEGY 2: Try base version (without profile suffix)
-     // This handles rebranded kernels where headers use the base version
-     if kernel_version != base_version {
-         eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] Trying base version: /usr/src/linux-{}", base_version);
-         let base_path = Path::new("/usr/src").join(format!("linux-{}", base_version));
-         if base_path.exists() && base_path.is_dir() {
-             if base_path.join("include/linux/kernel.h").exists() {
-                 eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✓ Found headers at (base version fallback): {}", base_path.display());
-                 return Some(base_path);
-             }
-         }
-     }
-     
-     // STRATEGY 3: Scan /usr/src for linux-* directories with validation
-     // HARDENED: Prioritize GOATd-branded directories first in scan
-     eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] Scanning /usr/src for linux-* directories (prioritize GOATd-branded paths)");
-     if let Ok(entries) = fs::read_dir("/usr/src") {
-         let mut candidates = Vec::new();
-         let mut goatd_candidates = Vec::new();
-         
-         for entry in entries.flatten() {
-             if let Ok(metadata) = entry.metadata() {
-                 if metadata.is_dir() {
-                     if let Some(name) = entry.file_name().to_str() {
-                         if name.starts_with("linux-") {
-                             let candidate = Path::new("/usr/src").join(name);
-                             
-                             // Validate: must have key header files
-                             if candidate.join("include/linux/kernel.h").exists() &&
-                                candidate.join("Makefile").exists() {
-                                 
-                                 let kernelrelease_path = candidate.join(".kernelrelease");
-                                 if kernelrelease_path.exists() {
-                                     if let Ok(content) = fs::read_to_string(&kernelrelease_path) {
-                                         let stored_version = content.trim();
-                                         if stored_version == kernel_version || stored_version == base_version {
-                                             // Prioritize GOATd-branded paths
-                                             if name.contains("-goatd-") {
-                                                 goatd_candidates.push(candidate);
-                                             } else {
-                                                 candidates.push(candidate);
-                                             }
-                                         }
-                                     }
-                                 } else {
-                                     // Fallback: if no .kernelrelease file, accept directory if headers are valid
-                                     if name.contains("-goatd-") {
-                                         goatd_candidates.push(candidate);
-                                     } else {
-                                         candidates.push(candidate);
-                                     }
-                                 }
-                             }
-                         }
-                     }
-                 }
-             }
-         }
-         
-         // Return GOATd-branded candidate first (priority)
-         if !goatd_candidates.is_empty() {
-             eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found GOATd-branded headers directory: {}", goatd_candidates[0].display());
-             return Some(goatd_candidates[0].clone());
-         }
-         
-         // Then return regular candidate
-         if !candidates.is_empty() {
-             eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found valid headers directory: {}", candidates[0].display());
-             return Some(candidates[0].clone());
-         }
-     }
-     
-     eprintln!("[DISCOVER_HEADERS] ✗ No kernel headers found for version: {}", kernel_version);
-     None
+    eprintln!(
+        "[DISCOVER_HEADERS] [UNIFIED-NAMING] Searching for headers for kernel version: {}",
+        kernel_version
+    );
+
+    // Extract base version (remove profile suffix if present)
+    // E.g., "6.18.3-arch1-2-goatd-gaming" -> "6.18.3-arch1-2"
+    let base_version = if let Some(dash_pos) = kernel_version.rfind('-') {
+        let potential_suffix = &kernel_version[dash_pos + 1..];
+        // If the suffix looks like a profile name (all lowercase letters), strip it
+        if potential_suffix
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '-')
+            && potential_suffix.len() > 2
+        {
+            &kernel_version[..dash_pos]
+        } else {
+            kernel_version
+        }
+    } else {
+        kernel_version
+    };
+
+    eprintln!(
+        "[DISCOVER_HEADERS] [UNIFIED-NAMING] Base version extracted: {}",
+        base_version
+    );
+
+    // STRATEGY 0 (PRIORITY): Try GOATd-branded path directly if kernel_version contains "-goatd-"
+    // This prioritizes GOATd-branded headers installation paths
+    if kernel_version.contains("-goatd-") {
+        eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] PRIORITY: Detected GOATd-branded version, trying exact match first: /usr/src/linux-{}", kernel_version);
+        let goatd_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
+        if goatd_path.exists() && goatd_path.is_dir() {
+            if goatd_path.join("include/linux/kernel.h").exists() {
+                eprintln!(
+                    "[DISCOVER_HEADERS] [STRATEGY-0] ✓ Found GOATd-branded headers at: {}",
+                    goatd_path.display()
+                );
+                return Some(goatd_path);
+            }
+        }
+    }
+
+    // STRATEGY 1: Try exact match with full kernel version (unified naming)
+    // This matches files installed using the exact .kernelrelease string
+    eprintln!(
+        "[DISCOVER_HEADERS] [STRATEGY-1] Trying exact match: /usr/src/linux-{}",
+        kernel_version
+    );
+    let exact_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
+    if exact_path.exists() && exact_path.is_dir() {
+        if exact_path.join("include/linux/kernel.h").exists() {
+            eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✓ Found headers at (unified naming - exact match): {}", exact_path.display());
+            return Some(exact_path);
+        }
+    }
+
+    // STRATEGY 2: Try base version (without profile suffix)
+    // This handles rebranded kernels where headers use the base version
+    if kernel_version != base_version {
+        eprintln!(
+            "[DISCOVER_HEADERS] [STRATEGY-2] Trying base version: /usr/src/linux-{}",
+            base_version
+        );
+        let base_path = Path::new("/usr/src").join(format!("linux-{}", base_version));
+        if base_path.exists() && base_path.is_dir() {
+            if base_path.join("include/linux/kernel.h").exists() {
+                eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✓ Found headers at (base version fallback): {}", base_path.display());
+                return Some(base_path);
+            }
+        }
+    }
+
+    // STRATEGY 3: Scan /usr/src for linux-* directories with validation
+    // HARDENED: Prioritize GOATd-branded directories first in scan
+    eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] Scanning /usr/src for linux-* directories (prioritize GOATd-branded paths)");
+    if let Ok(entries) = fs::read_dir("/usr/src") {
+        let mut candidates = Vec::new();
+        let mut goatd_candidates = Vec::new();
+
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_dir() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if name.starts_with("linux-") {
+                            let candidate = Path::new("/usr/src").join(name);
+
+                            // Validate: must have key header files
+                            if candidate.join("include/linux/kernel.h").exists()
+                                && candidate.join("Makefile").exists()
+                            {
+                                let kernelrelease_path = candidate.join(".kernelrelease");
+                                if kernelrelease_path.exists() {
+                                    if let Ok(content) = fs::read_to_string(&kernelrelease_path) {
+                                        let stored_version = content.trim();
+                                        if stored_version == kernel_version
+                                            || stored_version == base_version
+                                        {
+                                            // Prioritize GOATd-branded paths
+                                            if name.contains("-goatd-") {
+                                                goatd_candidates.push(candidate);
+                                            } else {
+                                                candidates.push(candidate);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Fallback: if no .kernelrelease file, accept directory if headers are valid
+                                    if name.contains("-goatd-") {
+                                        goatd_candidates.push(candidate);
+                                    } else {
+                                        candidates.push(candidate);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return GOATd-branded candidate first (priority)
+        if !goatd_candidates.is_empty() {
+            eprintln!(
+                "[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found GOATd-branded headers directory: {}",
+                goatd_candidates[0].display()
+            );
+            return Some(goatd_candidates[0].clone());
+        }
+
+        // Then return regular candidate
+        if !candidates.is_empty() {
+            eprintln!(
+                "[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found valid headers directory: {}",
+                candidates[0].display()
+            );
+            return Some(candidates[0].clone());
+        }
+    }
+
+    eprintln!(
+        "[DISCOVER_HEADERS] ✗ No kernel headers found for version: {}",
+        kernel_version
+    );
+    None
 }
 
 /// Verify kernel module directory structure exists and is valid
@@ -352,13 +400,21 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
 ///
 /// # Returns
 /// `Ok(true)` if module directory exists with kernel files, `Ok(false)` if missing
-pub fn verify_kernel_module_directory(kernel_version: &str) -> Result<bool, KernelInstallationError> {
-    eprintln!("[VERIFY] Checking kernel module directory for: {}", kernel_version);
-    
+pub fn verify_kernel_module_directory(
+    kernel_version: &str,
+) -> Result<bool, KernelInstallationError> {
+    eprintln!(
+        "[VERIFY] Checking kernel module directory for: {}",
+        kernel_version
+    );
+
     // Try /usr/lib/modules first (primary location)
     let usr_lib_modules = Path::new("/usr/lib/modules").join(kernel_version);
     if usr_lib_modules.exists() {
-        eprintln!("[VERIFY] ✓ Module directory exists: {}", usr_lib_modules.display());
+        eprintln!(
+            "[VERIFY] ✓ Module directory exists: {}",
+            usr_lib_modules.display()
+        );
         // Check for kernel files to confirm it's a valid kernel install
         let module_dep = usr_lib_modules.join("modules.dep");
         if module_dep.exists() {
@@ -368,11 +424,14 @@ pub fn verify_kernel_module_directory(kernel_version: &str) -> Result<bool, Kern
         eprintln!("[VERIFY] ⚠ Module directory exists but modules.dep not found");
         return Ok(false);
     }
-    
+
     // Try /lib/modules (may be symlink from /usr/lib)
     let lib_modules = Path::new("/lib/modules").join(kernel_version);
     if lib_modules.exists() {
-        eprintln!("[VERIFY] ✓ Module directory exists: {}", lib_modules.display());
+        eprintln!(
+            "[VERIFY] ✓ Module directory exists: {}",
+            lib_modules.display()
+        );
         let module_dep = lib_modules.join("modules.dep");
         if module_dep.exists() {
             eprintln!("[VERIFY] ✓ modules.dep found (valid kernel install)");
@@ -381,7 +440,7 @@ pub fn verify_kernel_module_directory(kernel_version: &str) -> Result<bool, Kern
         eprintln!("[VERIFY] ⚠ Module directory exists but modules.dep not found");
         return Ok(false);
     }
-    
+
     eprintln!("[VERIFY] ✗ Module directory not found in either /usr/lib or /lib");
     Ok(false)
 }
@@ -398,16 +457,18 @@ pub fn verify_kernel_module_directory(kernel_version: &str) -> Result<bool, Kern
 /// `Ok(true)` if symlink exists and points to valid headers, `Ok(false)` if missing
 pub fn verify_build_symlink(kernel_version: &str) -> Result<bool, KernelInstallationError> {
     eprintln!("[VERIFY] Checking build symlink for: {}", kernel_version);
-    
+
     // Try /usr/lib/modules first
-    let build_link = Path::new("/usr/lib/modules").join(kernel_version).join("build");
+    let build_link = Path::new("/usr/lib/modules")
+        .join(kernel_version)
+        .join("build");
     if build_link.exists() {
         eprintln!("[VERIFY] ✓ Build symlink exists: {}", build_link.display());
-        
+
         // Verify it points to valid headers
         if let Ok(path) = build_link.canonicalize() {
             eprintln!("[VERIFY] ✓ Build symlink points to: {}", path.display());
-            
+
             // Check for Makefile (key indicator of valid kernel headers)
             if path.join("Makefile").exists() {
                 eprintln!("[VERIFY] ✓ Makefile found in build target");
@@ -417,12 +478,12 @@ pub fn verify_build_symlink(kernel_version: &str) -> Result<bool, KernelInstalla
             return Ok(false);
         }
     }
-    
+
     // Try /lib/modules
     let build_link = Path::new("/lib/modules").join(kernel_version).join("build");
     if build_link.exists() {
         eprintln!("[VERIFY] ✓ Build symlink exists: {}", build_link.display());
-        
+
         if let Ok(path) = build_link.canonicalize() {
             eprintln!("[VERIFY] ✓ Build symlink points to: {}", path.display());
             if path.join("Makefile").exists() {
@@ -433,7 +494,7 @@ pub fn verify_build_symlink(kernel_version: &str) -> Result<bool, KernelInstalla
             return Ok(false);
         }
     }
-    
+
     eprintln!("[VERIFY] ✗ Build symlink not found");
     Ok(false)
 }
@@ -450,15 +511,20 @@ pub fn verify_build_symlink(kernel_version: &str) -> Result<bool, KernelInstalla
 /// `Ok(true)` if symlink exists and points to valid source, `Ok(false)` if missing
 pub fn verify_source_symlink(kernel_version: &str) -> Result<bool, KernelInstallationError> {
     eprintln!("[VERIFY] Checking source symlink for: {}", kernel_version);
-    
+
     // Try /usr/lib/modules first
-    let source_link = Path::new("/usr/lib/modules").join(kernel_version).join("source");
+    let source_link = Path::new("/usr/lib/modules")
+        .join(kernel_version)
+        .join("source");
     if source_link.exists() {
-        eprintln!("[VERIFY] ✓ Source symlink exists: {}", source_link.display());
-        
+        eprintln!(
+            "[VERIFY] ✓ Source symlink exists: {}",
+            source_link.display()
+        );
+
         if let Ok(path) = source_link.canonicalize() {
             eprintln!("[VERIFY] ✓ Source symlink points to: {}", path.display());
-            
+
             // Check for kernel.h (key header file)
             if path.join("include/linux/kernel.h").exists() {
                 eprintln!("[VERIFY] ✓ include/linux/kernel.h found in source target");
@@ -468,12 +534,17 @@ pub fn verify_source_symlink(kernel_version: &str) -> Result<bool, KernelInstall
             return Ok(false);
         }
     }
-    
+
     // Try /lib/modules
-    let source_link = Path::new("/lib/modules").join(kernel_version).join("source");
+    let source_link = Path::new("/lib/modules")
+        .join(kernel_version)
+        .join("source");
     if source_link.exists() {
-        eprintln!("[VERIFY] ✓ Source symlink exists: {}", source_link.display());
-        
+        eprintln!(
+            "[VERIFY] ✓ Source symlink exists: {}",
+            source_link.display()
+        );
+
         if let Ok(path) = source_link.canonicalize() {
             eprintln!("[VERIFY] ✓ Source symlink points to: {}", path.display());
             if path.join("include/linux/kernel.h").exists() {
@@ -484,7 +555,7 @@ pub fn verify_source_symlink(kernel_version: &str) -> Result<bool, KernelInstall
             return Ok(false);
         }
     }
-    
+
     eprintln!("[VERIFY] ✗ Source symlink not found");
     Ok(false)
 }
@@ -499,20 +570,28 @@ pub fn verify_source_symlink(kernel_version: &str) -> Result<bool, KernelInstall
 ///
 /// # Returns
 /// `Ok(true)` if headers directory exists and contains key files, `Ok(false)` if missing
-pub fn verify_kernel_headers_installed(kernel_version: &str) -> Result<bool, KernelInstallationError> {
-    eprintln!("[VERIFY] Checking kernel headers installation for: {}", kernel_version);
-    
+pub fn verify_kernel_headers_installed(
+    kernel_version: &str,
+) -> Result<bool, KernelInstallationError> {
+    eprintln!(
+        "[VERIFY] Checking kernel headers installation for: {}",
+        kernel_version
+    );
+
     // Use robust discovery function to locate headers
     match discover_kernel_headers(kernel_version) {
         Some(headers_dir) => {
             // Validate the discovered path
             if headers_dir.join("include/linux/kernel.h").exists() {
-                eprintln!("[VERIFY] ✓ include/linux/kernel.h found at: {}", headers_dir.display());
+                eprintln!(
+                    "[VERIFY] ✓ include/linux/kernel.h found at: {}",
+                    headers_dir.display()
+                );
             } else {
                 eprintln!("[VERIFY] ⚠ Headers directory exists but kernel.h not found");
                 return Ok(false);
             }
-            
+
             if headers_dir.join("Makefile").exists() {
                 eprintln!("[VERIFY] ✓ Makefile found (build system present)");
                 return Ok(true);
@@ -522,7 +601,10 @@ pub fn verify_kernel_headers_installed(kernel_version: &str) -> Result<bool, Ker
             }
         }
         None => {
-            eprintln!("[VERIFY] ✗ Kernel headers not found for version: {}", kernel_version);
+            eprintln!(
+                "[VERIFY] ✗ Kernel headers not found for version: {}",
+                kernel_version
+            );
             Ok(false)
         }
     }
@@ -546,20 +628,29 @@ pub fn verify_kernel_headers_installed(kernel_version: &str) -> Result<bool, Ker
 /// # Returns
 /// `Ok(())` if symlinks created successfully, `Err` if operation failed
 
-pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), KernelInstallationError> {
-    eprintln!("[VERIFY] Creating fallback symlinks for: {}", kernel_version);
-    
+pub fn create_kernel_symlinks_fallback(
+    kernel_version: &str,
+) -> Result<(), KernelInstallationError> {
+    eprintln!(
+        "[VERIFY] Creating fallback symlinks for: {}",
+        kernel_version
+    );
+
     let module_dir = Path::new("/usr/lib/modules").join(kernel_version);
-    
+
     // Verify module directory exists first
     if !module_dir.exists() {
-        return Err(KernelInstallationError::ModuleDirectoryMissing(
-            format!("Module directory does not exist: {}. Cannot create symlinks.", module_dir.display())
-        ));
+        return Err(KernelInstallationError::ModuleDirectoryMissing(format!(
+            "Module directory does not exist: {}. Cannot create symlinks.",
+            module_dir.display()
+        )));
     }
-    
-    eprintln!("[VERIFY] Module directory verified: {}", module_dir.display());
-    
+
+    eprintln!(
+        "[VERIFY] Module directory verified: {}",
+        module_dir.display()
+    );
+
     // Use robust discovery to find actual headers location
     let headers_dir = match discover_kernel_headers(kernel_version) {
         Some(path) => {
@@ -567,17 +658,22 @@ pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), Kerne
             path
         }
         None => {
-            return Err(KernelInstallationError::HeadersNotInstalled(
-                format!("Could not discover kernel headers for version: {}", kernel_version)
-            ));
+            return Err(KernelInstallationError::HeadersNotInstalled(format!(
+                "Could not discover kernel headers for version: {}",
+                kernel_version
+            )));
         }
     };
-    
+
     // Create build symlink
     let build_link = module_dir.join("build");
     if !build_link.exists() || build_link.is_symlink() {
-        eprintln!("[VERIFY] Creating build symlink: {} -> {}", build_link.display(), headers_dir.display());
-        
+        eprintln!(
+            "[VERIFY] Creating build symlink: {} -> {}",
+            build_link.display(),
+            headers_dir.display()
+        );
+
         // Remove existing broken symlink if present
         if build_link.is_symlink() || build_link.exists() {
             match fs::remove_file(&build_link) {
@@ -585,7 +681,7 @@ pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), Kerne
                 Err(e) => eprintln!("[VERIFY] Warning: Failed to remove build symlink: {}", e),
             }
         }
-        
+
         // Create symlink using std::os::unix::fs
         #[cfg(unix)]
         {
@@ -595,21 +691,26 @@ pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), Kerne
                     eprintln!("[VERIFY] ✓ Build symlink created successfully");
                 }
                 Err(e) => {
-                    return Err(KernelInstallationError::SymlinkCreationFailed(
-                        format!("Failed to create build symlink: {}", e)
-                    ));
+                    return Err(KernelInstallationError::SymlinkCreationFailed(format!(
+                        "Failed to create build symlink: {}",
+                        e
+                    )));
                 }
             }
         }
     } else {
         eprintln!("[VERIFY] ✓ Build symlink already valid");
     }
-    
+
     // Create source symlink
     let source_link = module_dir.join("source");
     if !source_link.exists() || source_link.is_symlink() {
-        eprintln!("[VERIFY] Creating source symlink: {} -> {}", source_link.display(), headers_dir.display());
-        
+        eprintln!(
+            "[VERIFY] Creating source symlink: {} -> {}",
+            source_link.display(),
+            headers_dir.display()
+        );
+
         // Remove existing broken symlink if present
         if source_link.is_symlink() || source_link.exists() {
             match fs::remove_file(&source_link) {
@@ -617,7 +718,7 @@ pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), Kerne
                 Err(e) => eprintln!("[VERIFY] Warning: Failed to remove source symlink: {}", e),
             }
         }
-        
+
         // Create symlink using std::os::unix::fs
         #[cfg(unix)]
         {
@@ -627,16 +728,17 @@ pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), Kerne
                     eprintln!("[VERIFY] ✓ Source symlink created successfully");
                 }
                 Err(e) => {
-                    return Err(KernelInstallationError::SymlinkCreationFailed(
-                        format!("Failed to create source symlink: {}", e)
-                    ));
+                    return Err(KernelInstallationError::SymlinkCreationFailed(format!(
+                        "Failed to create source symlink: {}",
+                        e
+                    )));
                 }
             }
         }
     } else {
         eprintln!("[VERIFY] ✓ Source symlink already valid");
     }
-    
+
     eprintln!("[VERIFY] Done: Fallback symlinks created/verified/repaired");
     Ok(())
 }
@@ -653,14 +755,17 @@ pub fn create_kernel_symlinks_fallback(kernel_version: &str) -> Result<(), Kerne
 /// `Some(kernel_release)` if MPL exists and contains valid kernelrelease, `None` otherwise
 pub fn read_mpl_kernelrelease(workspace_root: &Path) -> Option<String> {
     let mpl_path = workspace_root.join(".goatd_metadata");
-    
+
     eprintln!("[VERIFY] [MPL] Reading MPL from: {}", mpl_path.display());
-    
+
     if !mpl_path.exists() {
-        eprintln!("[VERIFY] [MPL] ⚠ MPL file not found at: {}", mpl_path.display());
+        eprintln!(
+            "[VERIFY] [MPL] ⚠ MPL file not found at: {}",
+            mpl_path.display()
+        );
         return None;
     }
-    
+
     match fs::read_to_string(&mpl_path) {
         Ok(content) => {
             // Parse shell-format MPL to extract GOATD_KERNELRELEASE
@@ -670,7 +775,10 @@ pub fn read_mpl_kernelrelease(workspace_root: &Path) -> Option<String> {
                         let value = &line[eq_pos + 1..];
                         let kernelrelease = value.trim_matches('"').to_string();
                         if !kernelrelease.is_empty() {
-                            eprintln!("[VERIFY] [MPL] ✓ Found GOATD_KERNELRELEASE: {}", kernelrelease);
+                            eprintln!(
+                                "[VERIFY] [MPL] ✓ Found GOATD_KERNELRELEASE: {}",
+                                kernelrelease
+                            );
                             return Some(kernelrelease);
                         }
                     }
@@ -697,19 +805,28 @@ pub fn read_mpl_kernelrelease(workspace_root: &Path) -> Option<String> {
 ///
 /// # Returns
 /// `Ok(true)` if installed version matches MPL kernelrelease, `Ok(false)` if mismatch or no MPL
-pub fn verify_kernel_against_mpl(installed_version: &str, workspace_root: &Path) -> Result<bool, KernelInstallationError> {
+pub fn verify_kernel_against_mpl(
+    installed_version: &str,
+    workspace_root: &Path,
+) -> Result<bool, KernelInstallationError> {
     eprintln!("[VERIFY] [MPL] Verifying kernel against MPL source of truth");
     eprintln!("[VERIFY] [MPL] Installed version: {}", installed_version);
-    
+
     match read_mpl_kernelrelease(workspace_root) {
         Some(expected_version) => {
-            eprintln!("[VERIFY] [MPL] Expected version from MPL: {}", expected_version);
-            
+            eprintln!(
+                "[VERIFY] [MPL] Expected version from MPL: {}",
+                expected_version
+            );
+
             if installed_version == expected_version {
                 eprintln!("[VERIFY] [MPL] ✓ MATCH: Installed kernel matches MPL metadata");
                 Ok(true)
             } else {
-                eprintln!("[VERIFY] [MPL] ✗ MISMATCH: Installed '{}' != Expected '{}'", installed_version, expected_version);
+                eprintln!(
+                    "[VERIFY] [MPL] ✗ MISMATCH: Installed '{}' != Expected '{}'",
+                    installed_version, expected_version
+                );
                 Ok(false)
             }
         }
@@ -730,29 +847,51 @@ pub fn verify_kernel_against_mpl(installed_version: &str, workspace_root: &Path)
 ///
 /// # Returns
 /// `Ok(KernelInstallationStatus)` with detailed status info, or `Err` if verification encounters errors
-pub fn verify_kernel_installation(kernel_version: &str) -> Result<KernelInstallationStatus, KernelInstallationError> {
+pub fn verify_kernel_installation(
+    kernel_version: &str,
+) -> Result<KernelInstallationStatus, KernelInstallationError> {
     eprintln!("[VERIFY] ===== STARTING COMPREHENSIVE KERNEL VERIFICATION =====");
     eprintln!("[VERIFY] Kernel version: {}", kernel_version);
-    
+
     // Run all checks
     let module_dir_exists = verify_kernel_module_directory(kernel_version)?;
-    eprintln!("[VERIFY] Module directory: {}", if module_dir_exists { "✓" } else { "✗" });
-    
+    eprintln!(
+        "[VERIFY] Module directory: {}",
+        if module_dir_exists { "✓" } else { "✗" }
+    );
+
     let build_symlink_exists = verify_build_symlink(kernel_version)?;
-    eprintln!("[VERIFY] Build symlink: {}", if build_symlink_exists { "✓" } else { "✗" });
-    
+    eprintln!(
+        "[VERIFY] Build symlink: {}",
+        if build_symlink_exists { "✓" } else { "✗" }
+    );
+
     let source_symlink_exists = verify_source_symlink(kernel_version)?;
-    eprintln!("[VERIFY] Source symlink: {}", if source_symlink_exists { "✓" } else { "✗" });
-    
+    eprintln!(
+        "[VERIFY] Source symlink: {}",
+        if source_symlink_exists { "✓" } else { "✗" }
+    );
+
     let headers_installed = verify_kernel_headers_installed(kernel_version)?;
-    eprintln!("[VERIFY] Headers installed: {}", if headers_installed { "✓" } else { "✗" });
-    
+    eprintln!(
+        "[VERIFY] Headers installed: {}",
+        if headers_installed { "✓" } else { "✗" }
+    );
+
     // Determine DKMS readiness: all components must be present
-    let ready_for_dkms = module_dir_exists && build_symlink_exists && source_symlink_exists && headers_installed;
-    
-    eprintln!("[VERIFY] DKMS readiness: {}", if ready_for_dkms { "✓ READY" } else { "✗ NOT READY" });
+    let ready_for_dkms =
+        module_dir_exists && build_symlink_exists && source_symlink_exists && headers_installed;
+
+    eprintln!(
+        "[VERIFY] DKMS readiness: {}",
+        if ready_for_dkms {
+            "✓ READY"
+        } else {
+            "✗ NOT READY"
+        }
+    );
     eprintln!("[VERIFY] ===== VERIFICATION COMPLETE =====");
-    
+
     Ok(KernelInstallationStatus {
         kernel_version: kernel_version.to_string(),
         module_dir_exists,
@@ -777,7 +916,7 @@ mod tests {
             headers_installed: true,
             ready_for_dkms: true,
         };
-        
+
         assert_eq!(status.kernel_version, "6.18.3-arch1-2");
         assert!(status.ready_for_dkms);
     }
@@ -785,7 +924,7 @@ mod tests {
     #[test]
     fn test_error_display() {
         let err = KernelInstallationError::HeadersNotInstalled(
-            "Headers not found at /usr/src/linux-6.18.3".to_string()
+            "Headers not found at /usr/src/linux-6.18.3".to_string(),
         );
         let display = format!("{}", err);
         assert!(display.contains("Headers not installed"));

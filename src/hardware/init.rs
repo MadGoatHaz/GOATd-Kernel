@@ -189,10 +189,7 @@ mod tests {
     fn test_etc_directories_detection() {
         let result = detect_via_etc_directories();
         assert!(
-            result == "runit"
-                || result == "openrc"
-                || result == "dinit"
-                || result == "unknown"
+            result == "runit" || result == "openrc" || result == "dinit" || result == "unknown"
         );
     }
 }

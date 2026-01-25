@@ -31,27 +31,44 @@ use std::process::Command;
 pub fn find_toolchain_binary(name: &str) -> String {
     // STEP 1: Try LLVM-19 variant first (highest priority for consistency)
     let llvm19_variant = format!("llvm-19-{}", name);
-    if Command::new(&llvm19_variant).arg("--version").output().is_ok() {
-        eprintln!("[Patcher] [TOOLCHAIN] Found LLVM-19 variant: {}", llvm19_variant);
+    if Command::new(&llvm19_variant)
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        eprintln!(
+            "[Patcher] [TOOLCHAIN] Found LLVM-19 variant: {}",
+            llvm19_variant
+        );
         return llvm19_variant;
     }
-    
+
     // STEP 2: Try generic LLVM variant (fallback for latest LLVM)
     let llvm_variant = format!("llvm-{}", name);
-    if Command::new(&llvm_variant).arg("--version").output().is_ok() {
+    if Command::new(&llvm_variant)
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
         eprintln!("[Patcher] [TOOLCHAIN] Found LLVM variant: {}", llvm_variant);
         return llvm_variant;
     }
-    
+
     // STEP 3: Try standard /usr/bin location
     let standard_path = format!("/usr/bin/{}", name);
     if Path::new(&standard_path).exists() {
-        eprintln!("[Patcher] [TOOLCHAIN] Found at standard location: {}", standard_path);
+        eprintln!(
+            "[Patcher] [TOOLCHAIN] Found at standard location: {}",
+            standard_path
+        );
         return standard_path;
     }
-    
+
     // STEP 4: Fallback to just the command name (rely on PATH)
-    eprintln!("[Patcher] [TOOLCHAIN] Using {} from PATH (final fallback)", name);
+    eprintln!(
+        "[Patcher] [TOOLCHAIN] Using {} from PATH (final fallback)",
+        name
+    );
     name.to_string()
 }
 
@@ -70,14 +87,17 @@ pub fn find_toolchain_binary(name: &str) -> String {
 pub fn sanitize_build_environment(env_vars: &mut HashMap<String, String>) {
     // STEP 1: Remove variables that commonly leak $srcdir paths
     let srcdir_leak_patterns = vec![
-        "TMPDIR",      // Temporary directories often contain $srcdir
-        "TEMP",        // Alternative temp
-        "TMP",         // Short form
+        "TMPDIR", // Temporary directories often contain $srcdir
+        "TEMP",   // Alternative temp
+        "TMP",    // Short form
     ];
-    
+
     for var_name in srcdir_leak_patterns {
         if let Some(_) = env_vars.remove(var_name) {
-            eprintln!("[Patcher] [SANITIZE] Removed {} to prevent $srcdir leak", var_name);
+            eprintln!(
+                "[Patcher] [SANITIZE] Removed {} to prevent $srcdir leak",
+                var_name
+            );
         }
     }
 
@@ -92,18 +112,18 @@ pub fn sanitize_build_environment(env_vars: &mut HashMap<String, String>) {
                 if *p == "/usr/bin" || *p == "/bin" || *p == "/usr/local/bin" {
                     return true;
                 }
-                
+
                 // Remove only paths that contain gcc/llvm/clang installations
-                !(p.contains("/gcc") ||
-                  p.contains("/g++") ||
-                  p.contains("/cc") ||
-                  p.contains("/c++") ||
-                  p.contains("/llvm") ||
-                  p.contains("/clang")) &&
-                !p.is_empty()
+                !(p.contains("/gcc")
+                    || p.contains("/g++")
+                    || p.contains("/cc")
+                    || p.contains("/c++")
+                    || p.contains("/llvm")
+                    || p.contains("/clang"))
+                    && !p.is_empty()
             })
             .collect();
-        
+
         let new_path = filtered.join(":");
         if new_path != original_path {
             eprintln!("[Patcher] [SANITIZE] Cleaned PATH: removed GCC-related directories while preserving /usr/bin and /bin");
@@ -117,13 +137,16 @@ pub fn sanitize_build_environment(env_vars: &mut HashMap<String, String>) {
             let original = flags.clone();
             // Remove any GCC-specific flags
             *flags = flags
-                .replace("-Wl,--as-needed", "")  // GCC linker marker
-                .replace("-Wl,--no-undefined", "")  // GCC linker marker
+                .replace("-Wl,--as-needed", "") // GCC linker marker
+                .replace("-Wl,--no-undefined", "") // GCC linker marker
                 .trim()
                 .to_string();
-            
+
             if original != *flags {
-                eprintln!("[Patcher] [SANITIZE] Cleaned {}: removed GCC-specific flags", flag_var);
+                eprintln!(
+                    "[Patcher] [SANITIZE] Cleaned {}: removed GCC-specific flags",
+                    flag_var
+                );
             }
         }
     }
@@ -149,9 +172,12 @@ pub fn sanitize_build_environment(env_vars: &mut HashMap<String, String>) {
 ///
 /// # Returns
 /// HashMap of environment variable names to values
-pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> HashMap<String, String> {
+pub fn prepare_build_environment(
+    src_dir: &Path,
+    native_optimizations: bool,
+) -> HashMap<String, String> {
     let mut env_vars = HashMap::new();
-    
+
     // CRITICAL: Sanitize environment FIRST to remove leaked paths and GCC contamination
     eprintln!("[Patcher] [ENV] STEP 0: Sanitizing build environment for cleanliness");
     sanitize_build_environment(&mut env_vars);
@@ -166,21 +192,27 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
     // PRIORITY 1: Search for .goatd_anchor walking up from src_dir
     // This provides definitive absolute path resolution across mount points
     let mut workspace_root_string: Option<String> = None;
-    
+
     if let Some(mut current) = src_dir.parent() {
         let max_depth = 10; // Prevent infinite loops
         let mut depth = 0;
-        
+
         while depth < max_depth {
             let anchor_path = current.join(".goatd_anchor");
             if anchor_path.exists() {
-                eprintln!("[Patcher] [ENV] [ANCHOR] Found .goatd_anchor at: {}", anchor_path.display());
-                
+                eprintln!(
+                    "[Patcher] [ENV] [ANCHOR] Found .goatd_anchor at: {}",
+                    anchor_path.display()
+                );
+
                 // Use anchor's parent as workspace root and canonicalize it
                 match std::fs::canonicalize(current) {
                     Ok(canonical_path) => {
                         let workspace_root = canonical_path.to_string_lossy().to_string();
-                        eprintln!("[Patcher] [ENV] [ANCHOR] Using anchor's parent (canonicalized): {}", workspace_root);
+                        eprintln!(
+                            "[Patcher] [ENV] [ANCHOR] Using anchor's parent (canonicalized): {}",
+                            workspace_root
+                        );
                         workspace_root_string = Some(workspace_root);
                     }
                     Err(e) => {
@@ -198,7 +230,7 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
                 }
                 break; // Anchor found, exit loop
             }
-            
+
             // Check if we've reached the filesystem root
             if let Some(parent) = current.parent() {
                 if parent == current {
@@ -212,19 +244,22 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
                 break;
             }
         }
-        
+
         if depth >= max_depth {
             eprintln!("[Patcher] [ENV] [ANCHOR] Max search depth ({}) reached without finding .goatd_anchor", max_depth);
         }
     }
-    
+
     // PRIORITY 2/3: Fallback to parent of src_dir if anchor not found
     if let Some(ws_root) = workspace_root_string {
         env_vars.insert("GOATD_WORKSPACE_ROOT".to_string(), ws_root.clone());
-        eprintln!("[Patcher] [ENV] Exported GOATD_WORKSPACE_ROOT={} (anchor-based resolution)", ws_root);
+        eprintln!(
+            "[Patcher] [ENV] Exported GOATD_WORKSPACE_ROOT={} (anchor-based resolution)",
+            ws_root
+        );
     } else if let Some(parent) = src_dir.parent() {
         let parent_path = PathBuf::from(parent);
-        
+
         // Try to canonicalize to absolute path
         match parent_path.canonicalize() {
             Ok(canonical_path) => {
@@ -241,7 +276,7 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
                         .map(|cwd| cwd.join(&parent_path))
                         .unwrap_or(parent_path)
                 };
-                
+
                 let workspace_root = abs_path.to_string_lossy().to_string();
                 env_vars.insert("GOATD_WORKSPACE_ROOT".to_string(), workspace_root.clone());
                 eprintln!("[Patcher] [ENV] Exported GOATD_WORKSPACE_ROOT={} (absolute fallback, no anchor found)", workspace_root);
@@ -266,23 +301,23 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
     env_vars.insert("CC".to_string(), "clang".to_string());
     env_vars.insert("CXX".to_string(), "clang++".to_string());
     env_vars.insert("LD".to_string(), "ld.lld".to_string());
-    
+
     // DYNAMIC TOOLCHAIN DISCOVERY: All toolchain binaries use LLVM-19 prioritization
     let ar_cmd = find_toolchain_binary("ar");
     env_vars.insert("AR".to_string(), ar_cmd);
-    
+
     let nm_cmd = find_toolchain_binary("nm");
     env_vars.insert("NM".to_string(), nm_cmd);
-    
+
     let strip_cmd = find_toolchain_binary("strip");
     env_vars.insert("STRIP".to_string(), strip_cmd);
-    
+
     let objcopy_cmd = find_toolchain_binary("objcopy");
     env_vars.insert("OBJCOPY".to_string(), objcopy_cmd);
-    
+
     let objdump_cmd = find_toolchain_binary("objdump");
     env_vars.insert("OBJDUMP".to_string(), objdump_cmd);
-    
+
     let readelf_cmd = find_toolchain_binary("readelf");
     env_vars.insert("READELF".to_string(), readelf_cmd);
     env_vars.insert("GCC".to_string(), "clang".to_string());
@@ -301,40 +336,50 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
     // CRITICAL: These defaults ensure consistent performance optimization even
     // when environment variables are not explicitly set by the executor.
     // These are high-performance, safe defaults for gaming kernels.
-    
+
     // GOATD_BASE_FLAGS: Essential optimization level required for hardening
     // -O2 is MANDATORY because -D_FORTIFY_SOURCE requires optimization
     if !env_vars.contains_key("GOATD_BASE_FLAGS") {
         env_vars.insert("GOATD_BASE_FLAGS".to_string(), "-O2".to_string());
         eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_BASE_FLAGS=-O2 (default, required for _FORTIFY_SOURCE)");
     }
-    
+
     // GOATD_HARDENING_FLAGS: Stack canary + bounds checking for gaming kernel
     if !env_vars.contains_key("GOATD_HARDENING_FLAGS") {
-        env_vars.insert("GOATD_HARDENING_FLAGS".to_string(),
-            "-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE".to_string());
+        env_vars.insert(
+            "GOATD_HARDENING_FLAGS".to_string(),
+            "-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE".to_string(),
+        );
         eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_HARDENING_FLAGS with stack-protector and _FORTIFY_SOURCE");
     }
-    
+
     // GOATD_NATIVE_FLAGS: Native CPU optimization for gaming performance
     if !env_vars.contains_key("GOATD_NATIVE_FLAGS") {
-        env_vars.insert("GOATD_NATIVE_FLAGS".to_string(), "-march=native -mtune=native".to_string());
+        env_vars.insert(
+            "GOATD_NATIVE_FLAGS".to_string(),
+            "-march=native -mtune=native".to_string(),
+        );
         eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_NATIVE_FLAGS=-march=native -mtune=native (gaming optimization)");
     }
-    
+
     // GOATD_LTO_FLAGS: Will be set by executor based on LTO level (full/thin/none)
     // Default to thin LTO if not set (balanced performance/compile time)
     if !env_vars.contains_key("GOATD_LTO_FLAGS") {
         env_vars.insert("GOATD_LTO_FLAGS".to_string(), "-flto=thin".to_string());
         eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_LTO_FLAGS=-flto=thin (default fallback)");
     }
-    
+
     // GOATD_POLLY_FLAGS: LLVM loop optimization (gaming kernel vectorization boost)
     // Polly enables advanced loop transformations for better cache locality
     if !env_vars.contains_key("GOATD_POLLY_FLAGS") {
-        env_vars.insert("GOATD_POLLY_FLAGS".to_string(),
-            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-omp-backend=GOMP".to_string());
-        eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_POLLY_FLAGS with advanced loop optimization");
+        env_vars.insert(
+            "GOATD_POLLY_FLAGS".to_string(),
+            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-omp-backend=GOMP"
+                .to_string(),
+        );
+        eprintln!(
+            "[Patcher] [ENV] [HARDENING] Set GOATD_POLLY_FLAGS with advanced loop optimization"
+        );
     }
 
     eprintln!("[Patcher] [ENV] Flag hardening complete - all GOATD_* variables have safe defaults");
@@ -346,7 +391,9 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
         env_vars.insert("KCFLAGS".to_string(), "\"-march=native\"".to_string());
         eprintln!("[Patcher] [ENV] Injected KCFLAGS=\"-march=native\" for native host-optimized kernel compilation");
     } else {
-        eprintln!("[Patcher] [ENV] Native optimizations disabled, KCFLAGS not set to -march=native");
+        eprintln!(
+            "[Patcher] [ENV] Native optimizations disabled, KCFLAGS not set to -march=native"
+        );
     }
 
     eprintln!("[Patcher] [ENV] Prepared LLVM/Clang toolchain enforcement");
@@ -356,10 +403,12 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
     // ============================================================================
     // CRITICAL: SRCDEST is now handled by the patcher, not the executor.
     // This enables smart caching of source artifacts across builds.
-    let srcdest = std::env::var("SRCDEST")
-        .unwrap_or_else(|_| "/tmp/kernel-sources".to_string());
+    let srcdest = std::env::var("SRCDEST").unwrap_or_else(|_| "/tmp/kernel-sources".to_string());
     env_vars.insert("SRCDEST".to_string(), srcdest.clone());
-    eprintln!("[Patcher] [ENV] [CACHE] Set SRCDEST={} for smart asset reuse", srcdest);
+    eprintln!(
+        "[Patcher] [ENV] [CACHE] Set SRCDEST={} for smart asset reuse",
+        srcdest
+    );
 
     // ============================================================================
     // CCACHE INTEGRATION FOR COMPILATION ACCELERATION
@@ -367,12 +416,18 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
     // CRITICAL: ccache integration is now handled by the patcher.
     // This ensures consistent caching behavior across all builds.
     if std::path::Path::new("/usr/lib/ccache/bin").exists() {
-        let ccache_dir = std::env::var("CCACHE_DIR")
-            .unwrap_or_else(|_| format!("{}/.cache/ccache",
-                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())));
+        let ccache_dir = std::env::var("CCACHE_DIR").unwrap_or_else(|_| {
+            format!(
+                "{}/.cache/ccache",
+                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string())
+            )
+        });
         env_vars.insert("CCACHE_DIR".to_string(), ccache_dir.clone());
-        eprintln!("[Patcher] [ENV] [CACHE] ccache enabled with CCACHE_DIR={}", ccache_dir);
-        
+        eprintln!(
+            "[Patcher] [ENV] [CACHE] ccache enabled with CCACHE_DIR={}",
+            ccache_dir
+        );
+
         // Note: PATH will be updated with ccache /usr/lib/ccache/bin in the PATH purification step
         eprintln!("[Patcher] [ENV] [CACHE] ccache /usr/lib/ccache/bin will be prioritized in PATH");
     }
@@ -383,17 +438,17 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
     // ============================================================================
     // Build the safe paths list, prioritizing ccache if available
     let mut safe_paths = vec![];
-    
+
     // PRIORITY 1: ccache (if available) - for compilation caching
     if std::path::Path::new("/usr/lib/ccache/bin").exists() {
         safe_paths.push("/usr/lib/ccache/bin");
         eprintln!("[Patcher] [ENV] [PATH] Prioritized ccache: /usr/lib/ccache/bin");
     }
-    
+
     // PRIORITY 2: Custom LLVM bin directory (if it exists)
     let llvm_bin_path = src_dir.join(".llvm_bin").to_string_lossy().to_string();
     safe_paths.push(&llvm_bin_path);
-    
+
     // PRIORITY 3: Essential system directories
     safe_paths.push("/usr/bin");
     safe_paths.push("/bin");
@@ -408,17 +463,18 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
                 return true; // Keep these always
             }
             // Remove only paths that contain gcc/llvm/clang installations
-            !(p.contains("/gcc") ||
-              p.contains("/g++") ||
-              p.contains("/cc") ||
-              p.contains("/c++") ||
-              p.contains("/llvm") ||
-              p.contains("/clang")) &&
-            !p.is_empty()
+            !(p.contains("/gcc")
+                || p.contains("/g++")
+                || p.contains("/cc")
+                || p.contains("/c++")
+                || p.contains("/llvm")
+                || p.contains("/clang"))
+                && !p.is_empty()
         })
         .collect();
 
-    let new_path = format!("{}{}{}",
+    let new_path = format!(
+        "{}{}{}",
         safe_paths.join(":"),
         if filtered_path.is_empty() { "" } else { ":" },
         filtered_path.join(":")
@@ -426,8 +482,15 @@ pub fn prepare_build_environment(src_dir: &Path, native_optimizations: bool) -> 
 
     env_vars.insert("PATH".to_string(), new_path.clone());
     eprintln!("[Patcher] [ENV] [PATH] Purified PATH with ccache priority and /usr/bin:/bin (removed gcc/llvm/clang installations)");
-    eprintln!("[Patcher] [ENV] [PATH] Final PATH (first 100 chars): {}...", if new_path.len() > 100 { &new_path[..100] } else { &new_path });
-    
+    eprintln!(
+        "[Patcher] [ENV] [PATH] Final PATH (first 100 chars): {}...",
+        if new_path.len() > 100 {
+            &new_path[..100]
+        } else {
+            &new_path
+        }
+    );
+
     // Verify make is available
     if let Ok(make_cmd) = Command::new("make").arg("--version").output() {
         if make_cmd.status.success() {

@@ -24,9 +24,17 @@ fn add_ns_to_timespec(ts: &mut libc::timespec, ns: u64) {
 /// Returns: -1 if a < b, 0 if a == b, 1 if a > b
 fn timespec_cmp(a: &libc::timespec, b: &libc::timespec) -> i32 {
     if a.tv_sec != b.tv_sec {
-        if a.tv_sec < b.tv_sec { -1 } else { 1 }
+        if a.tv_sec < b.tv_sec {
+            -1
+        } else {
+            1
+        }
     } else if a.tv_nsec != b.tv_nsec {
-        if a.tv_nsec < b.tv_nsec { -1 } else { 1 }
+        if a.tv_nsec < b.tv_nsec {
+            -1
+        } else {
+            1
+        }
     } else {
         0
     }
@@ -179,20 +187,36 @@ fn main() {
     println!();
     println!("=== Latency Statistics ===");
     println!("Samples collected: {}", stats.count());
-    println!("Min latency:       {} ns ({:.3} µs)", stats.min, stats.min as f64 / 1000.0);
-    println!("Max latency:       {} ns ({:.3} µs)", stats.max, stats.max as f64 / 1000.0);
-    println!("Avg latency:       {} ns ({:.3} µs)", stats.average(), stats.average() as f64 / 1000.0);
-    println!("P99 latency:       {} ns ({:.3} µs)", stats.p99(), stats.p99() as f64 / 1000.0);
+    println!(
+        "Min latency:       {} ns ({:.3} µs)",
+        stats.min,
+        stats.min as f64 / 1000.0
+    );
+    println!(
+        "Max latency:       {} ns ({:.3} µs)",
+        stats.max,
+        stats.max as f64 / 1000.0
+    );
+    println!(
+        "Avg latency:       {} ns ({:.3} µs)",
+        stats.average(),
+        stats.average() as f64 / 1000.0
+    );
+    println!(
+        "P99 latency:       {} ns ({:.3} µs)",
+        stats.p99(),
+        stats.p99() as f64 / 1000.0
+    );
     println!();
 
     // Additional diagnostics
     println!("=== Diagnostics ===");
     let outliers = stats.samples.iter().filter(|&&s| s > 10_000_000).count();
     println!("Samples > 10ms (outliers): {}", outliers);
-    
+
     let over_500us = stats.samples.iter().filter(|&&s| s > 500_000).count();
     println!("Samples > 500µs: {}", over_500us);
-    
+
     let over_100us = stats.samples.iter().filter(|&&s| s > 100_000).count();
     println!("Samples > 100µs: {}", over_100us);
 

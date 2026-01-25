@@ -11,12 +11,12 @@
 //! - **Memory**: Volatile random writes for cache thrashing
 //! - **Scheduler**: High-frequency spawn/yield for runqueue flooding
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 use nix::sched::sched_setaffinity;
 use nix::sched::CpuSet;
 use nix::unistd::Pid;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 
 /// Enumeration of available stressor types
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,10 +88,17 @@ impl StressorManager {
     pub fn new(target_core: usize) -> Result<Self, Box<dyn std::error::Error>> {
         let num_cores = num_cpus::get();
         if target_core >= num_cores {
-            return Err(format!("target_core {} out of range (available: {})", target_core, num_cores).into());
+            return Err(format!(
+                "target_core {} out of range (available: {})",
+                target_core, num_cores
+            )
+            .into());
         }
 
-        eprintln!("[STRESSOR_MGR] Initialized: target_core={}, num_cores={}", target_core, num_cores);
+        eprintln!(
+            "[STRESSOR_MGR] Initialized: target_core={}, num_cores={}",
+            target_core, num_cores
+        );
 
         Ok(StressorManager {
             workers: Vec::new(),
@@ -112,7 +119,11 @@ impl StressorManager {
         }
 
         // Check if this stressor type is already running
-        if self.workers.iter().any(|w| w.stressor_type == stressor_type) {
+        if self
+            .workers
+            .iter()
+            .any(|w| w.stressor_type == stressor_type)
+        {
             eprintln!("[STRESSOR_MGR] {} stressor already running", stressor_type);
             return Ok(());
         }
@@ -126,11 +137,18 @@ impl StressorManager {
         let iteration_count_clone = Arc::clone(&iteration_count);
 
         let handle = thread::spawn(move || {
-            eprintln!("[STRESSOR_{}] Worker starting (intensity={}%)", stressor_type, intensity.value());
+            eprintln!(
+                "[STRESSOR_{}] Worker starting (intensity={}%)",
+                stressor_type,
+                intensity.value()
+            );
 
             // Set up the stressor worker environment
             if let Err(e) = setup_stressor_environment(target_core, num_cores) {
-                eprintln!("[STRESSOR_{}] ✗ Failed to setup environment: {}", stressor_type, e);
+                eprintln!(
+                    "[STRESSOR_{}] ✗ Failed to setup environment: {}",
+                    stressor_type, e
+                );
                 return;
             }
 
@@ -139,25 +157,13 @@ impl StressorManager {
             // Run the appropriate stressor routine
             match stressor_type {
                 StressorType::Cpu => {
-                    cpu_stressor_routine(
-                        intensity,
-                        &stop_flag_clone,
-                        &iteration_count_clone,
-                    );
+                    cpu_stressor_routine(intensity, &stop_flag_clone, &iteration_count_clone);
                 }
                 StressorType::Memory => {
-                    memory_stressor_routine(
-                        intensity,
-                        &stop_flag_clone,
-                        &iteration_count_clone,
-                    );
+                    memory_stressor_routine(intensity, &stop_flag_clone, &iteration_count_clone);
                 }
                 StressorType::Scheduler => {
-                    scheduler_stressor_routine(
-                        intensity,
-                        &stop_flag_clone,
-                        &iteration_count_clone,
-                    );
+                    scheduler_stressor_routine(intensity, &stop_flag_clone, &iteration_count_clone);
                 }
             }
 
@@ -176,13 +182,20 @@ impl StressorManager {
         };
 
         self.workers.push(worker);
-        eprintln!("[STRESSOR_MGR] Started {} stressor (intensity={}%)", stressor_type, intensity.value());
+        eprintln!(
+            "[STRESSOR_MGR] Started {} stressor (intensity={}%)",
+            stressor_type,
+            intensity.value()
+        );
         Ok(())
     }
 
     /// Stop all active stressors and wait for graceful termination
     pub fn stop_all_stressors(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        eprintln!("[STRESSOR_MGR] Stopping all {} stressors", self.workers.len());
+        eprintln!(
+            "[STRESSOR_MGR] Stopping all {} stressors",
+            self.workers.len()
+        );
 
         // Signal all workers to stop
         for worker in &self.workers {
@@ -201,7 +214,10 @@ impl StressorManager {
                         );
                     }
                     Err(_) => {
-                        eprintln!("[STRESSOR_MGR] ✗ {} worker panicked during shutdown", worker.stressor_type);
+                        eprintln!(
+                            "[STRESSOR_MGR] ✗ {} worker panicked during shutdown",
+                            worker.stressor_type
+                        );
                     }
                 }
             }
@@ -232,7 +248,10 @@ impl StressorManager {
 impl Drop for StressorManager {
     fn drop(&mut self) {
         if !self.stopped && !self.workers.is_empty() {
-            eprintln!("[STRESSOR_MGR] Drop: Forcibly stopping {} active workers", self.workers.len());
+            eprintln!(
+                "[STRESSOR_MGR] Drop: Forcibly stopping {} active workers",
+                self.workers.len()
+            );
             if let Err(e) = self.stop_all_stressors() {
                 eprintln!("[STRESSOR_MGR] ✗ Error during drop cleanup: {}", e);
             }
@@ -244,13 +263,20 @@ impl Drop for StressorManager {
 /// - Set nice priority to 19 (lowest CPU priority)
 /// - Set SCHED_IDLE scheduling policy
 /// - Set CPU affinity to all cores except target_core
-fn setup_stressor_environment(target_core: usize, num_cores: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn setup_stressor_environment(
+    target_core: usize,
+    num_cores: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Set nice priority to 19 (lowest CPU priority)
     // Using getrusage/setrusage via nix is not directly available, so we use libc
     unsafe {
         let ret = libc::nice(19);
         if ret < 0 {
-            return Err(format!("nice() failed with errno: {}", std::io::Error::last_os_error()).into());
+            return Err(format!(
+                "nice() failed with errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into());
         }
     }
 
@@ -289,7 +315,10 @@ fn cpu_stressor_routine(
     let intensity_factor = (intensity.value() as f64) / 100.0;
     let iterations_per_batch = (10000.0 * intensity_factor) as usize;
 
-    eprintln!("[CPU_STRESSOR] Starting: intensity_factor={:.2}, iterations={}", intensity_factor, iterations_per_batch);
+    eprintln!(
+        "[CPU_STRESSOR] Starting: intensity_factor={:.2}, iterations={}",
+        intensity_factor, iterations_per_batch
+    );
 
     // Pre-allocate working memory for the matrix
     let matrix_size = 64;
@@ -335,7 +364,10 @@ fn cpu_stressor_routine(
         iteration_count.fetch_add(iterations_per_batch, Ordering::Relaxed);
 
         if batch_count % 10 == 0 {
-            eprintln!("[CPU_STRESSOR] Progress: {} iterations", batch_count * iterations_per_batch);
+            eprintln!(
+                "[CPU_STRESSOR] Progress: {} iterations",
+                batch_count * iterations_per_batch
+            );
         }
     }
 
@@ -436,11 +468,19 @@ fn scheduler_stressor_routine(
         iteration_count.fetch_add(threads_per_batch, Ordering::Relaxed);
 
         if batch_count % 100 == 0 {
-            eprintln!("[SCHEDULER_STRESSOR] Progress: {} batches ({} threads spawned)", batch_count, batch_count * threads_per_batch);
+            eprintln!(
+                "[SCHEDULER_STRESSOR] Progress: {} batches ({} threads spawned)",
+                batch_count,
+                batch_count * threads_per_batch
+            );
         }
     }
 
-    eprintln!("[SCHEDULER_STRESSOR] Completed {} batches ({} threads total)", batch_count, batch_count * threads_per_batch);
+    eprintln!(
+        "[SCHEDULER_STRESSOR] Completed {} batches ({} threads total)",
+        batch_count,
+        batch_count * threads_per_batch
+    );
 }
 
 #[cfg(test)]

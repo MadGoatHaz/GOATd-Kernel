@@ -1,8 +1,8 @@
 //! CPU detection and identification module.
 
 use crate::error::HardwareError;
-use std::fs;
 use std::collections::HashSet;
+use std::fs;
 
 /// Parse /proc/cpuinfo and extract CPU model, cores, and threads.
 fn parse_cpuinfo() -> (String, u32, u32) {
@@ -11,7 +11,7 @@ fn parse_cpuinfo() -> (String, u32, u32) {
             let mut model = "Unknown".to_string();
             let mut core_ids = HashSet::new();
             let mut processor_count = 0;
-            
+
             for line in content.lines() {
                 if line.starts_with("model name") && model == "Unknown" {
                     if let Some(value) = line.split(": ").nth(1) {
@@ -29,7 +29,7 @@ fn parse_cpuinfo() -> (String, u32, u32) {
                     }
                 }
             }
-            
+
             let cores = if !core_ids.is_empty() {
                 core_ids.len() as u32
             } else if processor_count > 0 {
@@ -37,14 +37,16 @@ fn parse_cpuinfo() -> (String, u32, u32) {
             } else {
                 1
             };
-            
-            let threads = if processor_count == 0 { 1 } else { processor_count };
-            
+
+            let threads = if processor_count == 0 {
+                1
+            } else {
+                processor_count
+            };
+
             (model, cores, threads)
         }
-        Err(_) => {
-            ("Unknown".to_string(), 1, 1)
-        }
+        Err(_) => ("Unknown".to_string(), 1, 1),
     }
 }
 

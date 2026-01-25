@@ -9,10 +9,10 @@
 //! - Topology-aware: Detects CPU siblings and uses cross-core pairs for representative measurement
 //! - Sub-microsecond precision preserved throughout nanosecond calculations
 
+use serde::{Deserialize, Serialize};
 use std::os::unix::io::RawFd;
 use std::sync::Arc;
 use std::thread;
-use serde::{Deserialize, Serialize};
 
 /// Configuration for context-switch RTT measurement
 #[derive(Clone, Debug)]
@@ -77,8 +77,8 @@ impl From<ContextSwitchSummary> for ContextSwitchMetrics {
     fn from(summary: ContextSwitchSummary) -> Self {
         ContextSwitchMetrics {
             avg_rtt_us: summary.mean,
-            min_rtt_us: 0.0, // Not tracked in Summary
-            max_rtt_us: 0.0, // Not tracked in Summary
+            min_rtt_us: 0.0,         // Not tracked in Summary
+            max_rtt_us: 0.0,         // Not tracked in Summary
             p99_rtt_us: summary.p95, // Use P95 as approximation
             successful_passes: summary.successful_passes,
         }
@@ -140,8 +140,7 @@ impl ContextSwitchCollector {
                 let recv_start = get_time_ns();
 
                 // Read token from pipe
-                if unsafe { libc::read(pipe_read1, buf.as_mut_ptr() as *mut libc::c_void, 1) } > 0
-                {
+                if unsafe { libc::read(pipe_read1, buf.as_mut_ptr() as *mut libc::c_void, 1) } > 0 {
                     // Record reception time
                     let recv_time = get_time_ns();
 

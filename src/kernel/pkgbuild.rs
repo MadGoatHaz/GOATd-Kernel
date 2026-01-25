@@ -5,9 +5,9 @@
 //!
 //! Uses the KernelSourceDB to locate PKGBUILD URLs based on canonical variant names.
 
-use regex::Regex;
 use crate::kernel::sources::KernelSourceDB;
 use log;
+use regex::Regex;
 
 /// Maps kernel variant names (canonical form) to their raw PKGBUILD URLs
 /// Uses the centralized KernelSourceDB for consistency
@@ -34,26 +34,26 @@ fn get_pkgbuild_url_for_variant(variant: &str) -> Option<String> {
 /// ```
 pub async fn get_latest_version_from_pkgbuild(url: &str) -> Result<String, String> {
     log::debug!("[PKGBUILD] Fetching: {}", url);
-    
+
     // Fetch the raw PKGBUILD content
     let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Failed to fetch PKGBUILD: {}", e))?;
-    
+
     let content = response
         .text()
         .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
-    
+
     log::debug!("[PKGBUILD] Successfully fetched {} bytes", content.len());
-    
+
     // Parse pkgver and pkgrel using regex
     let pkgver = extract_pkgver(&content)?;
     let pkgrel = extract_pkgrel(&content)?;
-    
+
     let version = format!("{}-{}", pkgver, pkgrel);
     log::debug!("[PKGBUILD] Extracted version: {}", version);
-    
+
     Ok(version)
 }
 
@@ -71,14 +71,12 @@ pub fn extract_pkgver(content: &str) -> Result<String, String> {
     // This pattern handles all three cases: unquoted, single-quoted, or double-quoted
     let regex = Regex::new(r#"pkgver\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))"#)
         .map_err(|e| format!("Failed to compile pkgver regex: {}", e))?;
-    
+
     regex
         .captures(content)
         .and_then(|caps| {
             // Try double-quoted first, then single-quoted, then unquoted
-            caps.get(1)
-                .or_else(|| caps.get(2))
-                .or_else(|| caps.get(3))
+            caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3))
         })
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| "Failed to extract pkgver from PKGBUILD".to_string())
@@ -98,14 +96,12 @@ pub fn extract_pkgrel(content: &str) -> Result<String, String> {
     // This pattern handles all three cases: unquoted, single-quoted, or double-quoted
     let regex = Regex::new(r#"pkgrel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))"#)
         .map_err(|e| format!("Failed to compile pkgrel regex: {}", e))?;
-    
+
     regex
         .captures(content)
         .and_then(|caps| {
             // Try double-quoted first, then single-quoted, then unquoted
-            caps.get(1)
-                .or_else(|| caps.get(2))
-                .or_else(|| caps.get(3))
+            caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3))
         })
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| "Failed to extract pkgrel from PKGBUILD".to_string())
@@ -125,32 +121,58 @@ pub fn extract_pkgrel(content: &str) -> Result<String, String> {
 /// let version = get_latest_version_by_variant("linux").await?;
 /// ```
 pub async fn get_latest_version_by_variant(variant: &str) -> Result<String, String> {
-    eprintln!("[PKGBUILD] [GET_VERSION] Starting version fetch for variant: '{}'", variant);
-    log::info!("[PKGBUILD] [GET_VERSION] Fetching latest version for variant: '{}'", variant);
-    
-    let url = get_pkgbuild_url_for_variant(variant)
-        .ok_or_else(|| {
-            let err_msg = format!("Unknown kernel variant: {}", variant);
-            eprintln!("[PKGBUILD] [GET_VERSION] [ERROR] {}", err_msg);
-            err_msg
-        })?;
-    
-    eprintln!("[PKGBUILD] [GET_VERSION] Resolved variant '{}' to URL: {}", variant, url);
-    log::debug!("[PKGBUILD] [GET_VERSION] URL resolved for variant '{}': {}", variant, url);
-    
+    eprintln!(
+        "[PKGBUILD] [GET_VERSION] Starting version fetch for variant: '{}'",
+        variant
+    );
+    log::info!(
+        "[PKGBUILD] [GET_VERSION] Fetching latest version for variant: '{}'",
+        variant
+    );
+
+    let url = get_pkgbuild_url_for_variant(variant).ok_or_else(|| {
+        let err_msg = format!("Unknown kernel variant: {}", variant);
+        eprintln!("[PKGBUILD] [GET_VERSION] [ERROR] {}", err_msg);
+        err_msg
+    })?;
+
+    eprintln!(
+        "[PKGBUILD] [GET_VERSION] Resolved variant '{}' to URL: {}",
+        variant, url
+    );
+    log::debug!(
+        "[PKGBUILD] [GET_VERSION] URL resolved for variant '{}': {}",
+        variant,
+        url
+    );
+
     let result = get_latest_version_from_pkgbuild(&url).await;
-    
+
     match &result {
         Ok(version) => {
-            eprintln!("[PKGBUILD] [GET_VERSION] [SUCCESS] Version fetched for '{}': '{}'", variant, version);
-            log::info!("[PKGBUILD] [GET_VERSION] Successfully fetched version for '{}': '{}'", variant, version);
+            eprintln!(
+                "[PKGBUILD] [GET_VERSION] [SUCCESS] Version fetched for '{}': '{}'",
+                variant, version
+            );
+            log::info!(
+                "[PKGBUILD] [GET_VERSION] Successfully fetched version for '{}': '{}'",
+                variant,
+                version
+            );
         }
         Err(e) => {
-            eprintln!("[PKGBUILD] [GET_VERSION] [ERROR] Failed to fetch version for '{}': {}", variant, e);
-            log::error!("[PKGBUILD] [GET_VERSION] Error fetching version for '{}': {}", variant, e);
+            eprintln!(
+                "[PKGBUILD] [GET_VERSION] [ERROR] Failed to fetch version for '{}': {}",
+                variant, e
+            );
+            log::error!(
+                "[PKGBUILD] [GET_VERSION] Error fetching version for '{}': {}",
+                variant,
+                e
+            );
         }
     }
-    
+
     result
 }
 
@@ -216,16 +238,16 @@ mod tests {
         // Verify URL structure matches KernelSourceDB
         let url_linux = get_pkgbuild_url_for_variant("linux").unwrap();
         assert!(url_linux.contains("linux/-/raw"));
-        
+
         let url_lts = get_pkgbuild_url_for_variant("linux-lts").unwrap();
         assert!(url_lts.contains("linux-lts"));
-        
+
         let url_zen = get_pkgbuild_url_for_variant("linux-zen").unwrap();
         assert!(url_zen.contains("linux-zen"));
-        
+
         let url_mainline = get_pkgbuild_url_for_variant("linux-mainline").unwrap();
         assert!(url_mainline.contains("aur.archlinux.org"));
-        
+
         let url_tkg = get_pkgbuild_url_for_variant("linux-tkg").unwrap();
         assert!(url_tkg.contains("github.com") || url_tkg.contains("raw.githubusercontent.com"));
     }

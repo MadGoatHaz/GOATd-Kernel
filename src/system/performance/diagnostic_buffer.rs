@@ -9,7 +9,7 @@
 //! Also provides event consumer that reads CollectorEvent's from an rtrb ring buffer
 //! and formats them into diagnostic messages for asynchronous logging.
 
-use crossbeam_channel::{bounded, Sender, Receiver, TrySendError};
+use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -129,11 +129,12 @@ impl DiagnosticBuffer {
 impl Drop for DiagnosticBuffer {
     fn drop(&mut self) {
         // Signal the consumer thread to stop
-        self.stop_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-        
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+
         // Explicitly drop the sender to signal the consumer to exit
         self.sender.take();
-        
+
         if let Some(thread) = self.consumer_thread.take() {
             // Wait for the consumer thread to finish
             let _ = thread.join();
@@ -201,14 +202,15 @@ pub fn spawn_collector_event_consumer(
 ) -> std::thread::JoinHandle<()> {
     // Determine if we are in a test environment to avoid infinite loop leaks
     let is_test = cfg!(test);
-    
+
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut local_consumer = event_consumer;
             // Initialize last_smi_count using the current value of TOTAL_SMI_COUNT
             // This avoids false-positives on the first detected spike if the system SMI count is non-zero
-            let mut last_smi_count = super::collector::TOTAL_SMI_COUNT.load(std::sync::atomic::Ordering::Relaxed);
-            
+            let mut last_smi_count =
+                super::collector::TOTAL_SMI_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+
             let mut empty_count = 0;
             loop {
                 // Try to read an event from the ring buffer
@@ -220,7 +222,7 @@ pub fn spawn_collector_event_consumer(
                             super::collector::CollectorEvent::Spike(latency_ns, spike_number, raw_smi_count) => {
                                 // Asynchronous SMI correlation: compare raw_smi_count with last_smi_count
                                 let is_smi_correlated = raw_smi_count > last_smi_count;
-                                
+
                                 let msg = if is_smi_correlated {
                                     smi_correlated_spikes.fetch_add(1, std::sync::atomic::Ordering::Release);
                                     let smi_delta = raw_smi_count - last_smi_count;
@@ -234,7 +236,7 @@ pub fn spawn_collector_event_consumer(
                                         spike_number, latency_ns
                                     )
                                 };
-                                
+
                                 // Update last_smi_count for next spike comparison
                                 last_smi_count = raw_smi_count;
                                 msg
@@ -271,11 +273,12 @@ pub fn spawn_collector_event_consumer(
                     Err(_) => {
                         // Ring buffer is empty, sleep briefly before trying again
                         std::thread::sleep(Duration::from_micros(100));
-                        
+
                         // In tests, exit if we've been empty for a while to avoid leaks
                         if is_test {
                             empty_count += 1;
-                            if empty_count > 100 { // ~10ms of emptiness in test
+                            if empty_count > 100 {
+                                // ~10ms of emptiness in test
                                 break;
                             }
                         }
@@ -283,7 +286,7 @@ pub fn spawn_collector_event_consumer(
                 }
             }
         }));
-        
+
         // Handle panic result: log and continue gracefully
         if let Err(panic_info) = result {
             let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
@@ -312,11 +315,11 @@ mod tests {
     fn test_diagnostic_buffer_send() {
         let mut buffer = DiagnosticBuffer::new(256);
         buffer.start_consumer();
-        
+
         // Should not block
         let result = buffer.send("[TEST] Non-blocking send");
         assert!(result.is_ok());
-        
+
         buffer.flush();
     }
 
@@ -324,12 +327,12 @@ mod tests {
     fn test_diagnostic_buffer_multiple_sends() {
         let mut buffer = DiagnosticBuffer::new(256);
         buffer.start_consumer();
-        
+
         for i in 0..10 {
             let msg = format!("[TEST] Message {}", i);
             assert!(buffer.send(&msg).is_ok());
         }
-        
+
         buffer.flush();
     }
 }

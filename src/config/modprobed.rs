@@ -157,9 +157,7 @@ pub fn parse_modprobed_json(json_str: &str) -> Result<HashSet<String>, ConfigErr
         })?
         .as_array()
         .ok_or_else(|| {
-            ConfigError::ValidationFailed(
-                "'modules' field must be an array".to_string(),
-            )
+            ConfigError::ValidationFailed("'modules' field must be an array".to_string())
         })?;
 
     // Extract module names and deduplicate
@@ -244,15 +242,12 @@ pub fn is_module_used(module_name: &str, modprobed_modules: &HashSet<String>) ->
 ///
 /// add_missing_modules(&mut config, &modules);
 /// ```
-pub fn add_missing_modules(
-    config: &mut KernelConfig,
-    modprobed_modules: &HashSet<String>,
-) {
+pub fn add_missing_modules(config: &mut KernelConfig, modprobed_modules: &HashSet<String>) {
     // Filter driver exclusions to remove any modules that are actively used
     if !modprobed_modules.is_empty() {
-        config.driver_exclusions.retain(|excluded| {
-            !is_module_used(excluded, modprobed_modules)
-        });
+        config
+            .driver_exclusions
+            .retain(|excluded| !is_module_used(excluded, modprobed_modules));
     }
 }
 
@@ -460,10 +455,7 @@ mod tests {
             ..crate::models::KernelConfig::default()
         };
 
-        let modules: HashSet<_> = vec!["nouveau"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let modules: HashSet<_> = vec!["nouveau"].iter().map(|s| s.to_string()).collect();
 
         add_missing_modules(&mut config, &modules);
 
@@ -480,10 +472,7 @@ mod tests {
             ..crate::models::KernelConfig::default()
         };
 
-        let modules: HashSet<_> = vec!["nouveau"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let modules: HashSet<_> = vec!["nouveau"].iter().map(|s| s.to_string()).collect();
 
         add_missing_modules(&mut config, &modules);
 

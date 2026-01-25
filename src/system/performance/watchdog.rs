@@ -8,12 +8,12 @@
 //! The watchdog thread runs with SCHED_FIFO priority to ensure it can
 //! interrupt frozen processes and recover the system.
 
+use std::fs;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use std::path::Path;
-use std::fs;
 
 /// Configuration for the benchmark watchdog
 #[derive(Clone, Debug)]
@@ -141,11 +141,8 @@ impl BenchmarkWatchdog {
             let mut sched_param: libc::sched_param = std::mem::zeroed();
             sched_param.sched_priority = priority as i32;
 
-            let result = libc::pthread_setschedparam(
-                libc::pthread_self(),
-                libc::SCHED_FIFO,
-                &sched_param,
-            );
+            let result =
+                libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, &sched_param);
 
             if result != 0 {
                 return Err(format!(
@@ -176,7 +173,7 @@ impl BenchmarkWatchdog {
             // If heartbeat hasn't changed, count the no-beat interval
             if current_beat == last_checked_beat && last_checked_beat != u64::MAX {
                 consecutive_no_beat_checks = consecutive_no_beat_checks.saturating_add(1);
-                
+
                 // Check if we've exceeded timeout
                 let elapsed = check_interval * consecutive_no_beat_checks;
                 if elapsed >= config.timeout {
@@ -211,12 +208,10 @@ impl BenchmarkWatchdog {
                     eprintln!("Successfully thawed cgroup at {}", cgroup_freeze_path);
                     Ok(())
                 }
-                Err(e) => {
-                    Err(format!(
-                        "Failed to write to cgroup freeze file {}: {}",
-                        cgroup_freeze_path, e
-                    ))
-                }
+                Err(e) => Err(format!(
+                    "Failed to write to cgroup freeze file {}: {}",
+                    cgroup_freeze_path, e
+                )),
             }
         } else {
             // Fallback: log warning but don't fail

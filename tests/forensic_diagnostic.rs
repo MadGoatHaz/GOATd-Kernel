@@ -13,12 +13,11 @@ mod forensic_diagnostic {
     use std::time::{Duration, Instant};
 
     // Re-export collector and processor from the main crate
-    use goatd_kernel::system::performance::{
-        LatencyCollector, MonitoringState,
-        SyscallSaturationCollector, SyscallSaturationConfig,
-        diagnostic_buffer,
-    };
     use goatd_kernel::system::performance::collector::LatencyProcessor;
+    use goatd_kernel::system::performance::{
+        diagnostic_buffer, LatencyCollector, MonitoringState, SyscallSaturationCollector,
+        SyscallSaturationConfig,
+    };
 
     /// Forensic Test: Raw Latency Data Collection and Analysis
     ///
@@ -36,7 +35,8 @@ mod forensic_diagnostic {
     /// - Spike count and SMI correlation provide diagnostic information
     #[test]
     fn test_forensic_raw_latency_collection() {
-        let separator = "================================================================================";
+        let separator =
+            "================================================================================";
         eprintln!("\n{}", separator);
         eprintln!("FORENSIC DIAGNOSTIC TEST: Raw Latency Data Collection");
         eprintln!("{}", separator);
@@ -50,7 +50,7 @@ mod forensic_diagnostic {
         // At 1ms interval = 10,000 samples + buffer for timing variation
         let ring_buffer_capacity = 12_000;
         let (producer, mut consumer) = rtrb::RingBuffer::new(ring_buffer_capacity);
-        
+
         // Create event ring buffer for diagnostic events
         let (event_producer, event_consumer) = rtrb::RingBuffer::new(1000);
 
@@ -68,10 +68,10 @@ mod forensic_diagnostic {
         eprintln!("[SETUP] Spawning latency collector thread...");
 
         let collector_state = monitoring_state.clone();
-        
+
         // Initialize global diagnostic buffer for test visibility
         diagnostic_buffer::init_global_buffer(1024);
-        
+
         // Spawn the event consumer to process SMI correlation and logs asynchronously
         let _consumer_handle = diagnostic_buffer::spawn_collector_event_consumer(
             event_consumer,
@@ -80,16 +80,16 @@ mod forensic_diagnostic {
 
         let collector_thread = thread::spawn(move || {
             let collector = LatencyCollector::new(
-                Duration::from_millis(1),                    // 1ms interval
+                Duration::from_millis(1), // 1ms interval
                 producer,
                 event_producer,
                 collector_state.stop_flag.clone(),
                 collector_state.dropped_samples.clone(),
-                500_000,                                     // 500µs spike threshold
+                500_000, // 500µs spike threshold
                 collector_state.spike_count.clone(),
                 collector_state.smi_correlated_spikes.clone(),
                 collector_state.total_smi_count.clone(),
-                None,                                        // SMI polling still happens background
+                None, // SMI polling still happens background
             );
             collector.run();
         });
@@ -130,9 +130,7 @@ mod forensic_diagnostic {
         // Signal collector to stop and collect any remaining samples
         monitoring_state.request_stop();
 
-        eprintln!(
-            "[COLLECTION] Requested stop. Collecting remaining buffered samples..."
-        );
+        eprintln!("[COLLECTION] Requested stop. Collecting remaining buffered samples...");
         thread::sleep(Duration::from_millis(100)); // Give collector time to finish
 
         // Drain any remaining samples
@@ -155,11 +153,13 @@ mod forensic_diagnostic {
         // ========================================================================
         // Raw Data Analysis
         // ========================================================================
-        eprintln!("\n[ANALYSIS] Processing {} raw nanosecond samples...", raw_samples.len());
+        eprintln!(
+            "\n[ANALYSIS] Processing {} raw nanosecond samples...",
+            raw_samples.len()
+        );
 
         // Initialize latency processor
-        let mut processor = LatencyProcessor::new()
-            .expect("Failed to initialize LatencyProcessor");
+        let mut processor = LatencyProcessor::new().expect("Failed to initialize LatencyProcessor");
 
         // Record all samples into the processor
         let mut analysis_errors = 0u64;
@@ -189,16 +189,8 @@ mod forensic_diagnostic {
         eprintln!("\n[STATISTICS] Computing metrics from raw samples...");
 
         // Basic statistics
-        let min_ns = raw_samples
-            .iter()
-            .copied()
-            .min()
-            .unwrap_or(0);
-        let max_ns = raw_samples
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(0);
+        let min_ns = raw_samples.iter().copied().min().unwrap_or(0);
+        let max_ns = raw_samples.iter().copied().max().unwrap_or(0);
         let avg_ns = if !raw_samples.is_empty() {
             raw_samples.iter().sum::<u64>() / raw_samples.len() as u64
         } else {
@@ -237,7 +229,8 @@ mod forensic_diagnostic {
             raw_samples.len()
         );
         eprintln!("Dropped Samples: {}", dropped_count);
-        eprintln!("Dropped Rate: {:.2}%", 
+        eprintln!(
+            "Dropped Rate: {:.2}%",
             if raw_samples.len() > 0 {
                 (dropped_count as f64 / (raw_samples.len() + dropped_count as usize) as f64) * 100.0
             } else {
@@ -246,9 +239,21 @@ mod forensic_diagnostic {
         );
         eprintln!();
         eprintln!("RAW SAMPLE STATISTICS (nanoseconds):");
-        eprintln!("  Min:      {} ns ({:.3} µs)", min_ns, min_ns as f64 / 1000.0);
-        eprintln!("  Max:      {} ns ({:.3} µs)", max_ns, max_ns as f64 / 1000.0);
-        eprintln!("  Average:  {} ns ({:.3} µs)", avg_ns, avg_ns as f64 / 1000.0);
+        eprintln!(
+            "  Min:      {} ns ({:.3} µs)",
+            min_ns,
+            min_ns as f64 / 1000.0
+        );
+        eprintln!(
+            "  Max:      {} ns ({:.3} µs)",
+            max_ns,
+            max_ns as f64 / 1000.0
+        );
+        eprintln!(
+            "  Average:  {} ns ({:.3} µs)",
+            avg_ns,
+            avg_ns as f64 / 1000.0
+        );
         eprintln!();
         eprintln!("PROCESSED STATISTICS (via LatencyProcessor):");
         eprintln!("  Min:      {:.3} µs", min_ns as f64 / 1000.0);
@@ -274,14 +279,17 @@ mod forensic_diagnostic {
         );
         eprintln!();
         eprintln!("THROUGHPUT:");
-        eprintln!("  Estimated: {} samples/sec (~{} Hz)", 
-            estimated_throughput, 
+        eprintln!(
+            "  Estimated: {} samples/sec (~{} Hz)",
+            estimated_throughput,
             estimated_throughput / 1000
         );
         eprintln!("  Expected:  1000 samples/sec (1 kHz at 1ms interval)");
-        eprintln!("  Loss:      {:.1}%", 
+        eprintln!(
+            "  Loss:      {:.1}%",
             if estimated_throughput > 0 {
-                ((1000 - estimated_throughput) as f64 / 1000.0) * 100.0
+                let loss = 1000u64.saturating_sub(estimated_throughput) as f64;
+                (loss / 1000.0) * 100.0
             } else {
                 100.0
             }
@@ -406,7 +414,8 @@ mod forensic_diagnostic {
     /// contributing to latency measurements or causing interference.
     #[test]
     fn test_forensic_syscall_saturation_isolation() {
-        let separator = "================================================================================";
+        let separator =
+            "================================================================================";
         eprintln!("\n{}", separator);
         eprintln!("FORENSIC DIAGNOSTIC TEST: Syscall Saturation Collector Isolation");
         eprintln!("{}", separator);
@@ -414,8 +423,8 @@ mod forensic_diagnostic {
         eprintln!("\n[SETUP] Initializing SyscallSaturationCollector...");
 
         let config = SyscallSaturationConfig {
-            iterations: 10_000,  // 10k getpid calls per run
-            runs: 3,             // 3 runs for quick diagnostic
+            iterations: 10_000, // 10k getpid calls per run
+            runs: 3,            // 3 runs for quick diagnostic
         };
 
         eprintln!(
@@ -431,7 +440,10 @@ mod forensic_diagnostic {
         match collector.run() {
             Ok(metrics) => {
                 let elapsed = start.elapsed();
-                eprintln!("[COLLECTION] Complete. Elapsed: {:.2}s", elapsed.as_secs_f64());
+                eprintln!(
+                    "[COLLECTION] Complete. Elapsed: {:.2}s",
+                    elapsed.as_secs_f64()
+                );
 
                 eprintln!("\n[METRICS] Syscall Saturation Results:");
                 eprintln!("  Avg ns/call:  {:.3} ns", metrics.avg_ns_per_call);
@@ -458,7 +470,10 @@ mod forensic_diagnostic {
                 }
             }
             Err(e) => {
-                eprintln!("[ERROR] Failed to collect syscall saturation metrics: {}", e);
+                eprintln!(
+                    "[ERROR] Failed to collect syscall saturation metrics: {}",
+                    e
+                );
             }
         }
 
@@ -488,11 +503,8 @@ mod forensic_diagnostic {
 
         // Compute standard deviation of deltas
         let mean = deltas.iter().sum::<f32>() / deltas.len() as f32;
-        let variance = deltas
-            .iter()
-            .map(|&d| (d - mean).powi(2))
-            .sum::<f32>()
-            / deltas.len() as f32;
+        let variance =
+            deltas.iter().map(|&d| (d - mean).powi(2)).sum::<f32>() / deltas.len() as f32;
 
         variance.sqrt()
     }
@@ -516,22 +528,26 @@ mod forensic_diagnostic {
         }
 
         // Create 10 buckets from min to max
-        let min = samples.iter().copied().min().unwrap();
-        let max = samples.iter().copied().max().unwrap();
+        let min = samples.iter().copied().min().unwrap_or(0);
+        let max = samples.iter().copied().max().unwrap_or(0);
 
-        if max == min {
+        if max == min || samples.is_empty() {
             eprintln!("  (all samples equal: {} ns)", min);
             return;
         }
 
-        let bucket_width = (max - min) / 10;
+        // Use saturating_sub to safely compute range, then divide to get bucket width
+        let range = max.saturating_sub(min);
+        // Ensure bucket_width is at least 1 to avoid divide-by-zero
+        let bucket_width = (range / 10).max(1);
         let mut buckets = vec![0u64; 10];
 
         for &sample in samples {
-            let bucket_idx = if sample == max {
+            let bucket_idx = if sample >= max {
                 9
             } else {
-                (((sample - min) / bucket_width).min(9)) as usize
+                let adjusted_sample = sample.saturating_sub(min);
+                (((adjusted_sample / bucket_width).min(9)) as usize).min(9)
             };
             buckets[bucket_idx] += 1;
         }
@@ -539,8 +555,8 @@ mod forensic_diagnostic {
         let max_bucket_count = buckets.iter().max().copied().unwrap_or(1);
 
         for (i, &count) in buckets.iter().enumerate() {
-            let lower_ns = min + (i as u64) * bucket_width;
-            let upper_ns = min + ((i + 1) as u64) * bucket_width;
+            let lower_ns = min.saturating_add((i as u64).saturating_mul(bucket_width));
+            let upper_ns = min.saturating_add(((i + 1) as u64).saturating_mul(bucket_width));
             let bar_len = (count as f64 / max_bucket_count as f64 * 40.0) as usize;
             let bar = "█".repeat(bar_len);
 

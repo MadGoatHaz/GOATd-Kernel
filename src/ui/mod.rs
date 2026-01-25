@@ -4,22 +4,22 @@
 //! All Slint code has been removed and the structure has been promoted directly
 //! into the ui module for a cleaner architecture.
 
-pub mod controller;
 pub mod app;
-pub mod dashboard;
 pub mod build;
-pub mod performance;
+pub mod controller;
+pub mod dashboard;
 pub mod kernels;
+pub mod performance;
 pub mod settings;
-pub mod widgets;
 pub mod threading;
+pub mod widgets;
 
-use std::path::PathBuf;
 use crate::kernel::manager::KernelPackage;
 use futures::future::BoxFuture;
+use std::path::PathBuf;
 
-pub use controller::{AppController, BuildEvent};
 pub use app::{AppUI, UIState};
+pub use controller::{AppController, BuildEvent};
 
 /// Trait for system-level operations (OS commands, logging, etc.)
 pub trait SystemWrapper: Send + Sync {
@@ -27,20 +27,20 @@ pub trait SystemWrapper: Send + Sync {
     fn uninstall_package(&self, pkg_name: &str) -> Result<(), String>;
     fn get_booted_kernel(&self) -> String;
     fn install_nvidia_drivers_dkms(&self, kernel_version: &str) -> Result<(), String>;
-    
+
     /// Execute multiple privileged commands in a single pkexec session
     ///
     /// Reduces authentication prompts by batching all privileged operations.
     /// Returns stdout for sentinel scanning and output parsing.
     fn batch_privileged_commands(&self, commands: Vec<&str>) -> Result<String, String>;
-    
+
     /// Execute multiple commands as the current user (without privileges)
     ///
     /// Joins commands with ` && ` and executes them sequentially as the current user.
     /// Intended for user-level operations that should NOT run with elevated privileges,
     /// such as GPG key imports, git operations, or other user-specific tasks.
     fn batch_user_commands(&self, commands: Vec<&str>) -> Result<(), String>;
-    
+
     /// Ensure DKMS safety net configuration for GOATd kernels
     ///
     /// Creates /etc/dkms/framework.conf.d/goatd.conf to configure DKMS
@@ -58,10 +58,17 @@ pub trait KernelManagerTrait: Send + Sync {
 /// Trait for system auditing and metrics collection
 pub trait AuditTrait: Send + Sync {
     fn get_summary(&self) -> Result<crate::kernel::audit::AuditSummary, String>;
-    fn run_deep_audit_async(&self) -> BoxFuture<'static, Result<crate::kernel::audit::KernelAuditData, String>>;
+    fn run_deep_audit_async(
+        &self,
+    ) -> BoxFuture<'static, Result<crate::kernel::audit::KernelAuditData, String>>;
     /// Run deep audit for a specific kernel version (optional parameter)
     /// If version is None, audits the running kernel
-    fn run_deep_audit_async_for_version(&self, version: Option<String>) -> BoxFuture<'static, Result<crate::kernel::audit::KernelAuditData, String>>;
+    fn run_deep_audit_async_for_version(
+        &self,
+        version: Option<String>,
+    ) -> BoxFuture<'static, Result<crate::kernel::audit::KernelAuditData, String>>;
     fn get_performance_metrics(&self) -> Result<crate::kernel::audit::PerformanceMetrics, String>;
-    fn run_jitter_audit_async(&self) -> BoxFuture<'static, Result<crate::kernel::audit::JitterAuditResult, String>>;
+    fn run_jitter_audit_async(
+        &self,
+    ) -> BoxFuture<'static, Result<crate::kernel::audit::JitterAuditResult, String>>;
 }

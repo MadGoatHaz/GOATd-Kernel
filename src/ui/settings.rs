@@ -1,21 +1,19 @@
+use crate::ui::controller::AppController;
 /// Settings View
 ///
 /// Manages application configuration: workspace path, security settings,
 /// UI customization, and startup behaviors.
-
 use eframe::egui;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::ui::controller::AppController;
-use crate::log_info;
 
 /// Persistent settings state for rendering
 #[derive(Clone, Default)]
 pub struct SettingsUIState {
-     pub workspace_path: String,
-     pub secure_boot_enabled: bool,
-     pub verify_signatures: bool,
-     pub prep_timeout_mins: String,
+    pub workspace_path: String,
+    pub secure_boot_enabled: bool,
+    pub verify_signatures: bool,
+    pub prep_timeout_mins: String,
     pub config_timeout_mins: String,
     pub patch_timeout_mins: String,
     pub build_timeout_mins: String,
@@ -37,9 +35,12 @@ pub fn render_settings(
 ) {
     ui.heading("Settings");
     ui.separator();
-    
+
     // Load current settings from controller on first frame only
-    if app_ui_state.workspace_path.is_empty() && app_ui_state.theme == 0 && app_ui_state.font_size == 0.0 {
+    if app_ui_state.workspace_path.is_empty()
+        && app_ui_state.theme == 0
+        && app_ui_state.font_size == 0.0
+    {
         if let Ok(guard) = controller.try_read() {
             if let Ok(state) = guard.get_state() {
                 app_ui_state.workspace_path = state.workspace_path.clone();
@@ -60,16 +61,19 @@ pub fn render_settings(
             }
         }
     }
-    
+
     // Workspace Management Section
     ui.group(|ui| {
         ui.label("Workspace Management");
         ui.separator();
-        
+
         ui.horizontal(|ui| {
             ui.label("Workspace Path:");
             // React to changes: update happens immediately after text_edit
-            if ui.text_edit_singleline(&mut app_ui_state.workspace_path).changed() {
+            if ui
+                .text_edit_singleline(&mut app_ui_state.workspace_path)
+                .changed()
+            {
                 // Wire workspace path change to controller immediately
                 let controller_clone = Arc::clone(controller);
                 let path = app_ui_state.workspace_path.clone();
@@ -78,20 +82,30 @@ pub fn render_settings(
                         match controller_handle.update_state(|state| {
                             state.workspace_path = path.clone();
                         }) {
-                            Ok(()) => eprintln!("[UI] [SETTINGS] Workspace path updated and persisted: {}", path),
-                            Err(e) => eprintln!("[UI] [SETTINGS] Failed to persist workspace path: {}", e),
+                            Ok(()) => {
+                                eprintln!(
+                                    "[UI] [SETTINGS] Workspace path updated and persisted: {}",
+                                    path
+                                );
+                                // Trigger WorkspaceChanged event to force UI refresh
+                                let _ = controller_handle
+                                    .build_tx
+                                    .try_send(crate::ui::controller::BuildEvent::WorkspaceChanged);
+                                eprintln!("[UI] [SETTINGS] WorkspaceChanged event sent");
+                            }
+                            Err(e) => {
+                                eprintln!("[UI] [SETTINGS] Failed to persist workspace path: {}", e)
+                            }
                         }
                     }
                 });
             }
-            
+
             if ui.button("Browse...").clicked() {
                 // Open file dialog via rfd
-                if let Some(path) = rfd::FileDialog::new()
-                    .pick_folder()
-                {
+                if let Some(path) = rfd::FileDialog::new().pick_folder() {
                     app_ui_state.workspace_path = path.to_string_lossy().to_string();
-                    
+
                     // Wire selected path to controller immediately
                     let controller_clone = Arc::clone(controller);
                     let selected_path = app_ui_state.workspace_path.clone();
@@ -100,15 +114,28 @@ pub fn render_settings(
                             match controller_handle.update_state(|state| {
                                 state.workspace_path = selected_path.clone();
                             }) {
-                                Ok(()) => eprintln!("[UI] [SETTINGS] Workspace path selected and persisted: {}", selected_path),
-                                Err(e) => eprintln!("[UI] [SETTINGS] Failed to persist selected path: {}", e),
+                                Ok(()) => {
+                                    eprintln!(
+                                        "[UI] [SETTINGS] Workspace path selected and persisted: {}",
+                                        selected_path
+                                    );
+                                    // Trigger WorkspaceChanged event to force UI refresh
+                                    let _ = controller_handle
+                                        .build_tx
+                                        .try_send(crate::ui::controller::BuildEvent::WorkspaceChanged);
+                                    eprintln!("[UI] [SETTINGS] WorkspaceChanged event sent");
+                                }
+                                Err(e) => eprintln!(
+                                    "[UI] [SETTINGS] Failed to persist selected path: {}",
+                                    e
+                                ),
                             }
                         }
                     });
                 }
             }
         });
-        
+
         // =========================================================================
         // VISUAL WARNING: Path Validation for Kbuild
         // =========================================================================
@@ -119,34 +146,40 @@ pub fn render_settings(
             use std::path::Path;
             validate_kbuild_path(Path::new(&app_ui_state.workspace_path)).is_ok()
         };
-        
+
         if !path_is_valid && !app_ui_state.workspace_path.is_empty() {
             ui.colored_label(
                 egui::Color32::from_rgb(255, 100, 100),
-                "⚠ WARNING: Path contains spaces or colons - Kbuild will fail!"
+                "⚠ WARNING: Path contains spaces or colons - Kbuild will fail!",
             );
         }
-        
+
         ui.horizontal(|ui| {
             ui.label("Kernel Source:");
             ui.monospace(format!("{}/src", app_ui_state.workspace_path));
         });
-        
+
         ui.horizontal(|ui| {
             ui.label("Build Output:");
             ui.monospace(format!("{}/pkg", app_ui_state.workspace_path));
         });
     });
-    
+
     ui.separator();
-    
+
     // Security & Build Settings
     ui.group(|ui| {
         ui.label("Security & Build Settings");
         ui.separator();
-        
+
         // Secure Boot checkbox with persistence
-        if ui.checkbox(&mut app_ui_state.secure_boot_enabled, "Enable Secure Boot (requires UEFI key management)").changed() {
+        if ui
+            .checkbox(
+                &mut app_ui_state.secure_boot_enabled,
+                "Enable Secure Boot (requires UEFI key management)",
+            )
+            .changed()
+        {
             let controller_clone = Arc::clone(controller);
             let enabled = app_ui_state.secure_boot_enabled;
             tokio::spawn(async move {
@@ -157,9 +190,15 @@ pub fn render_settings(
                 }
             });
         }
-        
+
         // Verify signatures checkbox with persistence
-        if ui.checkbox(&mut app_ui_state.verify_signatures, "Verify kernel signatures").changed() {
+        if ui
+            .checkbox(
+                &mut app_ui_state.verify_signatures,
+                "Verify kernel signatures",
+            )
+            .changed()
+        {
             let controller_clone = Arc::clone(controller);
             let enabled = app_ui_state.verify_signatures;
             tokio::spawn(async move {
@@ -170,39 +209,45 @@ pub fn render_settings(
                 }
             });
         }
-        
+
         ui.separator();
     });
-    
+
     ui.separator();
-    
+
     // UI Customization
     ui.group(|ui| {
         ui.label("UI Customization");
         ui.separator();
-        
+
         ui.horizontal(|ui| {
             ui.label("Theme:");
             let themes = vec!["4rchCybrPnk", "Dark", "Light"];
-            let selected_theme = themes.get(app_ui_state.theme).copied().unwrap_or("4rchCybrPnk");
+            let selected_theme = themes
+                .get(app_ui_state.theme)
+                .copied()
+                .unwrap_or("4rchCybrPnk");
             let old_theme = app_ui_state.theme;
             egui::ComboBox::from_id_source("settings_theme_combo")
                 .selected_text(selected_theme)
                 .show_ui(ui, |ui| {
                     for (i, theme) in themes.iter().enumerate() {
-                        if ui.selectable_value(&mut app_ui_state.theme, i, *theme).changed() {
+                        if ui
+                            .selectable_value(&mut app_ui_state.theme, i, *theme)
+                            .changed()
+                        {
                             // Apply theme immediately to egui
                             let new_visuals = match i {
-                                0 => egui::Visuals::dark(),  // 4rchCybrPnk (custom colors applied via controller)
-                                1 => egui::Visuals::dark(),  // Dark
+                                0 => egui::Visuals::dark(), // 4rchCybrPnk (custom colors applied via controller)
+                                1 => egui::Visuals::dark(), // Dark
                                 2 => egui::Visuals::light(), // Light
-                                _ => egui::Visuals::dark(),  // Default to dark
+                                _ => egui::Visuals::dark(), // Default to dark
                             };
                             ui.ctx().set_visuals(new_visuals);
                         }
                     }
                 });
-            
+
             // If theme changed, persist it
             if app_ui_state.theme != old_theme {
                 let controller_clone = Arc::clone(controller);
@@ -216,10 +261,13 @@ pub fn render_settings(
                 });
             }
         });
-        
+
         ui.horizontal(|ui| {
             ui.label("Font Size:");
-            if ui.add(egui::Slider::new(&mut app_ui_state.font_size, 8.0..=20.0).text("pixels")).changed() {
+            if ui
+                .add(egui::Slider::new(&mut app_ui_state.font_size, 8.0..=20.0).text("pixels"))
+                .changed()
+            {
                 let controller_clone = Arc::clone(controller);
                 let font_size = app_ui_state.font_size;
                 tokio::spawn(async move {
@@ -231,8 +279,11 @@ pub fn render_settings(
                 });
             }
         });
-        
-        if ui.checkbox(&mut app_ui_state.auto_scroll_logs, "Auto-scroll build logs").changed() {
+
+        if ui
+            .checkbox(&mut app_ui_state.auto_scroll_logs, "Auto-scroll build logs")
+            .changed()
+        {
             let controller_clone = Arc::clone(controller);
             let enabled = app_ui_state.auto_scroll_logs;
             tokio::spawn(async move {
@@ -244,15 +295,21 @@ pub fn render_settings(
             });
         }
     });
-    
+
     ui.separator();
-    
+
     // Startup & Behaviors
     ui.group(|ui| {
         ui.label("Startup & Behaviors");
         ui.separator();
-        
-        if ui.checkbox(&mut app_ui_state.audit_on_startup, "Run hardware audit on startup").changed() {
+
+        if ui
+            .checkbox(
+                &mut app_ui_state.audit_on_startup,
+                "Run hardware audit on startup",
+            )
+            .changed()
+        {
             let controller_clone = Arc::clone(controller);
             let enabled = app_ui_state.audit_on_startup;
             tokio::spawn(async move {
@@ -263,8 +320,14 @@ pub fn render_settings(
                 }
             });
         }
-        
-        if ui.checkbox(&mut app_ui_state.minimize_to_tray, "Minimize to system tray on close").changed() {
+
+        if ui
+            .checkbox(
+                &mut app_ui_state.minimize_to_tray,
+                "Minimize to system tray on close",
+            )
+            .changed()
+        {
             let controller_clone = Arc::clone(controller);
             let enabled = app_ui_state.minimize_to_tray;
             tokio::spawn(async move {
@@ -275,8 +338,14 @@ pub fn render_settings(
                 }
             });
         }
-        
-        if ui.checkbox(&mut app_ui_state.save_window_state, "Save window position and size").changed() {
+
+        if ui
+            .checkbox(
+                &mut app_ui_state.save_window_state,
+                "Save window position and size",
+            )
+            .changed()
+        {
             let controller_clone = Arc::clone(controller);
             let enabled = app_ui_state.save_window_state;
             tokio::spawn(async move {
@@ -288,37 +357,56 @@ pub fn render_settings(
             });
         }
     });
-    
+
     ui.separator();
-    
+
     // Advanced Settings
     ui.group(|ui| {
         ui.label("Advanced Settings");
         ui.separator();
-        
+
         ui.horizontal(|ui| {
-            if ui.checkbox(&mut app_ui_state.debug_logging, "Enable debug logging").changed() {
+            if ui
+                .checkbox(&mut app_ui_state.debug_logging, "Enable debug logging")
+                .changed()
+            {
                 let controller_clone = Arc::clone(controller);
                 let enabled = app_ui_state.debug_logging;
                 tokio::spawn(async move {
                     if let Ok(controller_handle) = controller_clone.try_read() {
-                        let _ = controller_handle.update_state(|state| {
-                            state.debug_logging = enabled;
-                        });
+                        match controller_handle.update_logging_level(enabled) {
+                            Ok(()) => {
+                                eprintln!("[UI] [SETTINGS] Debug logging updated: {}", enabled);
+                            }
+                            Err(e) => {
+                                eprintln!("[UI] [SETTINGS] Failed to update logging level: {}", e);
+                            }
+                        }
                     }
                 });
             }
             if ui.button("View Logs").clicked() {
                 let controller_clone = Arc::clone(controller);
                 tokio::spawn(async move {
-                    log_info!("[UI] View Logs action invoked - open system log viewer");
-                    let _ = controller_clone;
+                    if let Ok(controller_handle) = controller_clone.try_read() {
+                        match controller_handle.open_logs_dir() {
+                            Ok(()) => {
+                                eprintln!("[UI] [SETTINGS] Logs directory opened successfully");
+                            }
+                            Err(e) => {
+                                eprintln!("[UI] [SETTINGS] Failed to open logs directory: {}", e);
+                            }
+                        }
+                    }
                 });
             }
         });
-        
+
         ui.horizontal(|ui| {
-            if ui.checkbox(&mut app_ui_state.tokio_tracing, "Enable Tokio tracing").changed() {
+            if ui
+                .checkbox(&mut app_ui_state.tokio_tracing, "Enable Tokio tracing")
+                .changed()
+            {
                 let controller_clone = Arc::clone(controller);
                 let enabled = app_ui_state.tokio_tracing;
                 tokio::spawn(async move {
@@ -332,15 +420,29 @@ pub fn render_settings(
             if ui.button("Export Traces").clicked() {
                 let controller_clone = Arc::clone(controller);
                 tokio::spawn(async move {
-                    log_info!("[UI] Export Traces action invoked - export to file");
-                    let _ = controller_clone;
+                    // Open file save dialog
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("traces_export.json")
+                        .save_file()
+                    {
+                        if let Ok(controller_handle) = controller_clone.try_read() {
+                            match controller_handle.export_traces(path.clone()) {
+                                Ok(()) => {
+                                    eprintln!("[UI] [SETTINGS] Traces exported successfully to {}", path.display());
+                                }
+                                Err(e) => {
+                                    eprintln!("[UI] [SETTINGS] Failed to export traces: {}", e);
+                                }
+                            }
+                        }
+                    }
                 });
             }
         });
     });
-    
+
     ui.separator();
-    
+
     // Action Buttons
     ui.horizontal(|ui| {
         if ui.button("Save Settings").clicked() {
@@ -357,10 +459,10 @@ pub fn render_settings(
                 }
             });
         }
-        
+
         if ui.button("Reset to Defaults").clicked() {
             eprintln!("[UI] [SETTINGS] Reset to Defaults clicked - resetting controller state");
-            
+
             // Wire reset to defaults to controller
             let controller_clone = Arc::clone(controller);
             tokio::spawn(async move {
@@ -377,7 +479,7 @@ pub fn render_settings(
                     eprintln!("[UI] [SETTINGS] ✗ Could not acquire lock for reset_to_defaults");
                 }
             });
-            
+
             // CRITICAL: Clear the local UI state so it reloads from controller on next render
             // This forces a refresh of the Settings tab
             *app_ui_state = SettingsUIState::default();

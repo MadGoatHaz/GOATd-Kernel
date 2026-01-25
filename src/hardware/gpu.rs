@@ -1,10 +1,10 @@
 //! GPU vendor detection and identification module.
 
-use crate::models::GpuVendor;
 use crate::error::HardwareError;
-use std::process::Command;
-use std::fs;
+use crate::models::GpuVendor;
 use regex::Regex;
+use std::fs;
+use std::process::Command;
 
 /// Detect GPU vendor via lspci, /proc/modules, or command existence.
 pub fn detect_gpu_vendor() -> Result<GpuVendor, HardwareError> {
@@ -43,7 +43,7 @@ pub fn detect_gpu_model() -> Result<String, HardwareError> {
         // Format is typically: "xx:xx.x VGA compatible controller: [Vendor] Model Name"
         if let Some(colon_idx) = line.rfind(": ") {
             let model_part = &line[colon_idx + 2..].trim();
-            
+
             if !model_part.is_empty() {
                 // Clean up the GPU model string before returning
                 return Ok(clean_gpu_model(model_part));
@@ -90,14 +90,14 @@ pub fn clean_gpu_model(raw_model: &str) -> String {
             if let (Some(vendor_m), Some(name_m)) = (caps.get(1), caps.get(2)) {
                 let vendor = vendor_m.as_str();
                 let name = name_m.as_str();
-                
+
                 // Remove duplicate vendor prefixes and trim whitespace
                 let clean_name = name
                     .replace("GeForce ", "")
                     .replace("Radeon ", "")
                     .trim()
                     .to_string();
-                
+
                 return format!("{} {}", vendor, clean_name);
             }
         }
@@ -120,28 +120,30 @@ pub fn clean_gpu_model(raw_model: &str) -> String {
         if let Some(vendor_match) = re3.find(&without_rev) {
             let vendor = vendor_match.as_str();
             let rest = &without_rev[vendor_match.end()..].trim();
-            
+
             // Try to extract bracketed content
             if let Ok(bracket_re) = Regex::new(r"\[([^\]]+)\]") {
                 if let Some(bracket_match) = bracket_re.find(rest) {
-                    let bracketed = bracket_match.as_str()
+                    let bracketed = bracket_match
+                        .as_str()
                         .trim_matches(|c| c == '[' || c == ']');
                     return format!("{} {}", vendor, bracketed.trim());
                 }
             }
-            
+
             // Fallback: return vendor + first non-empty tokens
             let tokens: Vec<&str> = rest.split_whitespace().collect();
             if tokens.is_empty() {
                 return vendor.to_string();
             }
             // Take up to 3 meaningful tokens to avoid noise
-            let meaningful_tokens: Vec<&str> = tokens.iter()
+            let meaningful_tokens: Vec<&str> = tokens
+                .iter()
                 .take(3)
                 .filter(|t| t.len() > 1 && !t.contains("Corporation"))
                 .copied()
                 .collect();
-            
+
             if meaningful_tokens.is_empty() {
                 return vendor.to_string();
             }
@@ -172,7 +174,7 @@ fn detect_via_lspci() -> Option<GpuVendor> {
     if let Ok(entries) = fs::read_dir("/sys/bus/pci/devices") {
         for entry in entries.flatten() {
             let device_path = entry.path();
-            
+
             // Check if this is a display controller device
             if let Ok(class_str) = fs::read_to_string(device_path.join("class")) {
                 let class_lower = class_str.to_lowercase();
@@ -181,7 +183,7 @@ fn detect_via_lspci() -> Option<GpuVendor> {
                     continue;
                 }
             }
-            
+
             if let Ok(vendor_str) = fs::read_to_string(device_path.join("vendor")) {
                 if let Some(vendor) = detect_vendor_from_id(&vendor_str) {
                     return Some(vendor);
@@ -197,7 +199,7 @@ fn detect_via_lspci() -> Option<GpuVendor> {
 /// Vendor IDs are in hex format: 0x10de (NVIDIA), 0x1002 (AMD), 0x8086 (Intel)
 fn detect_vendor_from_id(vendor_str: &str) -> Option<GpuVendor> {
     let vendor_id = vendor_str.trim();
-    
+
     match vendor_id {
         "0x10de" => Some(GpuVendor::Nvidia),
         "0x1002" => Some(GpuVendor::Amd),
@@ -270,10 +272,7 @@ fn detect_via_commands() -> Option<GpuVendor> {
 /// Returns false if the command doesn't exist or the check fails.
 fn command_exists(cmd: &str) -> bool {
     // Try using 'which' to check if command exists
-    if let Ok(output) = Command::new("which")
-        .arg(cmd)
-        .output()
-    {
+    if let Ok(output) = Command::new("which").arg(cmd).output() {
         if output.status.success() {
             return true;
         }
@@ -281,10 +280,7 @@ fn command_exists(cmd: &str) -> bool {
 
     // Fallback: try running the command directly to see if it exists
     // This handles cases where the command might be in a non-standard location
-    if let Ok(output) = Command::new(cmd)
-        .arg("--version")
-        .output()
-    {
+    if let Ok(output) = Command::new(cmd).arg("--version").output() {
         if output.status.success() {
             return true;
         }
@@ -313,17 +309,14 @@ pub fn detect_nvidia_driver_package() -> Option<String> {
     use std::process::Command;
 
     // Query pacman for installed packages
-    let output = match Command::new("pacman")
-        .args(&["-Q"])
-        .output()
-    {
+    let output = match Command::new("pacman").args(&["-Q"]).output() {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
         _ => return None,
     };
 
     // Check for NVIDIA driver packages (prefer open-source variant if available)
     let priority_packages = vec!["nvidia", "nvidia-open", "nvidia-lts"];
-    
+
     for pkg_name in &priority_packages {
         for line in output.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -364,7 +357,10 @@ mod tests {
         assert!(result.is_ok());
         let vendor = result.unwrap();
         // Should always return one of the four variants
-        matches!(vendor, GpuVendor::Nvidia | GpuVendor::Amd | GpuVendor::Intel | GpuVendor::Unknown);
+        matches!(
+            vendor,
+            GpuVendor::Nvidia | GpuVendor::Amd | GpuVendor::Intel | GpuVendor::Unknown
+        );
     }
 
     #[test]

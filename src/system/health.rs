@@ -1,10 +1,9 @@
+use serde::{Deserialize, Serialize};
 /// System Health Manager
 ///
 /// Silent system health checks without terminal prompts.
 /// Reports missing dependencies, GPG keys, and optional tools.
-
 use std::process::Command;
-use serde::{Deserialize, Serialize};
 
 /// Package repository type
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,26 +97,36 @@ impl HealthManager {
             // Non-Arch systems: only check for cargo
             if !Self::command_exists("cargo") {
                 report.status = HealthStatus::Poor;
-                report.missing_official_packages.push("cargo (Rust)".to_string());
+                report
+                    .missing_official_packages
+                    .push("cargo (Rust)".to_string());
                 report.message = "Rust toolchain (cargo) is required".to_string();
             }
             return report;
         }
 
         // On Arch: check packages and GPG keys
-         // Includes all kernel build dependencies: bc, pahole, python, python-sphinx, texinfo, base-devel, git
-         let critical_packages = vec![
-             "rust", "base-devel", "git", "bc", "pahole", "python", "python-sphinx",
-             "texinfo", "rust-bindgen", "rust-src",
-             "graphviz", "texlive-latexextra", "llvm",
-             "clang", "lld", "polly",
-         ];
-
-        let optional_tools = vec![
-            "modprobed-db",
-            "scx-tools",
-            "scx-scheds",
+        // Includes all kernel build dependencies: bc, pahole, python, python-sphinx, texinfo, base-devel, git
+        let critical_packages = vec![
+            "rust",
+            "base-devel",
+            "git",
+            "bc",
+            "pahole",
+            "python",
+            "python-sphinx",
+            "texinfo",
+            "rust-bindgen",
+            "rust-src",
+            "graphviz",
+            "texlive-latexextra",
+            "llvm",
+            "clang",
+            "lld",
+            "polly",
         ];
+
+        let optional_tools = vec!["modprobed-db", "scx-tools", "scx-scheds"];
 
         let aur_pkgs = Self::aur_packages();
 
@@ -229,7 +238,8 @@ impl HealthManager {
             .arg("--with-colons")
             .arg("--list-keys")
             .arg(key_id)
-            .output() {
+            .output()
+        {
             Ok(o) => o,
             Err(_) => return false,
         };
@@ -296,7 +306,7 @@ impl HealthManager {
         // Install missing OFFICIAL packages and optional tools (not AUR)
         let mut all_official = report.missing_official_packages.clone();
         all_official.extend(report.missing_optional_tools.clone());
-        
+
         if !all_official.is_empty() {
             let pkg_list = all_official.join(" ");
             commands.push(format!("pacman -S --needed --noconfirm {}", pkg_list));

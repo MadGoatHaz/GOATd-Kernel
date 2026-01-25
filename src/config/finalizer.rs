@@ -34,9 +34,9 @@
 //!  7. Return finalized config
 //! ```
 
-use crate::error::ConfigError;
-use crate::models::{KernelConfig, HardwareInfo, LtoType, GpuVendor};
 use super::{exclusions, profiles};
+use crate::error::ConfigError;
+use crate::models::{GpuVendor, HardwareInfo, KernelConfig, LtoType};
 
 /// Finalize kernel configuration by applying all rules and defaults.
 ///
@@ -87,28 +87,29 @@ pub fn finalize_kernel_config(
     // =========================================================================
     if hardware.cpu_cores == 0 {
         return Err(ConfigError::ValidationFailed(
-            "Hardware validation failed: CPU cores cannot be 0".to_string()
+            "Hardware validation failed: CPU cores cannot be 0".to_string(),
         ));
     }
-    
+
     if hardware.ram_gb == 0 {
         return Err(ConfigError::ValidationFailed(
-            "Hardware validation failed: RAM cannot be 0 GB".to_string()
+            "Hardware validation failed: RAM cannot be 0 GB".to_string(),
         ));
     }
-    
-    eprintln!("[Finalizer] [SANITY_CHECK] Hardware validation passed: {} cores, {} GB RAM",
-        hardware.cpu_cores, hardware.ram_gb);
-    
+
+    eprintln!(
+        "[Finalizer] [SANITY_CHECK] Hardware validation passed: {} cores, {} GB RAM",
+        hardware.cpu_cores, hardware.ram_gb
+    );
+
     // =========================================================================
     // Phase 1: Load Profile Definitions (pure data)
     // =========================================================================
     // Retrieve profile data from profiles module (now pure data provider)
-    let profile_def = profiles::get_profile(&config.profile)
-        .ok_or_else(|| ConfigError::ValidationFailed(
-            format!("Unknown profile: {}", config.profile)
-        ))?;
-    
+    let profile_def = profiles::get_profile(&config.profile).ok_or_else(|| {
+        ConfigError::ValidationFailed(format!("Unknown profile: {}", config.profile))
+    })?;
+
     eprintln!("[Finalizer] [STEP 1] Loaded profile: {}", profile_def.name);
 
     // =========================================================================
@@ -120,7 +121,7 @@ pub fn finalize_kernel_config(
     config.hz = profile_def.hz;
     config.preemption = profile_def.preemption.clone();
     config.force_clang = profile_def.use_clang;
-    
+
     // PHASE 9.2: Honor user overrides for Polly, MGLRU, and Hardening
     // Pattern: if !config.user_toggled_* { apply profile default }
     if !config.user_toggled_polly {
@@ -135,16 +136,16 @@ pub fn finalize_kernel_config(
     if !config.user_toggled_native_optimizations {
         config.native_optimizations = profile_def.native_optimizations;
     }
-    
+
     // PHASE 9.3: Honor user overrides for LTO (CRITICAL FIX)
     // If user explicitly set LTO level in UI, respect it - profile default should NOT override
     if !config.user_toggled_lto {
         config.lto_type = profile_def.default_lto;
     }
-    
+
     config.use_modprobed = profile_def.enable_module_stripping;
     config.use_whitelist = profile_def.enable_module_stripping;
-    
+
     // =========================================================================
     // CRITICAL SAFETY CONSTRAINT: Whitelist depends on modprobed-db
     // =========================================================================
@@ -155,7 +156,7 @@ pub fn finalize_kernel_config(
         config.use_whitelist = false;
         eprintln!("[Finalizer] [SAFETY] ⚠️ Whitelisting requires modprobed-db: forcibly disabled use_whitelist");
     }
-    
+
     eprintln!(
         "[Finalizer] [STEP 2] Applied profile defaults: HZ={}, Preemption={}, Clang={}, Polly={} (user_toggled={}), MGLRU={} (user_toggled={}), NativeOpt={} (user_toggled={}), Modprobed={}, Whitelist={}",
         config.hz, config.preemption, config.force_clang, config.use_polly, config.user_toggled_polly, config.use_mglru, config.user_toggled_mglru,
@@ -167,8 +168,10 @@ pub fn finalize_kernel_config(
     // =========================================================================
     if config.use_mglru {
         apply_mglru_tuning(&mut config);
-        eprintln!("[Finalizer] [STEP 3] Applied MGLRU tuning: mask=0x{:04x}, ttl={}ms",
-            config.mglru_enabled_mask, config.mglru_min_ttl_ms);
+        eprintln!(
+            "[Finalizer] [STEP 3] Applied MGLRU tuning: mask=0x{:04x}, ttl={}ms",
+            config.mglru_enabled_mask, config.mglru_min_ttl_ms
+        );
     }
 
     // =========================================================================
@@ -176,23 +179,29 @@ pub fn finalize_kernel_config(
     // =========================================================================
     if config.use_modprobed {
         apply_gpu_exclusions(&mut config, hardware)?;
-        eprintln!("[Finalizer] [STEP 4] Applied GPU exclusions: {} drivers excluded",
-            config.driver_exclusions.len());
+        eprintln!(
+            "[Finalizer] [STEP 4] Applied GPU exclusions: {} drivers excluded",
+            config.driver_exclusions.len()
+        );
     }
 
     // =========================================================================
     // Phase 5: Determine LTO Shielding Modules (GPU-Based)
     // =========================================================================
     apply_gpu_lto_shielding(&mut config, hardware);
-    eprintln!("[Finalizer] [STEP 5] Applied GPU LTO shielding: {} modules shielded",
-        config.lto_shield_modules.len());
+    eprintln!(
+        "[Finalizer] [STEP 5] Applied GPU LTO shielding: {} modules shielded",
+        config.lto_shield_modules.len()
+    );
 
     // =========================================================================
     // Phase 6: Generate Derived config_options Strings
     // =========================================================================
     generate_derived_config_options(&mut config, &profile_def);
-    eprintln!("[Finalizer] [STEP 6] Generated {} derived config_options",
-        config.config_options.len());
+    eprintln!(
+        "[Finalizer] [STEP 6] Generated {} derived config_options",
+        config.config_options.len()
+    );
 
     // =========================================================================
     // Phase 7: Ensure SCX Support Configuration
@@ -203,8 +212,10 @@ pub fn finalize_kernel_config(
     // =========================================================================
     // Phase 8: Return Finalized Config
     // =========================================================================
-    eprintln!("[Finalizer] [COMPLETE] Configuration finalized: {} profile ready for build",
-        config.profile);
+    eprintln!(
+        "[Finalizer] [COMPLETE] Configuration finalized: {} profile ready for build",
+        config.profile
+    );
     Ok(config)
 }
 
@@ -220,11 +231,11 @@ pub fn finalize_kernel_config(
 /// - **Generic/Default**: enabled_mask=0x0007, min_ttl_ms=1000 (conservative defaults)
 fn apply_mglru_tuning(config: &mut KernelConfig) {
     let (enabled_mask, min_ttl_ms) = match config.profile.as_str() {
-        "Gaming" => (0x0007, 1000),       // All subsystems, 1000ms TTL
-        "Workstation" => (0x0007, 1000),  // All subsystems, 1000ms TTL
-        "Laptop" => (0x0007, 500),        // All subsystems, 500ms TTL for aggressive reclaim
-        "Server" => (0x0000, 1000),       // Disabled for server workloads
-        _ => (0x0007, 1000),              // Default: all subsystems, 1000ms
+        "Gaming" => (0x0007, 1000),      // All subsystems, 1000ms TTL
+        "Workstation" => (0x0007, 1000), // All subsystems, 1000ms TTL
+        "Laptop" => (0x0007, 500),       // All subsystems, 500ms TTL for aggressive reclaim
+        "Server" => (0x0000, 1000),      // Disabled for server workloads
+        _ => (0x0007, 1000),             // Default: all subsystems, 1000ms
     };
 
     config.mglru_enabled_mask = enabled_mask;
@@ -251,12 +262,12 @@ fn apply_gpu_exclusions(
 /// `config.lto_shield_modules` based on the detected GPU vendor.
 fn apply_gpu_lto_shielding(config: &mut KernelConfig, hardware: &HardwareInfo) {
     config.lto_shield_modules.clear();
-    
+
     // Only apply shielding if LTO is enabled
     if config.lto_type == LtoType::None {
         return;
     }
-    
+
     // Determine which GPU modules need LTO shielding based on vendor
     match hardware.gpu_vendor {
         GpuVendor::Nvidia => {
@@ -285,7 +296,10 @@ fn apply_gpu_lto_shielding(config: &mut KernelConfig, hardware: &HardwareInfo) {
 /// This function creates the legacy config_options HashMap entries that are
 /// used by the build system. It converts first-class fields like `hz` and
 /// `preemption` into the underscore-prefixed keys that the patcher expects.
-fn generate_derived_config_options(config: &mut KernelConfig, _profile_def: &profiles::ProfileDefinition) {
+fn generate_derived_config_options(
+    config: &mut KernelConfig,
+    _profile_def: &profiles::ProfileDefinition,
+) {
     // Clang compiler flag
     config.config_options.insert(
         "_FORCE_CLANG".to_string(),
@@ -300,17 +314,15 @@ fn generate_derived_config_options(config: &mut KernelConfig, _profile_def: &pro
         "Server" => "CONFIG_PREEMPT_NONE=y",
         _ => "CONFIG_PREEMPT_VOLUNTARY=y",
     };
-    config.config_options.insert(
-        "_PREEMPTION_MODEL".to_string(),
-        preemption_flag.to_string(),
-    );
+    config
+        .config_options
+        .insert("_PREEMPTION_MODEL".to_string(), preemption_flag.to_string());
 
     // Timer frequency (HZ) flag
     let hz_flag = format!("CONFIG_HZ={}", config.hz);
-    config.config_options.insert(
-        "_HZ_VALUE".to_string(),
-        hz_flag,
-    );
+    config
+        .config_options
+        .insert("_HZ_VALUE".to_string(), hz_flag);
 
     // MGLRU compile flags if enabled for this profile
     if config.use_mglru {
@@ -334,15 +346,18 @@ fn generate_derived_config_options(config: &mut KernelConfig, _profile_def: &pro
     if config.use_polly {
         config.config_options.insert(
             "_POLLY_CFLAGS".to_string(),
-            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max".to_string(),
+            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max"
+                .to_string(),
         );
         config.config_options.insert(
             "_POLLY_CXXFLAGS".to_string(),
-            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max".to_string(),
+            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max"
+                .to_string(),
         );
         config.config_options.insert(
             "_POLLY_LDFLAGS".to_string(),
-            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max".to_string(),
+            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max"
+                .to_string(),
         );
     }
 }
@@ -385,10 +400,7 @@ mod tests {
         assert_eq!(finalized.mglru_enabled_mask, 0x0007);
         assert_eq!(finalized.mglru_min_ttl_ms, 1000);
         // AMD/Intel drivers should be excluded
-        assert!(finalized
-            .driver_exclusions
-            .iter()
-            .any(|d| d == "amdgpu"));
+        assert!(finalized.driver_exclusions.iter().any(|d| d == "amdgpu"));
         // NVIDIA GPU should be shielded from LTO
         assert!(finalized.lto_shield_modules.contains(&"nvidia".to_string()));
     }
@@ -414,13 +426,21 @@ mod tests {
         assert_eq!(finalized.profile, "Laptop");
         assert_eq!(finalized.mglru_enabled_mask, 0x0007);
         assert_eq!(finalized.mglru_min_ttl_ms, 500); // Laptop has shorter TTL
-        // NVIDIA drivers should be excluded
+                                                     // AMD drivers should NOT be excluded
+        assert!(!finalized
+            .driver_exclusions
+            .iter()
+            .any(|d| d == "amdgpu" || d == "radeon"));
+        // Intel drivers should be excluded for AMD GPU
         assert!(finalized
             .driver_exclusions
             .iter()
-            .any(|d| d == "nvidia"));
+            .any(|d| d == "i915" || d == "xe"));
         // AMD GPU should be shielded from LTO
-        assert!(finalized.lto_shield_modules.iter().any(|m| m == "amdgpu" || m == "amdkfd"));
+        assert!(finalized
+            .lto_shield_modules
+            .iter()
+            .any(|m| m == "amdgpu" || m == "amdkfd"));
     }
 
     #[test]
@@ -533,11 +553,29 @@ mod tests {
         generate_derived_config_options(&mut config, &profile_def);
 
         // Verify config_options were generated correctly
-        assert_eq!(config.config_options.get("_FORCE_CLANG"), Some(&"1".to_string()));
-        assert_eq!(config.config_options.get("_PREEMPTION_MODEL"), Some(&"CONFIG_PREEMPT=y".to_string()));
-        assert_eq!(config.config_options.get("_HZ_VALUE"), Some(&"CONFIG_HZ=1000".to_string()));
-        assert_eq!(config.config_options.get("_MGLRU_CONFIG_LRU_GEN"), Some(&"CONFIG_LRU_GEN=y".to_string()));
-        assert_eq!(config.config_options.get("_POLLY_CFLAGS"), Some(&"-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max".to_string()));
+        assert_eq!(
+            config.config_options.get("_FORCE_CLANG"),
+            Some(&"1".to_string())
+        );
+        assert_eq!(
+            config.config_options.get("_PREEMPTION_MODEL"),
+            Some(&"CONFIG_PREEMPT=y".to_string())
+        );
+        assert_eq!(
+            config.config_options.get("_HZ_VALUE"),
+            Some(&"CONFIG_HZ=1000".to_string())
+        );
+        assert_eq!(
+            config.config_options.get("_MGLRU_CONFIG_LRU_GEN"),
+            Some(&"CONFIG_LRU_GEN=y".to_string())
+        );
+        assert_eq!(
+            config.config_options.get("_POLLY_CFLAGS"),
+            Some(
+                &"-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-opt-fusion=max"
+                    .to_string()
+            )
+        );
     }
 
     #[test]

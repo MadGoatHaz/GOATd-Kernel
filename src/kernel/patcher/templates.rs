@@ -47,24 +47,24 @@ log_json() {
     local _message="${3:-<no message>}"
     local _metadata="${4:-}"
     local _timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-    
+
     # Build JSON object with proper escaping
     local _json_entry="{"
     _json_entry+="\"timestamp\":\"${_timestamp}\","
     _json_entry+="\"level\":\"${_level}\","
     _json_entry+="\"phase\":\"${_phase}\","
     _json_entry+="\"message\":\"$(echo "$_message" | sed 's/"/\\"/g')\""
-    
+
     # Append metadata if provided
     if [ -n "$_metadata" ]; then
         _json_entry+=",\"metadata\":${_metadata}"
     fi
-    
+
     _json_entry+="}"
-    
+
     # Append to telemetry log file
     echo "$_json_entry" >> /tmp/goatd_dkms.log 2>/dev/null
-    
+
     # Also output to stderr for visibility during build
     printf "[%s] [%s] %s\n" "$_level" "$_phase" "$_message" >&2
 }
@@ -103,7 +103,8 @@ pub const RUST_RMETA_FIX: &str = r#"   echo "Installing Rust files..."
 /// that runs IMMEDIATELY BEFORE the 'make' command in build().
 pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
     match lto_type {
-        LtoType::Full => r#"
+        LtoType::Full => {
+            r#"
     # =====================================================================
     # PHASE G1 PREBUILD: LTO HARD ENFORCER (FULL LTO)
     # =====================================================================
@@ -115,7 +116,7 @@ pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
     # CRITICAL: This is the FINAL GATE before kernel compilation.
     # All other config changes have been finalized in prepare().
     # Environment variables are NOW protected from overwrites.
-    
+
     # ====================================================================
     # PHASE G1.1: ENVIRONMENT VARIABLE HARDENING
     # ====================================================================
@@ -130,40 +131,40 @@ pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
     # from being applied to host tools (like bpftool). Host tools don't support
     # Polly and will fail with "Unknown command line argument '-polly'" errors.
     # Only the main kernel (vmlinux) gets Polly optimizations.
-    
+
     # Main kernel compilation: Include LTO, hardening, and native flags (NO POLLY)
     # CRITICAL FIX: Polly flags moved to KCFLAGS to prevent host tool contamination
     export CFLAGS="${CFLAGS:-} $GOATD_LTO_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS="${CXXFLAGS:-} $GOATD_LTO_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export LDFLAGS="${LDFLAGS:-} $GOATD_LTO_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # CRITICAL: KCFLAGS is kernel-only (NOT inherited by host tools like bpftool)
     # Polly flags are NOW in KCFLAGS to ensure kernel gets optimizations without hosttool contamination
     export KCFLAGS="-march=native $GOATD_POLLY_FLAGS"
-    
+
     # Host tools compilation: Exclude LTO and Polly flags (not supported by host toolchain)
     # CRITICAL: Include GOATD_BASE_FLAGS (-O2) BEFORE hardening flags
     # This is REQUIRED because _FORTIFY_SOURCE demands optimization (-O flag)
     export HOSTCFLAGS="${HOSTCFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export HOSTCXXFLAGS="${HOSTCXXFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export HOSTLDFLAGS="${HOSTLDFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # Tool-specific flag variants (some kernel makefiles use these aliases)
     export CFLAGS_HOST="${CFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS_HOST="${CXXFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export LDFLAGS_HOST="${LDFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # Tools (e.g., resolve_btfids) compilation: BASE_FLAGS only, no Polly/LTO
     export TOOLS_CFLAGS="${TOOLS_CFLAGS:-} $GOATD_BASE_FLAGS"
     export TOOLS_CXXFLAGS="${TOOLS_CXXFLAGS:-} $GOATD_BASE_FLAGS"
     export TOOLS_LDFLAGS="${TOOLS_LDFLAGS:-} $GOATD_BASE_FLAGS"
-    
+
     # EXTRA_* variables also used by some toolchain makefiles (e.g., bpftool bootstrap)
     # CRITICAL: These must NOT inherit Polly or LTO flags to prevent tool failures
     export EXTRA_CFLAGS="${EXTRA_CFLAGS:-} $GOATD_BASE_FLAGS"
     export EXTRA_CXXFLAGS="${EXTRA_CXXFLAGS:-} $GOATD_BASE_FLAGS"
     export EXTRA_LDFLAGS="${EXTRA_LDFLAGS:-} $GOATD_BASE_FLAGS"
-     
+
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CFLAGS=\"%s\"\n" "$CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: LDFLAGS=\"%s\"\n" "$LDFLAGS" >&2
@@ -179,10 +180,10 @@ pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_CFLAGS=\"%s\"\n" "$EXTRA_CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_CXXFLAGS=\"%s\"\n" "$EXTRA_CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_LDFLAGS=\"%s\"\n" "$EXTRA_LDFLAGS" >&2
-    
+
     if [[ -f ".config" ]]; then
         config_file=".config"
-        
+
         # ====================================================================
         # PHASE G1.2: LTO HARD ENFORCER (Surgical, Atomic Enforcement - FULL LTO)
         # ====================================================================
@@ -192,10 +193,10 @@ pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
         #
         # SURGICAL REMOVAL: Use GLOBAL sed pattern to delete ALL LTO-related lines
         sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' "$config_file"
-        
+
         # Ensure file ends with newline
         tail -c 1 < "$config_file" | od -An -tx1 | grep -q '0a' || echo "" >> "$config_file"
-        
+
         # ATOMIC INJECTION: Append FULL LTO settings
          [ -f "$config_file" ] && cat >> "$config_file" << 'EOF'
 
@@ -208,9 +209,9 @@ CONFIG_LTO_CLANG=y
 CONFIG_LTO_CLANG_FULL=y
 CONFIG_HAS_LTO_CLANG=y
 EOF
-        
+
         printf "[PREBUILD] [LTO] PHASE G1.2: Surgically enforced CONFIG_LTO_CLANG=y + CONFIG_LTO_CLANG_FULL=y\n" >&2
-        
+
         # ====================================================================
         # PHASE G1.3: RUN OLDDEFCONFIG TO ACCEPT NEW CONFIG OPTIONS
         # ====================================================================
@@ -222,13 +223,15 @@ EOF
                 printf "[PREBUILD] WARNING: 'make olddefconfig' failed or unavailable, continuing anyway...\n" >&2
             fi
         fi
-        
+
         # Verify final module count
         VERIFY_MODULE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" "$config_file" 2>/dev/null || echo "unknown")
         printf "[PREBUILD] VERIFICATION: Final module count before make: $VERIFY_MODULE_COUNT\n" >&2
     fi
-    "#,
-        LtoType::Thin => r#"
+    "#
+        }
+        LtoType::Thin => {
+            r#"
     # =====================================================================
     # PHASE G1 PREBUILD: LTO HARD ENFORCER (THIN LTO)
     # =====================================================================
@@ -240,7 +243,7 @@ EOF
     # CRITICAL: This is the FINAL GATE before kernel compilation.
     # All other config changes have been finalized in prepare().
     # Environment variables are NOW protected from overwrites.
-    
+
     # ====================================================================
     # PHASE G1.1: ENVIRONMENT VARIABLE HARDENING
     # ====================================================================
@@ -255,40 +258,40 @@ EOF
     # from being applied to host tools (like bpftool). Host tools don't support
     # Polly and will fail with "Unknown command line argument '-polly'" errors.
     # Only the main kernel (vmlinux) gets Polly optimizations.
-    
+
     # Main kernel compilation: Include LTO, hardening, and native flags (NO POLLY)
     # CRITICAL FIX: Polly flags moved to KCFLAGS to prevent host tool contamination
     export CFLAGS="${CFLAGS:-} $GOATD_LTO_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS="${CXXFLAGS:-} $GOATD_LTO_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export LDFLAGS="${LDFLAGS:-} $GOATD_LTO_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # CRITICAL: KCFLAGS is kernel-only (NOT inherited by host tools like bpftool)
     # Polly flags are NOW in KCFLAGS to ensure kernel gets optimizations without hosttool contamination
     export KCFLAGS="-march=native $GOATD_POLLY_FLAGS"
-    
+
     # Host tools compilation: Exclude LTO and Polly flags (not supported by host toolchain)
     # CRITICAL: Include GOATD_BASE_FLAGS (-O2) BEFORE hardening flags
     # This is REQUIRED because _FORTIFY_SOURCE demands optimization (-O flag)
     export HOSTCFLAGS="${HOSTCFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export HOSTCXXFLAGS="${HOSTCXXFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export HOSTLDFLAGS="${HOSTLDFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # Tool-specific flag variants (some kernel makefiles use these aliases)
     export CFLAGS_HOST="${CFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS_HOST="${CXXFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export LDFLAGS_HOST="${LDFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # Tools (e.g., resolve_btfids) compilation: BASE_FLAGS only, no Polly/LTO
     export TOOLS_CFLAGS="${TOOLS_CFLAGS:-} $GOATD_BASE_FLAGS"
     export TOOLS_CXXFLAGS="${TOOLS_CXXFLAGS:-} $GOATD_BASE_FLAGS"
     export TOOLS_LDFLAGS="${TOOLS_LDFLAGS:-} $GOATD_BASE_FLAGS"
-    
+
     # EXTRA_* variables also used by some toolchain makefiles (e.g., bpftool bootstrap)
     # CRITICAL: These must NOT inherit Polly or LTO flags to prevent tool failures
     export EXTRA_CFLAGS="${EXTRA_CFLAGS:-} $GOATD_BASE_FLAGS"
     export EXTRA_CXXFLAGS="${EXTRA_CXXFLAGS:-} $GOATD_BASE_FLAGS"
     export EXTRA_LDFLAGS="${EXTRA_LDFLAGS:-} $GOATD_BASE_FLAGS"
-     
+
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CFLAGS=\"%s\"\n" "$CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: LDFLAGS=\"%s\"\n" "$LDFLAGS" >&2
@@ -304,10 +307,10 @@ EOF
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_CFLAGS=\"%s\"\n" "$EXTRA_CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_CXXFLAGS=\"%s\"\n" "$EXTRA_CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_LDFLAGS=\"%s\"\n" "$EXTRA_LDFLAGS" >&2
-    
+
     if [[ -f ".config" ]]; then
         config_file=".config"
-        
+
         # ====================================================================
         # PHASE G1.2: LTO HARD ENFORCER (Surgical, Atomic Enforcement - THIN LTO)
         # ====================================================================
@@ -317,10 +320,10 @@ EOF
         #
         # SURGICAL REMOVAL: Use GLOBAL sed pattern to delete ALL LTO-related lines
         sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' "$config_file"
-        
+
         # Ensure file ends with newline
         tail -c 1 < "$config_file" | od -An -tx1 | grep -q '0a' || echo "" >> "$config_file"
-        
+
         # ATOMIC INJECTION: Append THIN LTO settings
          [ -f "$config_file" ] && cat >> "$config_file" << 'EOF'
 
@@ -333,9 +336,9 @@ CONFIG_LTO_CLANG=y
 CONFIG_LTO_CLANG_THIN=y
 CONFIG_HAS_LTO_CLANG=y
 EOF
-        
+
         printf "[PREBUILD] [LTO] PHASE G1.2: Surgically enforced CONFIG_LTO_CLANG=y + CONFIG_LTO_CLANG_THIN=y\n" >&2
-        
+
         # ====================================================================
         # PHASE G1.3: RUN OLDDEFCONFIG TO ACCEPT NEW CONFIG OPTIONS
         # ====================================================================
@@ -347,19 +350,21 @@ EOF
                 printf "[PREBUILD] WARNING: 'make olddefconfig' failed or unavailable, continuing anyway...\n" >&2
             fi
         fi
-        
+
         # Verify final module count
         VERIFY_MODULE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" "$config_file" 2>/dev/null || echo "unknown")
         printf "[PREBUILD] VERIFICATION: Final module count before make: $VERIFY_MODULE_COUNT\n" >&2
     fi
-    "#,
-        LtoType::None => r#"
+    "#
+        }
+        LtoType::None => {
+            r#"
     # =====================================================================
     # PHASE G1 PREBUILD: LTO DISABLED (None)
     # =====================================================================
     # LTO is disabled per user selection - no LTO enforcement
     # CRITICAL: Still protect environment variables (Hardening, Polly, Native Optimization)
-    
+
     # ====================================================================
     # PHASE G1.1: ENVIRONMENT VARIABLE HARDENING (even with LTO disabled)
     # ====================================================================
@@ -375,40 +380,40 @@ EOF
     # from being applied to host tools (like bpftool). Host tools don't support
     # Polly and will fail with "Unknown command line argument '-polly'" errors.
     # Only the main kernel (vmlinux) gets Polly optimizations.
-    
+
     # Main kernel compilation: Include hardening and native flags (no LTO, NO POLLY)
     # CRITICAL FIX: Polly flags moved to KCFLAGS to prevent host tool contamination
     export CFLAGS="${CFLAGS:-} $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS="${CXXFLAGS:-} $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export LDFLAGS="${LDFLAGS:-} $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-    
+
     # CRITICAL: KCFLAGS is kernel-only (NOT inherited by host tools like bpftool)
     # Polly flags are NOW in KCFLAGS to ensure kernel gets optimizations without hosttool contamination
     export KCFLAGS="-march=native $GOATD_POLLY_FLAGS"
-    
+
     # Host tools compilation: Exclude Polly flags (not supported by host toolchain)
      # CRITICAL: Include GOATD_BASE_FLAGS (-O2) BEFORE hardening flags
      # This is REQUIRED because _FORTIFY_SOURCE demands optimization (-O flag)
      export HOSTCFLAGS="${HOSTCFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
      export HOSTCXXFLAGS="${HOSTCXXFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
      export HOSTLDFLAGS="${HOSTLDFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-     
+
      # Tool-specific flag variants (some kernel makefiles use these aliases)
      export CFLAGS_HOST="${CFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
      export CXXFLAGS_HOST="${CXXFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
      export LDFLAGS_HOST="${LDFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
-     
+
      # Tools (e.g., resolve_btfids) compilation: BASE_FLAGS only, no Polly/LTO
      export TOOLS_CFLAGS="${TOOLS_CFLAGS:-} $GOATD_BASE_FLAGS"
      export TOOLS_CXXFLAGS="${TOOLS_CXXFLAGS:-} $GOATD_BASE_FLAGS"
      export TOOLS_LDFLAGS="${TOOLS_LDFLAGS:-} $GOATD_BASE_FLAGS"
-     
+
      # EXTRA_* variables also used by some toolchain makefiles (e.g., bpftool bootstrap)
      # CRITICAL: These must NOT inherit Polly or LTO flags to prevent tool failures
      export EXTRA_CFLAGS="${EXTRA_CFLAGS:-} $GOATD_BASE_FLAGS"
      export EXTRA_CXXFLAGS="${EXTRA_CXXFLAGS:-} $GOATD_BASE_FLAGS"
      export EXTRA_LDFLAGS="${EXTRA_LDFLAGS:-} $GOATD_BASE_FLAGS"
-     
+
      printf "[PREBUILD] [PHASE-G1.1] Main kernel (no LTO): CFLAGS=\"%s\"\n" "$CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel (no LTO): CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel (no LTO): LDFLAGS=\"%s\"\n" "$LDFLAGS" >&2
@@ -424,29 +429,30 @@ EOF
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_CFLAGS=\"%s\"\n" "$EXTRA_CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_CXXFLAGS=\"%s\"\n" "$EXTRA_CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Extra vars (BPF): EXTRA_LDFLAGS=\"%s\"\n" "$EXTRA_LDFLAGS" >&2
-    
+
     if [[ -f ".config" ]]; then
         config_file=".config"
-        
+
         # SURGICAL REMOVAL: Remove all LTO-related lines
         sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' "$config_file"
-        
+
         # Ensure file ends with newline
         tail -c 1 < "$config_file" | od -An -tx1 | grep -q '0a' || echo "" >> "$config_file"
-        
+
         printf "[PREBUILD] [LTO] PHASE G1: LTO disabled - removed all LTO configs\n" >&2
-        
+
         # Run olddefconfig to finalize
         if command -v make &> /dev/null; then
             if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
                 printf "[PREBUILD] OLDDEFCONFIG: SUCCESS - Configuration finalized\n" >&2
             fi
         fi
-        
+
         VERIFY_MODULE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" "$config_file" 2>/dev/null || echo "unknown")
         printf "[PREBUILD] VERIFICATION: Final module count before make: $VERIFY_MODULE_COUNT\n" >&2
     fi
-    "#,
+    "#
+        }
     }
 }
 
@@ -455,7 +461,7 @@ EOF
 /// Protects modprobed-filtered modules and MGLRU/Polly settings from overwrite
 /// by the "Setting config..." step which runs "cp ../config .config".
 pub const PHASE_G2_5_RESTORER: &str = r#"
-      
+
       # =====================================================================
       # PHASE G2.5 POST-SETTING-CONFIG: Protect profile settings and re-apply filtering
       # =====================================================================
@@ -472,7 +478,7 @@ pub const PHASE_G2_5_RESTORER: &str = r#"
       # - Re-applies modprobed filtering AFTER overwrite
       # - Re-injects backed-up CONFIG_CMDLINE*, MGLRU configs
       # - Re-enforces LTO settings that kernel defaults reverted
-      
+
       # STEP 1: Capture CONFIG_CMDLINE* settings BEFORE "cp ../config .config"
       # Find kernel source directory
       KERNEL_SRC_DIR=""
@@ -481,39 +487,39 @@ pub const PHASE_G2_5_RESTORER: &str = r#"
       else
           KERNEL_SRC_DIR=$(find "$srcdir" -maxdepth 1 -type d -name 'linux-*' 2>/dev/null | head -1)
       fi
-      
+
       if [[ -z "$KERNEL_SRC_DIR" ]] && [[ -f "$srcdir/Makefile" ]]; then
           KERNEL_SRC_DIR="$srcdir"
       fi
-      
+
       # Capture CONFIG_CMDLINE* values BEFORE the "cp ../config .config" step overwrites them
       CONFIG_CMDLINE_BACKUP=""
       CONFIG_CMDLINE_BOOL_BACKUP=""
       CONFIG_CMDLINE_OVERRIDE_BACKUP=""
-      
+
       if [[ -n "$KERNEL_SRC_DIR" ]] && [[ -d "$KERNEL_SRC_DIR" ]] && [[ -f "$KERNEL_SRC_DIR/.config" ]]; then
           CONFIG_CMDLINE_BACKUP=$(grep "^CONFIG_CMDLINE=" "$KERNEL_SRC_DIR/.config" 2>/dev/null || echo "")
           CONFIG_CMDLINE_BOOL_BACKUP=$(grep "^CONFIG_CMDLINE_BOOL=" "$KERNEL_SRC_DIR/.config" 2>/dev/null || echo "")
           CONFIG_CMDLINE_OVERRIDE_BACKUP=$(grep "^CONFIG_CMDLINE_OVERRIDE=" "$KERNEL_SRC_DIR/.config" 2>/dev/null || echo "")
-          
+
           if [[ -n "$CONFIG_CMDLINE_BACKUP" ]]; then
               printf "[PHASE-G2.5] CAPTURED CONFIG_CMDLINE before overwrite\n" >&2
           fi
       fi
-      
+
       # STEP 2: Now the "Setting config..." step runs "cp ../config .config" (happens in main prepare)
       # We'll restore values immediately after
-      
+
       if [[ -n "$KERNEL_SRC_DIR" ]] && [[ -d "$KERNEL_SRC_DIR" ]] && [[ -f "$KERNEL_SRC_DIR/.config" ]]; then
           # CRITICAL FIX: Use subshell to limit directory change scope
           # This ensures we return to $srcdir after all operations
           (
               cd "$KERNEL_SRC_DIR" || exit 1
-              
+
               # STEP 3: Count modules BEFORE re-filtering
               BEFORE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
               printf "[PHASE-G2.5] Module count after 'Setting config...': $BEFORE_COUNT\n" >&2
-              
+
               # STEP 4: Re-apply modprobed filtering with robust path detection
               # Find modprobed.db using multiple fallback strategies
               MODPROBED_DB_PATH=""
@@ -524,7 +530,7 @@ pub const PHASE_G2_5_RESTORER: &str = r#"
                       break
                   fi
               done
-              
+
               # Check if modprobed.db exists BEFORE attempting to use it
               if [[ -n "$MODPROBED_DB_PATH" && -f "$MODPROBED_DB_PATH" ]]; then
                   printf "[PHASE-G2.5] Re-running: yes \"\" | make LLVM=1 LLVM_IAS=1 LSMOD=$MODPROBED_DB_PATH localmodconfig\n" >&2
@@ -537,50 +543,58 @@ pub const PHASE_G2_5_RESTORER: &str = r#"
               else
                   printf "[PHASE-G2.5] INFO: modprobed.db not found at $MODPROBED_DB_PATH, skipping re-filtering (expected on fresh install)\n" >&2
               fi
-              
+
               # STEP 5: Restore CONFIG_CMDLINE* parameters
               if [[ -n "$CONFIG_CMDLINE_BACKUP" ]] || [[ -n "$CONFIG_CMDLINE_BOOL_BACKUP" ]] || [[ -n "$CONFIG_CMDLINE_OVERRIDE_BACKUP" ]]; then
                   # Remove old CONFIG_CMDLINE* entries to prevent duplicates
                   sed -i '/^CONFIG_CMDLINE.*/d' ".config"
-                  
+
                   # Ensure newline before appending
                   [[ -n "$(tail -c 1 ".config")" ]] && echo "" >> ".config"
-                  
+
                   # Re-inject backed-up CMDLINE parameters
                   [[ -n "$CONFIG_CMDLINE_BACKUP" ]] && echo "$CONFIG_CMDLINE_BACKUP" >> ".config"
                   [[ -n "$CONFIG_CMDLINE_BOOL_BACKUP" ]] && echo "$CONFIG_CMDLINE_BOOL_BACKUP" >> ".config"
                   [[ -n "$CONFIG_CMDLINE_OVERRIDE_BACKUP" ]] && echo "$CONFIG_CMDLINE_OVERRIDE_BACKUP" >> ".config"
-                  
+
                   printf "[PHASE-G2.5] Re-applied CONFIG_CMDLINE* parameters\n" >&2
               fi
-              
+
               # STEP 6: Re-apply MGLRU configs if they were set
               if [[ -n "$GOATD_MGLRU_CONFIGS" ]]; then
                   # Remove old MGLRU lines
                   sed -i '/^CONFIG_LRU_GEN/d' ".config"
-                  
+
                   # Ensure newline before appending
                   [[ -n "$(tail -c 1 ".config")" ]] && echo "" >> ".config"
                   echo "$GOATD_MGLRU_CONFIGS" >> ".config"
                   printf "[PHASE-G2.5] Re-applied MGLRU configs\n" >&2
               fi
-              
+
               # STEP 7: CRITICAL FIX - Re-enforce LTO settings after config overwrite
               # The kernel's defaults set CONFIG_LTO_NONE=y which completely bypasses LTO
               # We MUST surgically remove CONFIG_LTO_NONE and re-inject proper LTO settings
               printf "[PHASE-G2.5] [LTO-RE-ENFORCEMENT] Checking for LTO restoration...\n" >&2
+
+              # Detect LTO type from environment (CRITICAL: no fallback default)
+              # The executor MUST export GOATD_LTO_LEVEL before build starts
+              LTO_TYPE="${GOATD_LTO_LEVEL}"
               
-              # Detect LTO type from environment or default to full
-              LTO_TYPE="${GOATD_LTO_LEVEL:-full}"
-              printf "[PHASE-G2.5] [LTO-RE-ENFORCEMENT] Detected LTO type: $LTO_TYPE\n" >&2
-              
+              # SAFETY: If GOATD_LTO_LEVEL is not set, log warning and skip re-enforcement
+              if [ -z "$LTO_TYPE" ]; then
+                  printf "[PHASE-G2.5] [LTO-RE-ENFORCEMENT] WARNING: GOATD_LTO_LEVEL not exported - LTO settings NOT re-enforced\n" >&2
+                  printf "[PHASE-G2.5] [LTO-RE-ENFORCEMENT] This may indicate a build environment configuration issue\n" >&2
+              else
+                  printf "[PHASE-G2.5] [LTO-RE-ENFORCEMENT] Detected LTO type: $LTO_TYPE\n" >&2
+              fi
+
               # SURGICAL REMOVAL: Remove ALL LTO-related lines that kernel defaults may have added
               sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' ".config"
               printf "[PHASE-G2.5] [LTO-RE-ENFORCEMENT] Surgically removed all LTO config lines\n" >&2
-              
+
               # Ensure file ends with newline
               [[ -n "$(tail -c 1 ".config")" ]] && echo "" >> ".config"
-              
+
               # Re-inject LTO settings based on detected type using heredocs
               case "$LTO_TYPE" in
                   full)
@@ -623,7 +637,7 @@ CONFIG_HAS_LTO_CLANG=y
 LTOEODEFAULT
                       ;;
               esac
-              
+
               printf "[PHASE-G2.5] SUCCESS: Modprobed filtering, CMDLINE parameters, MGLRU, and LTO settings restored\n" >&2
           )
       else
@@ -650,11 +664,11 @@ pub const PHASE_G2_ENFORCER: &str = r#"
      # 4. Result: ~170 modules preserved with correct Kconfig dependencies
      #
      # This MUST run AFTER localmodconfig but BEFORE make olddefconfig (or in place of it)
-     
+
      # CRITICAL: Find modprobed.db using robust path detection (same as modprobed_injection)
      # In makepkg context, $HOME may be /root but modprobed.db is at user's ~/.config/
      MODPROBED_DB_PATH=""
-     
+
      # Try common locations - search in order of likelihood
      # Priority: $HOME first (normal context), /root (root context), then /home/* (actual users)
      for candidate in "$HOME/.config/modprobed.db" /root/.config/modprobed.db /home/*/.config/modprobed.db; do
@@ -664,11 +678,11 @@ pub const PHASE_G2_ENFORCER: &str = r#"
              break
          fi
      done
-     
+
      if [[ -n "$MODPROBED_DB_PATH" && -f "$MODPROBED_DB_PATH" ]]; then
          printf "[PHASE-G2] POST-MODPROBED: Starting hard enforcer to protect filtered modules\n" >&2
          printf "[PHASE-G2] Using modprobed.db at: $MODPROBED_DB_PATH\n" >&2
-         
+
          # CRITICAL: Must be in kernel source directory to operate on .config
          # Use same directory detection as modprobed_injection
          KERNEL_SRC_DIR=""
@@ -677,15 +691,15 @@ pub const PHASE_G2_ENFORCER: &str = r#"
          else
              KERNEL_SRC_DIR=$(find "$srcdir" -maxdepth 1 -type d -name 'linux-*' 2>/dev/null | head -1)
          fi
-         
+
          if [[ -z "$KERNEL_SRC_DIR" ]] && [[ -f "$srcdir/Makefile" ]]; then
              KERNEL_SRC_DIR="$srcdir"
          fi
-         
+
          # Only proceed if we found and can access the kernel source directory
          if [[ -n "$KERNEL_SRC_DIR" ]] && [[ -d "$KERNEL_SRC_DIR" ]] && [[ -f "$KERNEL_SRC_DIR/Makefile" ]]; then
              printf "[PHASE-G2] Found kernel source directory: $KERNEL_SRC_DIR\n" >&2
-             
+
              # Change to kernel source directory for .config manipulation (FIX #5: DIRECTORY CONTEXT)
              # CRITICAL FIX: Wrap in subshell to automatically restore original directory
              ( cd "$KERNEL_SRC_DIR" || exit 1; {
@@ -695,14 +709,14 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                      # After localmodconfig filters to 170 modules, olddefconfig's Kconfig dependency
                      # expansion can remove some of these modules if they become optional dependencies.
                      # We HARD LOCK them by extracting and restoring them after olddefconfig.
-                     
+
                      # STEP 1: Create a backup and extract all filtered modules (CONFIG_*=m lines)
                      cp ".config" ".config.pre_g2"
                      FILTERED_MODULES=$(grep "=m$" ".config.pre_g2" | sort)
                      FILTERED_MODULE_COUNT=$(echo "$FILTERED_MODULES" | grep -c "=" 2>/dev/null || echo "unknown")
-                     
+
                      printf "[PHASE-G2] HARD LOCK: Extracted $FILTERED_MODULE_COUNT filtered modules from localmodconfig\n" >&2
-                     
+
                      # STEP 2: Run olddefconfig to handle consistent Kconfig dependencies
                      # This may add NEW dependencies but we'll restore our 170 filtered modules afterward
                      printf "[PHASE-G2] Running: make LLVM=1 LLVM_IAS=1 olddefconfig\n" >&2
@@ -711,13 +725,13 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                          # Create a temporary file with all non-module configs
                          TEMP_CONFIG=$(mktemp)
                          grep -v "=m$" ".config" > "$TEMP_CONFIG"
-                         
+
                          # Append the original filtered modules back
                          echo "$FILTERED_MODULES" >> "$TEMP_CONFIG"
-                         
+
                          # Replace .config with hard-locked version
                          mv "$TEMP_CONFIG" ".config"
-                         
+
                          # Count final module count
                          FINAL_MODULE_COUNT=$(grep -c "=m" ".config" 2>/dev/null || echo "unknown")
                          printf "[PHASE-G2] Module count: $FILTERED_MODULE_COUNT → $FINAL_MODULE_COUNT (hard-locked to filtered set)\n" >&2
@@ -725,7 +739,7 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                      else
                          printf "[PHASE-G2] WARNING: olddefconfig failed\n" >&2
                      fi
-                     
+
                      # Cleanup backup
                      rm -f ".config.pre_g2"
                  fi
@@ -759,7 +773,7 @@ pub const MODPROBED_INJECTION: &str = r#"
           # The kernel's localmodconfig target reads enabled modules from the
           # modprobed-db file ($HOME/.config/modprobed.db) and automatically
           # deselects all CONFIG_*=m module options that aren't in the database.
-          
+
           # ROBUST PATH DETECTION: Use multiple fallback strategies to find modprobed.db
           # This handles cases where $HOME might be /root but modprobed.db is at /home/user/.config/
           MODPROBED_DB_PATH=""
@@ -769,18 +783,18 @@ pub const MODPROBED_INJECTION: &str = r#"
                   break
               fi
           done
-          
+
           # DIAGNOSTIC LOGGING: Log what paths were checked and what was found
           printf "[MODPROBED] [PATH-DETECTION] HOME env var: \$HOME\n" >&2
           printf "[MODPROBED] [PATH-DETECTION] Resolved modprobed.db path: $MODPROBED_DB_PATH\n" >&2
           printf "[MODPROBED] [PATH-DETECTION] Checked: \$HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db\n" >&2
-          
+
           if [[ -n "$MODPROBED_DB_PATH" && -f "$MODPROBED_DB_PATH" ]]; then
               printf "[MODPROBED] Found modprobed-db at $MODPROBED_DB_PATH\n" >&2
               printf "[MODPROBED] Running localmodconfig to filter kernel modules...\n" >&2
               printf "[MODPROBED] This will automatically filter kernel modules to those in use\n" >&2
               printf "[MODPROBED] Using modprobed database: $MODPROBED_DB_PATH\n" >&2
-              
+
               # FIX #1: HARDENED DIRECTORY CONTEXT DETECTION
               # The kernel source may be in various directory formats:
               # - linux-6.18.3 (standard version naming)
@@ -788,7 +802,7 @@ pub const MODPROBED_INJECTION: &str = r#"
               # - linux (generic)
               # First, try to find and use the actual kernel directory
               KERNEL_SRC_DIR=""
-              
+
               # Try to find a directory matching linux-* or linux pattern
               if [[ -d "$srcdir/linux" ]]; then
                   KERNEL_SRC_DIR="$srcdir/linux"
@@ -796,31 +810,31 @@ pub const MODPROBED_INJECTION: &str = r#"
                   # Try to find any directory starting with 'linux-'
                   KERNEL_SRC_DIR=$(find "$srcdir" -maxdepth 1 -type d -name 'linux-*' 2>/dev/null | head -1)
               fi
-              
+
               # If still not found, check if srcdir itself has Makefile (might be extracted there)
               if [[ -z "$KERNEL_SRC_DIR" ]] && [[ -f "$srcdir/Makefile" ]]; then
                   KERNEL_SRC_DIR="$srcdir"
               fi
-              
+
               # If we found a kernel source directory, change to it
               if [[ -n "$KERNEL_SRC_DIR" ]] && [[ -d "$KERNEL_SRC_DIR" ]] && [[ -f "$KERNEL_SRC_DIR/Makefile" ]]; then
                   printf "[MODPROBED] Found kernel source directory: $KERNEL_SRC_DIR\n" >&2
-                  
+
                   # CRITICAL FIX: Use subshell to limit directory change scope
                   # This ensures we return to $srcdir automatically after all operations
                   ( cd "$KERNEL_SRC_DIR" || exit 1; {
                       printf "[MODPROBED] Changed to kernel source directory\n" >&2
                       printf "[MODPROBED] Running: yes \"\" | make LLVM=1 LLVM_IAS=1 LSMOD=$MODPROBED_DB_PATH localmodconfig\n" >&2
-                      
+
                       if yes "" | make LLVM=1 LLVM_IAS=1 LSMOD="$MODPROBED_DB_PATH" localmodconfig 2>&1 | tee /tmp/modprobed_output.log; then
                           printf "[MODPROBED] SUCCESS: Kernel configuration filtered for used modules\n" >&2
-                          
+
                           # VERIFICATION: Count the filtered modules IMMEDIATELY after localmodconfig
                           if [[ -f ".config" ]]; then
                               MODULE_COUNT=$(grep -c "=m" .config 2>/dev/null || echo "unknown")
                               printf "[MODPROBED] Module count after localmodconfig: $MODULE_COUNT\n" >&2
                           fi
-                          
+
                           # NOTE: We do NOT run olddefconfig here because Kconfig dependency expansion
                           # will re-enable thousands of modules that localmodconfig just filtered out.
                           # Instead, a PHASE G2 POST-MODPROBED hard enforcer (injected by patcher)
@@ -843,7 +857,7 @@ pub const MODPROBED_INJECTION: &str = r#"
               printf "[MODPROBED] SKIPPED: modprobed-db not found at any location\n" >&2
               printf "[MODPROBED] Kernel will build with full module set (localmodconfig step skipped)\n" >&2
           fi
-          
+
           # =====================================================================
           # END MODPROBED-DB BLOCK
           # =====================================================================
@@ -870,10 +884,10 @@ pub const WHITELIST_INJECTION: &str = r#"
      #
      # These options will survive localmodconfig filtering and ensure
      # the kernel remains bootable even with aggressive module stripping.
-     
+
      if [[ -f ".config" ]]; then
          printf "[WHITELIST] Applying kernel whitelist protection...\n" >&2
-         
+
          # CRITICAL: These CONFIG options MUST be present for bootability
          # We enforce them BEFORE localmodconfig to establish the baseline
          [ -f ".config" ] && cat >> ".config" << 'EOF'
@@ -927,7 +941,7 @@ CONFIG_USB_STORAGE=m
 # Input device support (CRITICAL - USB keyboards, mice)
 CONFIG_USB_HID=m
 EOF
-         
+
          printf "[WHITELIST] Kernel whitelist applied - critical features protected\n" >&2
      fi
      "#;
@@ -937,26 +951,27 @@ EOF
 /// Re-enforces LTO settings after any kernel config regeneration.
 pub fn get_post_oldconfig_lto_patch(lto_type: LtoType) -> &'static str {
     match lto_type {
-        LtoType::Full => r#"
+        LtoType::Full => {
+            r#"
      # =====================================================================
      # PHASE E1 CRITICAL: POST-OLDCONFIG LTO ENFORCEMENT (FULL LTO)
      # =====================================================================
      # After any 'make oldconfig' or 'make syncconfig', the kernel's Kconfig
      # system may revert our LTO settings to defaults. This snippet
      # IMMEDIATELY re-applies CONFIG_LTO_CLANG_FULL enforcement.
-     
+
      # Check if we're in a build function (prepare, build, etc.)
      if [[ "$(pwd)" == "$srcdir/"* ]] || [[ -f ".config" ]]; then
          config_file=".config"
-         
+
          # Only patch if .config exists (oldconfig already ran)
          if [[ -f "$config_file" ]]; then
              # Use GLOBAL sed pattern to remove ALL LTO and HAS_LTO entries
              sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' "$config_file"
-             
+
              # Ensure file ends with newline, then append FULL LTO enforcement
              tail -c 1 < "$config_file" | od -An -tx1 | grep -q '0a' || echo "" >> "$config_file"
-             
+
              # APPEND FULL LTO settings at the END of .config
              [ -f "$config_file" ] && cat >> "$config_file" << 'EOF'
 
@@ -967,9 +982,9 @@ CONFIG_LTO_CLANG_FULL=y
 CONFIG_LTO_CLANG=y
 CONFIG_HAS_LTO_CLANG=y
 EOF
-             
+
              printf "[PATCH] POST-OLDCONFIG: Re-enforced CONFIG_LTO_CLANG_FULL=y after config regeneration\n" >&2
-             
+
              if command -v make &> /dev/null; then
                  printf "[PATCH] POST-OLDCONFIG: Running 'make olddefconfig' to finalize config...\n" >&2
                  if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
@@ -980,27 +995,29 @@ EOF
              fi
          fi
      fi
-     "#,
-        LtoType::Thin => r#"
+     "#
+        }
+        LtoType::Thin => {
+            r#"
      # =====================================================================
      # PHASE E1 CRITICAL: POST-OLDCONFIG LTO ENFORCEMENT (THIN LTO)
      # =====================================================================
      # After any 'make oldconfig' or 'make syncconfig', the kernel's Kconfig
      # system may revert our LTO settings to defaults. This snippet
      # IMMEDIATELY re-applies CONFIG_LTO_CLANG_THIN enforcement.
-     
+
      # Check if we're in a build function (prepare, build, etc.)
      if [[ "$(pwd)" == "$srcdir/"* ]] || [[ -f ".config" ]]; then
          config_file=".config"
-         
+
          # Only patch if .config exists (oldconfig already ran)
          if [[ -f "$config_file" ]]; then
              # Use GLOBAL sed pattern to remove ALL LTO and HAS_LTO entries
              sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' "$config_file"
-             
+
              # Ensure file ends with newline, then append THIN LTO enforcement
              tail -c 1 < "$config_file" | od -An -tx1 | grep -q '0a' || echo "" >> "$config_file"
-             
+
              # APPEND THIN LTO settings at the END of .config
              [ -f "$config_file" ] && cat >> "$config_file" << 'EOF'
 
@@ -1011,9 +1028,9 @@ CONFIG_LTO_CLANG_THIN=y
 CONFIG_LTO_CLANG=y
 CONFIG_HAS_LTO_CLANG=y
 EOF
-             
+
              printf "[PATCH] POST-OLDCONFIG: Re-enforced CONFIG_LTO_CLANG_THIN=y after config regeneration\n" >&2
-             
+
              if command -v make &> /dev/null; then
                  printf "[PATCH] POST-OLDCONFIG: Running 'make olddefconfig' to finalize config...\n" >&2
                  if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
@@ -1024,25 +1041,27 @@ EOF
              fi
          fi
      fi
-     "#,
-        LtoType::None => r#"
+     "#
+        }
+        LtoType::None => {
+            r#"
      # =====================================================================
      # PHASE E1: POST-OLDCONFIG (LTO DISABLED - None)
      # =====================================================================
      # LTO is disabled per user selection - only remove LTO configs
-     
+
      if [[ "$(pwd)" == "$srcdir/"* ]] || [[ -f ".config" ]]; then
          config_file=".config"
-         
+
          if [[ -f "$config_file" ]]; then
              # Use GLOBAL sed pattern to remove ALL LTO and HAS_LTO entries
              sed -i '/^CONFIG_LTO_\|^CONFIG_HAS_LTO_\|^# CONFIG_LTO_\|^# CONFIG_HAS_LTO_/d' "$config_file"
-             
+
              # Ensure file ends with newline
              tail -c 1 < "$config_file" | od -An -tx1 | grep -q '0a' || echo "" >> "$config_file"
-             
+
              printf "[PATCH] POST-OLDCONFIG: LTO disabled - removed all LTO configs\n" >&2
-             
+
              if command -v make &> /dev/null; then
                  if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
                      printf "[PATCH] POST-OLDCONFIG: SUCCESS - Configuration finalized\n" >&2
@@ -1050,7 +1069,8 @@ EOF
              fi
          fi
      fi
-     "#,
+     "#
+        }
     }
 }
 
@@ -1076,13 +1096,13 @@ pub const CLANG_EXPORTS: &str = r#"    # =======================================
           export OBJCOPY=llvm-objcopy
           export OBJDUMP=llvm-objdump
           export READELF=llvm-readelf
-          
+
           # ======================================================================
           # HOST COMPILER ENFORCEMENT - Ensure host tools also use Clang
           # ======================================================================
           export HOSTCC=clang
           export HOSTCXX=clang++
-          
+
           # ======================================================================
           # NOTE: CFLAGS/CXXFLAGS/LDFLAGS assembly delegated to PHASE G1.1
           # ======================================================================
@@ -1107,11 +1127,11 @@ pub const POLLY_INJECTION_HEADER: &str = r#"    # ==============================
 /// Creates the full Polly injection script with custom flags.
 pub fn get_polly_block(cflags: &str, cxxflags: &str, ldflags: &str) -> String {
     format!(
-        r#"{}      
+        r#"{}
       export POLLY_CFLAGS='{}'
       export POLLY_CXXFLAGS='{}'
       export POLLY_LDFLAGS='{}'
-      
+
       # Append Polly flags to existing CFLAGS/CXXFLAGS/LDFLAGS
       export CFLAGS="${{CFLAGS}} $POLLY_CFLAGS"
       export CXXFLAGS="${{CXXFLAGS}} $POLLY_CXXFLAGS"
@@ -1133,14 +1153,14 @@ pub fn get_resolve_goatd_root() -> &'static str {
     # =====================================================================
     # Bash function to dynamically resolve GOATD_WORKSPACE_ROOT by searching for .goatd_anchor
     # This ensures fakeroot can find metadata even across mount points
-    
+
     resolve_goatd_root() {
         local current_dir="${1:-.}"
         local max_depth=10
         local depth=0
-        
+
         printf "[RESOLVE] Starting .goatd_anchor search from: %s\n" "$current_dir" >&2
-        
+
         while [ $depth -lt $max_depth ]; do
             if [ -f "$current_dir/.goatd_anchor" ]; then
                 # Found the anchor - use its parent as workspace root
@@ -1150,7 +1170,7 @@ pub fn get_resolve_goatd_root() -> &'static str {
                 printf "[RESOLVE] ✓ Set GOATD_WORKSPACE_ROOT=%s\n" "$GOATD_WORKSPACE_ROOT" >&2
                 return 0
             fi
-            
+
             # Move up one directory level
             local parent_dir="$(cd "$current_dir/.." && pwd)" || return 1
             if [ "$parent_dir" = "$current_dir" ]; then
@@ -1158,11 +1178,11 @@ pub fn get_resolve_goatd_root() -> &'static str {
                 printf "[RESOLVE] ✗ Reached filesystem root without finding .goatd_anchor\n" >&2
                 return 1
             fi
-            
+
             current_dir="$parent_dir"
             depth=$((depth + 1))
         done
-        
+
         printf "[RESOLVE] ✗ Max depth (%d) reached without finding .goatd_anchor\n" $max_depth >&2
         return 1
     }
@@ -1182,10 +1202,10 @@ pub fn get_mpl_injection(workspace: &str) -> String {
            printf "[MPL] GOATD_WORKSPACE_ROOT not set, attempting dynamic resolution\n" >&2
            resolve_goatd_root || true
        fi
-       
+
        echo "!!! MPL SOURCING INJECTED !!!" >&2
        echo "[MPL] Workspace root: ${{GOATD_WORKSPACE_ROOT:={workspace}}}" >&2
-       
+
        # Source the immutable metadata file from workspace root
        # This provides GOATD_KERNELRELEASE and other build metadata
        # from a single source of truth instead of fragile discovery
@@ -1211,24 +1231,25 @@ pub fn get_mpl_injection(workspace: &str) -> String {
 pub fn get_headers_injection(version: Option<&str>) -> String {
     if let Some(actual_ver) = version {
         // PRIORITY 0: Hardcoded literal version from Rust orchestrator
-        format!(r#"
+        format!(
+            r#"
            # =====================================================================
             # PHASE-E2: HARDENED HEADER NAMING - LITERAL INJECTION (PRIORITY 0)
             # =====================================================================
             # CRITICAL: Hardcoded kernel version from Rust orchestrator
             # This is the NUCLEAR OPTION - version is baked in, no discovery needed
             # Implements hardened Version Bridge with explicit build symlinks
-            
+
             _actual_ver="{}"
             echo "[PHASE-E2] KERNELRELEASE[0-HARDCODED]: Using Rust-injected literal: ${{_actual_ver}}" >&2
-            
+
             # SUCCESS: _actual_ver is now set from PRIORITY 0 hardcoded literal
             if [ -n "${{_actual_ver}}" ]; then
                 # Create /usr/src/linux-{{kernelrelease}} directory for headers installation
                 echo "[PHASE-E2] Installing headers to: /usr/src/linux-${{_actual_ver}}" >&2
                 mkdir -p "${{pkgdir}}/usr/src/linux-${{_actual_ver}}"
                 mkdir -p "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}"
-                
+
                 # =====================================================================
                 # HARDENED: EXPLICIT build SYMLINK CREATION WITHIN MODULE DIRECTORY
                 # =====================================================================
@@ -1239,13 +1260,13 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                      ln -sf /usr/src/linux-${{_actual_ver}} build) 2>/dev/null
                     echo "[PHASE-E2] Created build symlink: /usr/lib/modules/${{_actual_ver}}/build -> /usr/src/linux-${{_actual_ver}}" >&2
                 fi
-                
+
                 # =====================================================================
                 # HARDENED: MULTI-ALIAS BRIDGE (LOOPING THROUGH ALIASES)
                 # =====================================================================
                 _pretty_ver="${{pkgver}}-${{pkgrel}}-${{pkgbase#linux-}}"
                 _uname_r_expected="${{_actual_ver}}"
-                
+
                 # Loop through both _actual_ver and _pretty_ver to create alias bridges
                 for _bridge_alias in "${{_uname_r_expected}}" "${{_pretty_ver}}"; do
                     if [ -n "${{_bridge_alias}}" ] && [ "${{_bridge_alias}}" != "${{_uname_r_expected}}" ]; then
@@ -1257,7 +1278,7 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                         echo "[PHASE-E2] Created build symlink for alias: /usr/lib/modules/${{_bridge_alias}}/build" >&2
                     fi
                 done
-                
+
                 # =====================================================================
                 # HARDENED: FINAL VERIFICATION STEP
                 # =====================================================================
@@ -1274,10 +1295,12 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                        _verify_pass=$(({{_verify_pass}} + 1))
                 fi
                 echo "[PHASE-E2] Verification result: ${{_verify_pass}} symlink(s) verified" >&2
-                
+
                 echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${{_actual_ver}}" >&2
             fi
-            "#, actual_ver)
+            "#,
+            actual_ver
+        )
     } else {
         // Fallback with 5-tier discovery strategy + hardened Version Bridge
         r#"
@@ -1286,15 +1309,15 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
         # =====================================================================
         # CRITICAL: Use exact kernel version matching uname -r (source of truth)
         # Implements explicit build symlinks, multi-alias bridges, and verification
-        
+
         _actual_ver=""
-        
+
         # PRIORITY 1: Try .kernelrelease from current directory (build artifact)
         if [ -f .kernelrelease ]; then
             _actual_ver=$(cat .kernelrelease)
             echo "[PHASE-E2] KERNELRELEASE[1]: Read from ./.kernelrelease: ${_actual_ver}" >&2
         fi
-        
+
         # PRIORITY 2: Search srcdir for .kernelrelease (makepkg scenario)
         if [ -z "${_actual_ver}" ]; then
             _rel_file=$(find "${srcdir}" -maxdepth 2 -name .kernelrelease -print -quit 2>/dev/null)
@@ -1303,13 +1326,13 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                 echo "[PHASE-E2] KERNELRELEASE[2]: Read from srcdir: ${_actual_ver}" >&2
             fi
         fi
-        
+
         # PRIORITY 3: Check environment variable (passed by executor)
         if [ -z "${_actual_ver}" ] && [ -n "${GOATD_KERNELRELEASE}" ]; then
             _actual_ver="${GOATD_KERNELRELEASE}"
             echo "[PHASE-E2] KERNELRELEASE[3]: Read from GOATD_KERNELRELEASE: ${_actual_ver}" >&2
         fi
-        
+
         # PRIORITY 4: Fallback to standard naming convention
         if [ -z "${_actual_ver}" ]; then
             _actual_ver=$(ls "${pkgdir}/usr/lib/modules/" 2>/dev/null | grep -v 'extramodules' | head -n 1)
@@ -1317,10 +1340,10 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                 echo "[PHASE-E2] KERNELRELEASE[4]: Found in pkgdir: ${_actual_ver}" >&2
             fi
         fi
-        
+
         # PRIORITY 5: Final fallback to _kernver
         [ -z "${_actual_ver}" ] && _actual_ver="${_kernver}" && echo "[PHASE-E2] KERNELRELEASE[5]: Fallback to _kernver: ${_actual_ver}" >&2
-        
+
         # CRITICAL EDGE CASE: If _actual_ver is STILL empty after all 5 strategies, FAIL HARD
         if [ -z "${_actual_ver}" ]; then
             echo "[PHASE-E2] ERROR: Could not determine kernel version after all 5 discovery strategies failed:" >&2
@@ -1339,7 +1362,7 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
             echo "[PHASE-E2] Installing headers to: /usr/src/linux-${_actual_ver}" >&2
             mkdir -p "${pkgdir}/usr/src/linux-${_actual_ver}"
             mkdir -p "${pkgdir}/usr/lib/modules/${_actual_ver}"
-            
+
             # =====================================================================
             # HARDENED: EXPLICIT build SYMLINK CREATION WITHIN MODULE DIRECTORY
             # =====================================================================
@@ -1350,13 +1373,13 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                  ln -sf /usr/src/linux-${_actual_ver} build) 2>/dev/null
                 echo "[PHASE-E2] Created build symlink: /usr/lib/modules/${_actual_ver}/build -> /usr/src/linux-${_actual_ver}" >&2
             fi
-            
+
             # =====================================================================
             # HARDENED: MULTI-ALIAS BRIDGE (LOOPING THROUGH ALIASES)
             # =====================================================================
             _pretty_ver="${pkgver}-${pkgrel}-${pkgbase#linux-}"
             _uname_r_expected="${_actual_ver}"
-            
+
             # Loop through both _actual_ver and _pretty_ver to create alias bridges
             for _bridge_alias in "${_uname_r_expected}" "${_pretty_ver}"; do
                 if [ -n "${_bridge_alias}" ] && [ "${_bridge_alias}" != "${_uname_r_expected}" ]; then
@@ -1368,7 +1391,7 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                     echo "[PHASE-E2] Created build symlink for alias: /usr/lib/modules/${_bridge_alias}/build" >&2
                 fi
             done
-            
+
             # =====================================================================
             # HARDENED: FINAL VERIFICATION STEP
             # =====================================================================
@@ -1385,7 +1408,7 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                 _verify_pass=$((${_verify_pass} + 1))
             fi
             echo "[PHASE-E2] Verification result: ${_verify_pass} symlink(s) verified" >&2
-            
+
             echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${_actual_ver}" >&2
         fi
         "#.to_string()
@@ -1400,15 +1423,15 @@ pub const PHASE_E2_MAIN_INJECTION: &str = r#"
      # PHASE-E2: UNIFIED HEADER NAMING - Module directory for main package
      # =====================================================================
      # CRITICAL: Use exact kernel version from .kernelrelease for consistency
-     
+
      _actual_ver=""
-     
+
      # PRIORITY 1: Try .kernelrelease from current directory (build artifact)
      if [ -f .kernelrelease ]; then
          _actual_ver=$([ -f .kernelrelease ] && cat .kernelrelease)
          echo "[PHASE-E2-MAIN] KERNELRELEASE[1]: Read from ./.kernelrelease: ${_actual_ver}" >&2
      fi
-     
+
      # PRIORITY 2: Search srcdir for .kernelrelease (makepkg scenario)
      if [ -z "${_actual_ver}" ]; then
          _rel_file=$(find "${srcdir}" -maxdepth 2 -name .kernelrelease -print -quit 2>/dev/null)
@@ -1417,16 +1440,16 @@ pub const PHASE_E2_MAIN_INJECTION: &str = r#"
              echo "[PHASE-E2-MAIN] KERNELRELEASE[2]: Read from srcdir: ${_actual_ver}" >&2
          fi
      fi
-     
+
      # PRIORITY 3: Check environment variable (passed by executor)
      if [ -z "${_actual_ver}" ] && [ -n "${GOATD_KERNELRELEASE}" ]; then
          _actual_ver="${GOATD_KERNELRELEASE}"
          echo "[PHASE-E2-MAIN] KERNELRELEASE[3]: Read from GOATD_KERNELRELEASE: ${_actual_ver}" >&2
      fi
-     
+
      # PRIORITY 4: Final fallback to _kernver
      [ -z "${_actual_ver}" ] && _actual_ver="${_kernver}" && echo "[PHASE-E2-MAIN] KERNELRELEASE[4]: Fallback to _kernver: ${_actual_ver}" >&2
-     
+
      # CRITICAL EDGE CASE: If _actual_ver is STILL empty after all 4 strategies, FAIL HARD
      if [ -z "${_actual_ver}" ]; then
          echo "[PHASE-E2-MAIN] ERROR: Could not determine kernel version after all strategies failed:" >&2
@@ -1452,20 +1475,20 @@ pub const PHASE_E2_MAIN_INJECTION: &str = r#"
 /// Returns tuple of (headers_injection, main_injection) with version detection logic.
 /// **CRITICAL FIX:** Uses `{{_actual_ver}}` to ensure generated Bash contains `${_actual_ver}`.
 pub fn get_module_dir_creation(actual_version: Option<&str>) -> (String, String) {
-   // Define version discovery logic (Priority 0 vs Fallback)
-   let version_logic = if let Some(ver) = actual_version {
-       // Priority 0: Hardcoded literal version (The Nuclear Option)
-       format!(
-           r#"
+    // Define version discovery logic (Priority 0 vs Fallback)
+    let version_logic = if let Some(ver) = actual_version {
+        // Priority 0: Hardcoded literal version (The Nuclear Option)
+        format!(
+            r#"
    # PRIORITY 0: Hardcoded Version Injection
    _actual_ver="{}"
    echo "[PHASE-E2] Using Hardcoded Version: ${{_actual_ver}}" >&2
 "#,
-           ver
-       )
-   } else {
-       // Legacy Fallback Discovery
-       r#"
+            ver
+        )
+    } else {
+        // Legacy Fallback Discovery
+        r#"
    # Fallback Version Discovery
    _actual_ver=""
    if [ -n "${GOATD_KERNELRELEASE}" ]; then
@@ -1475,16 +1498,16 @@ pub fn get_module_dir_creation(actual_version: Option<&str>) -> (String, String)
    fi
    [ -z "${_actual_ver}" ] && _actual_ver="${_kernver}"
 "#
-       .to_string()
-   };
+        .to_string()
+    };
 
-   // Headers package action
-   let headers_action = r#"
+    // Headers package action
+    let headers_action = r#"
    if [ -n "${_actual_ver}" ]; then
        echo "[PHASE-E2] Installing headers to: /usr/src/linux-${_actual_ver}" >&2
        mkdir -p "${pkgdir}/usr/src/linux-${_actual_ver}"
        mkdir -p "${pkgdir}/usr/lib/modules/${_actual_ver}"
-       
+
        # Version Bridge
        _pretty_ver="${pkgver}-${pkgrel}-${pkgbase#linux-}"
        if [ "${_actual_ver}" != "${_pretty_ver}" ]; then
@@ -1493,19 +1516,19 @@ pub fn get_module_dir_creation(actual_version: Option<&str>) -> (String, String)
    fi
 "#;
 
-   // Main package action
-   let main_action = r#"
+    // Main package action
+    let main_action = r#"
    if [ -n "${_actual_ver}" ]; then
        echo "[PHASE-E2] Creating module dir: /usr/lib/modules/${_actual_ver}" >&2
        mkdir -p "${pkgdir}/usr/lib/modules/${_actual_ver}"
    fi
 "#;
 
-   // Combine version logic with action logic
-   let headers_code = format!("{}{}", version_logic, headers_action);
-   let main_code = format!("{}{}", version_logic, main_action);
+    // Combine version logic with action logic
+    let headers_code = format!("{}{}", version_logic, headers_action);
+    let main_code = format!("{}{}", version_logic, main_action);
 
-   (headers_code, main_code)
+    (headers_code, main_code)
 }
 
 /// NVIDIA DKMS Compatibility Shim: Restore page_free field
@@ -1532,7 +1555,7 @@ pub const NVIDIA_DKMS_MEMREMAP_SHIM: &str = r#"    # ===========================
       #
       # The shim restores the page_free function pointer field
       # that allows NVIDIA's driver to compile without modification.
-      
+
       # =====================================================================
       # PHASE 16: LOAD JSON TELEMETRY LOGGING FUNCTION
       # =====================================================================
@@ -1542,57 +1565,57 @@ pub const NVIDIA_DKMS_MEMREMAP_SHIM: &str = r#"    # ===========================
           local _message="${3:-<no message>}"
           local _metadata="${4:-}"
           local _timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-          
+
           local _json_entry="{"
           _json_entry+="\"timestamp\":\"${_timestamp}\","
           _json_entry+="\"level\":\"${_level}\","
           _json_entry+="\"phase\":\"${_phase}\","
           _json_entry+="\"message\":\"$(echo "$_message" | sed 's/"/\\"/g')\""
-          
+
           if [ -n "$_metadata" ]; then
               _json_entry+=",\"metadata\":${_metadata}"
           fi
-          
+
           _json_entry+="}"
-          
+
           echo "$_json_entry" >> /tmp/goatd_dkms.log 2>/dev/null
           printf "[%s] [%s] %s\n" "$_level" "$_phase" "$_message" >&2
       }
-      
+
       # =====================================================================
       # STEP 1: Locate the struct dev_pagemap_ops definition
       # =====================================================================
       MEMREMAP_FILE="include/linux/memremap.h"
-      
+
       if [ -f "$MEMREMAP_FILE" ]; then
           # Verify the file exists and contains the struct definition
           if grep -q "struct dev_pagemap_ops" "$MEMREMAP_FILE"; then
               # Idempotent check: only apply if page_free not already present
               if ! grep -q "page_free" "$MEMREMAP_FILE"; then
                   log_json "INFO" "NVIDIA-DKMS" "Applying page_free field restoration shim"
-                 
+
                  # ===================================================================
                  # STEP 2: Inject page_free compatibility member using Perl one-liner
                  # ===================================================================
                  # Use context-aware Perl to find struct closing and inject BEFORE close
                  # The regex handles kernel version variations in struct format
-                 
+
                  if perl -0777 -pi -e 's/(struct\s+dev_pagemap_ops\s*\{.*?)(\s*\});/$1\n\tvoid (*page_free)(struct page *page); \/* NVIDIA DKMS compat: restored for 6.19 *\/\n$2/sg if /struct\s+dev_pagemap_ops/ && !/page_free/' "$MEMREMAP_FILE"; then
                      if grep -q "page_free" "$MEMREMAP_FILE"; then
                          log_json "SUCCESS" "NVIDIA-DKMS" "page_free injected via context-aware Perl"
                      else
                          log_json "WARNING" "NVIDIA-DKMS" "Perl command executed but page_free not detected"
                          log_json "INFO" "NVIDIA-DKMS" "Initiating Tier 2 fallback..."
-                         
+
                          # ===================================================================
                          # TIER 2 FALLBACK: Preprocessor override if Perl injection fails
                          # ===================================================================
                          if ! grep -q "page_free" "$MEMREMAP_FILE"; then
                              log_json "INFO" "NVIDIA-DKMS" "Appending compatibility shim via preprocessor"
-                             
+
                              # Ensure newline at EOF before appending
                              [ -n "$(tail -c 1 "$MEMREMAP_FILE")" ] && echo "" >> "$MEMREMAP_FILE"
-                             
+
                              # Append the GOATD PHASE 9 compatibility header
                              cat >> "$MEMREMAP_FILE" << 'COMPATEOF'
 
@@ -1605,7 +1628,7 @@ struct goatd_dev_pagemap_ops {
 #define dev_pagemap_ops goatd_dev_pagemap_ops
 #endif
 COMPATEOF
-                             
+
                              if grep -q "page_free" "$MEMREMAP_FILE"; then
                                  log_json "SUCCESS" "NVIDIA-DKMS" "Compatibility shim appended via preprocessor fallback"
                              else
@@ -1616,16 +1639,16 @@ COMPATEOF
                  else
                      log_json "ERROR" "NVIDIA-DKMS" "Perl one-liner failed to execute"
                      log_json "INFO" "NVIDIA-DKMS" "Initiating Tier 2 fallback..."
-                     
+
                      # ===================================================================
                      # TIER 2 FALLBACK: Preprocessor override if Perl fails entirely
                      # ===================================================================
                      if ! grep -q "page_free" "$MEMREMAP_FILE"; then
                          log_json "INFO" "NVIDIA-DKMS" "Appending compatibility shim via preprocessor (Tier 2)"
-                         
+
                          # Ensure newline at EOF before appending
                          [ -n "$(tail -c 1 "$MEMREMAP_FILE")" ] && echo "" >> "$MEMREMAP_FILE"
-                         
+
                          # Append the GOATD PHASE 9 compatibility header
                          cat >> "$MEMREMAP_FILE" << 'COMPATEOF'
 
@@ -1638,7 +1661,7 @@ struct goatd_dev_pagemap_ops {
 #define dev_pagemap_ops goatd_dev_pagemap_ops
 #endif
 COMPATEOF
-                         
+
                          if grep -q "page_free" "$MEMREMAP_FILE"; then
                              log_json "SUCCESS" "NVIDIA-DKMS" "Compatibility shim appended via preprocessor fallback"
                          else
@@ -1656,18 +1679,18 @@ COMPATEOF
          log_json "WARNING" "NVIDIA-DKMS" "memremap.h not found in kernel source"
      fi
      "#;
-   
-   /// NVIDIA DKMS Compatibility Shim for headers package
-   ///
-   /// Applied to the _package-headers() function to inject the shim
-   /// AFTER headers are copied into the package directory.
-   /// This ensures the shim survives packaging into the final headers package.
-   ///
-   /// ROBUST REDESIGN (Linux 6.19 compatible):
-   /// - Fallback path discovery: 3-tier with dynamic find as ultimate fallback
-   /// - Surgical sed targeting: address range /struct dev_pagemap_ops/,/^}/ for accuracy
-   /// - Enhanced diagnostics: detailed echo statements at every step
-   pub const NVIDIA_DKMS_HEADER_PACKAGE_SHIM: &str = r#"    # =====================================================================
+
+/// NVIDIA DKMS Compatibility Shim for headers package
+///
+/// Applied to the _package-headers() function to inject the shim
+/// AFTER headers are copied into the package directory.
+/// This ensures the shim survives packaging into the final headers package.
+///
+/// ROBUST REDESIGN (Linux 6.19 compatible):
+/// - Fallback path discovery: 3-tier with dynamic find as ultimate fallback
+/// - Surgical sed targeting: address range /struct dev_pagemap_ops/,/^}/ for accuracy
+/// - Enhanced diagnostics: detailed echo statements at every step
+pub const NVIDIA_DKMS_HEADER_PACKAGE_SHIM: &str = r#"    # =====================================================================
    # NVIDIA DKMS HEADER PACKAGE SHIM: Restore page_free in staged headers
    # =====================================================================
    # CRITICAL FIX FOR KERNEL 6.19 DKMS BUILDS
@@ -1680,7 +1703,7 @@ COMPATEOF
    # - Temporary test directory (SHIM_TEST_DIR) for validation
    # - Success commitment: explicit backup removal on validation pass
    # - Idempotent operation with comprehensive error handling
-   
+
    # =====================================================================
    # PHASE 16: LOAD JSON TELEMETRY LOGGING FUNCTION
    # =====================================================================
@@ -1690,39 +1713,39 @@ COMPATEOF
        local _message="${3:-<no message>}"
        local _metadata="${4:-}"
        local _timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-       
+
        local _json_entry="{"
        _json_entry+="\"timestamp\":\"${_timestamp}\","
        _json_entry+="\"level\":\"${_level}\","
        _json_entry+="\"phase\":\"${_phase}\","
        _json_entry+="\"message\":\"$(echo "$_message" | sed 's/"/\\"/g')\""
-       
+
        if [ -n "$_metadata" ]; then
            _json_entry+=",\"metadata\":${_metadata}"
        fi
-       
+
        _json_entry+="}"
-       
+
        echo "$_json_entry" >> /tmp/goatd_dkms.log 2>/dev/null
        printf "[%s] [%s] %s\n" "$_level" "$_phase" "$_message" >&2
    }
-   
+
    log_json "INFO" "NVIDIA-DKMS" "Starting header package shim processor"
-   
+
    # =====================================================================
    # PHASE 12: UNIFIED TRAP SETUP - Atomic rollback and cleanup
    # =====================================================================
    # This trap ensures that on ANY abnormal exit (INT, TERM, ERR, or EXIT),
    # we roll back the memremap.h file from backup and clean up test artifacts
-   
+
    MEMREMAP_BAK=""
    SHIM_TEST_DIR=""
-   
+
    # Trap function to handle cleanup on exit/error
    _shim_cleanup() {
        local _exit_code=$?
        log_json "INFO" "NVIDIA-DKMS" "Cleanup handler triggered" "{\"exit_code\":$_exit_code}"
-       
+
        # Roll back memremap.h if backup exists (indicates interrupted/failed patch)
        if [ -n "$MEMREMAP_BAK" ] && [ -f "$MEMREMAP_BAK" ]; then
            log_json "WARNING" "NVIDIA-DKMS" "Rolling back memremap.h from backup"
@@ -1732,45 +1755,45 @@ COMPATEOF
                log_json "WARNING" "NVIDIA-DKMS" "Rollback failed"
            fi
        fi
-       
+
        # Remove temporary test directory and contents
        if [ -n "$SHIM_TEST_DIR" ] && [ -d "$SHIM_TEST_DIR" ]; then
            log_json "INFO" "NVIDIA-DKMS" "Removing temporary test directory"
            rm -rf "$SHIM_TEST_DIR" 2>/dev/null || true
        fi
-       
+
        log_json "INFO" "NVIDIA-DKMS" "Cleanup complete"
    }
-   
+
    # Set trap for EXIT, INT, TERM, and ERR signals
    trap _shim_cleanup EXIT INT TERM ERR
-   
+
    log_json "INFO" "NVIDIA-DKMS" "Automated cleanup trap installed"
-   
+
    # =====================================================================
    # TIER 1: RESOLVE STAGED HEADERS DIRECTORY - 3-TIER FALLBACK
    # =====================================================================
    _header_dir=""
    _header_resolved_via=""
-   
+
    # TIER 1: Check _actual_ver variable (usually set by phase setup)
    if [ -n "${_actual_ver}" ] && [ -d "${pkgdir}/usr/src/linux-${_actual_ver}" ]; then
        _header_dir="${pkgdir}/usr/src/linux-${_actual_ver}"
        _header_resolved_via="_actual_ver"
        log_json "INFO" "NVIDIA-DKMS" "Path resolved via _actual_ver" "{\"version\":\"${_actual_ver}\"}"
-   
+
    # TIER 2: Fallback to _kernver variable if _actual_ver unavailable
    elif [ -n "${_kernver}" ] && [ -d "${pkgdir}/usr/src/linux-${_kernver}" ]; then
        _header_dir="${pkgdir}/usr/src/linux-${_kernver}"
        _header_resolved_via="_kernver"
        log_json "INFO" "NVIDIA-DKMS" "Path resolved via _kernver" "{\"version\":\"${_kernver}\"}"
-   
+
    # TIER 3: Ultimate fallback - dynamic discovery via find command
    else
        log_json "INFO" "NVIDIA-DKMS" "Variables unavailable/directories not found - initiating discovery"
        log_json "INFO" "NVIDIA-DKMS" "Initiating dynamic path discovery"
        _discovered=$(find "${pkgdir}/usr/src" -maxdepth 1 -type d -name "linux-*" 2>/dev/null | head -n 1)
-       
+
        if [ -n "$_discovered" ]; then
            _header_dir="$_discovered"
            _header_resolved_via="find-discovery"
@@ -1780,22 +1803,22 @@ COMPATEOF
            return 0
        fi
    fi
-   
+
    log_json "SUCCESS" "NVIDIA-DKMS" "Headers located" "{\"path\":\"${_header_dir}\",\"method\":\"${_header_resolved_via}\"}"
-   
+
    # =====================================================================
    # STEP 2: LOCATE AND VALIDATE memremap.h
    # =====================================================================
    STAGED_MEMREMAP="${_header_dir}/include/linux/memremap.h"
    log_json "INFO" "NVIDIA-DKMS" "Validating memremap.h"
-   
+
    if [ ! -f "$STAGED_MEMREMAP" ]; then
        log_json "ERROR" "NVIDIA-DKMS" "memremap.h not found - skipping shim"
        return 0
    fi
-   
+
    log_json "INFO" "NVIDIA-DKMS" "memremap.h file found and readable"
-   
+
    # =====================================================================
    # STEP 3: VERIFY struct dev_pagemap_ops DEFINITION EXISTS
    # =====================================================================
@@ -1803,9 +1826,9 @@ COMPATEOF
        log_json "WARNING" "NVIDIA-DKMS" "struct dev_pagemap_ops not found - cannot apply shim"
        return 0
    fi
-   
+
    log_json "SUCCESS" "NVIDIA-DKMS" "struct dev_pagemap_ops definition located"
-   
+
    # =====================================================================
    # STEP 4: IDEMPOTENT CHECK - SKIP IF ALREADY PATCHED
    # =====================================================================
@@ -1813,9 +1836,9 @@ COMPATEOF
        log_json "INFO" "NVIDIA-DKMS" "page_free field already present (idempotent - skipped)"
        return 0
    fi
-   
+
    log_json "INFO" "NVIDIA-DKMS" "page_free not found - applying restoration"
-   
+
    # =====================================================================
    # STEP 4.5: ATOMIC BACKUP CREATION - BEFORE PATCHING
    # =====================================================================
@@ -1823,14 +1846,14 @@ COMPATEOF
    # This ensures we have a pristine copy to roll back to if needed
    log_json "INFO" "NVIDIA-DKMS" "Creating atomic backup file"
    MEMREMAP_BAK="${STAGED_MEMREMAP}.goatd_bak"
-   
+
    if cp "$STAGED_MEMREMAP" "$MEMREMAP_BAK" 2>/dev/null; then
        log_json "SUCCESS" "NVIDIA-DKMS" "Atomic backup created successfully"
    else
        log_json "ERROR" "NVIDIA-DKMS" "Cannot create backup file"
        return 0
    fi
-   
+
    # =====================================================================
    # STEP 4.6: INITIALIZE TEMPORARY TEST DIRECTORY
    # =====================================================================
@@ -1842,7 +1865,7 @@ COMPATEOF
        return 0
    }
    log_json "INFO" "NVIDIA-DKMS" "Test directory created"
-   
+
    # =====================================================================
    # STEP 5: CONTEXT-AWARE PERL INJECTION - STRUCT BOUNDARY TARGETING
    # =====================================================================
@@ -1855,27 +1878,27 @@ COMPATEOF
    #
    # This approach is resilient to kernel version variations in struct format
    # NOTE: Atomic backup (MEMREMAP_BAK) was created in STEP 4.5 before any patching
-   
+
    log_json "INFO" "NVIDIA-DKMS" "Executing context-aware Perl injection"
-   
+
    # Execute the context-aware Perl one-liner
    # This reads the entire file, finds struct dev_pagemap_ops with its closing brace,
    # and injects page_free before the closing brace
    if perl -0777 -pi -e 's/(struct\s+dev_pagemap_ops\s*\{.*?)(\s*\});/$1\n\tvoid (*page_free)(struct page *page); \/* NVIDIA DKMS compat: restored for 6.19 *\/\n$2/sg if /struct\s+dev_pagemap_ops/ && !/page_free/' "$STAGED_MEMREMAP" 2>/dev/null; then
        log_json "INFO" "NVIDIA-DKMS" "Perl one-liner completed"
-       
+
        # Verify the injection success by grep
        if grep -q "page_free" "$STAGED_MEMREMAP" 2>/dev/null; then
            log_json "SUCCESS" "NVIDIA-DKMS" "page_free field injected successfully"
-           
+
            # =========================================================================
            # POST-STAGING VERIFICATION: Compilation-Based Header Validation
            # =========================================================================
            # CRITICAL: Verify that the injected header compiles correctly with clang
            # and that the page_free field is properly visible to external consumers
-           
+
            log_json "INFO" "NVIDIA-DKMS" "Starting compilation-based header validation"
-           
+
            # Create a test C file that includes memremap.h and exercises page_free
            cat > "$SHIM_TEST_DIR/test_page_free.c" << 'TESTEOF'
 #include <linux/memremap.h>
@@ -1884,7 +1907,7 @@ COMPATEOF
 static void verify_page_free_visibility(void) {
    /* This function verifies that page_free is a visible member of dev_pagemap_ops */
    struct dev_pagemap_ops ops = {};
-   
+
    /* Access page_free field - will fail at compile time if not present */
    if (ops.page_free != NULL) {
        /* Field is visible and accessible */
@@ -1897,18 +1920,18 @@ int main(void) {
    return 0;
 }
 TESTEOF
-           
+
            log_json "INFO" "NVIDIA-DKMS" "Test file created"
-           
+
            # Attempt compilation with clang, using header path
            _compile_log="$SHIM_TEST_DIR/compile.log"
            _compile_flags="-I${_header_dir}/include -c -fsyntax-only"
-           
+
            log_json "INFO" "NVIDIA-DKMS" "Executing clang compilation test"
-           
+
            if clang $_compile_flags "$SHIM_TEST_DIR/test_page_free.c" > "$_compile_log" 2>&1; then
                log_json "SUCCESS" "NVIDIA-DKMS" "Compilation successful - page_free field accessible and visible"
-               
+
                # =========================================================================
                # SUCCESS COMMITMENT: Remove backup to prevent trap rollback on exit
                # =========================================================================
@@ -1920,11 +1943,11 @@ TESTEOF
                else
                    log_json "WARNING" "NVIDIA-DKMS" "Could not remove backup file"
                fi
-               
+
                log_json "INFO" "NVIDIA-DKMS" "Test directory will be cleaned by trap on exit"
            else
                log_json "ERROR" "NVIDIA-DKMS" "Compilation FAILED - page_free not visible or syntax error"
-               
+
                # CRITICAL: Do NOT manually rollback here - the trap will handle it
                # Keeping MEMREMAP_BAK intact signals the trap to restore the original
                log_json "ERROR" "NVIDIA-DKMS" "Header validation failed - automatic rollback queued"
@@ -1933,19 +1956,19 @@ TESTEOF
        else
            log_json "WARNING" "NVIDIA-DKMS" "Perl executed but page_free not detected"
            log_json "INFO" "NVIDIA-DKMS" "Initiating Tier 2 fallback with preprocessor shim"
-           
+
            # Restore from backup to ensure clean state for Tier 2
            if ! grep -q "page_free" "$STAGED_MEMREMAP"; then
                log_json "INFO" "NVIDIA-DKMS" "Restoring original memremap.h before fallback"
                cp "$MEMREMAP_BAK" "$STAGED_MEMREMAP" 2>/dev/null || {
                    log_json "WARNING" "NVIDIA-DKMS" "Cannot restore from backup"
                }
-               
+
                log_json "INFO" "NVIDIA-DKMS" "Appending compatibility shim via preprocessor"
-               
+
                # Ensure newline at EOF before appending
                [ -n "$(tail -c 1 "$STAGED_MEMREMAP")" ] && echo "" >> "$STAGED_MEMREMAP"
-               
+
                # Append the GOATD PHASE 9 compatibility header
                cat >> "$STAGED_MEMREMAP" << 'COMPATEOF'
 
@@ -1958,7 +1981,7 @@ struct goatd_dev_pagemap_ops {
 #define dev_pagemap_ops goatd_dev_pagemap_ops
 #endif
 COMPATEOF
-               
+
                if grep -q "page_free" "$STAGED_MEMREMAP" 2>/dev/null; then
                    log_json "SUCCESS" "NVIDIA-DKMS" "Compatibility shim appended via preprocessor"
                    # SUCCESS: Commit the patch by removing backup
@@ -1973,19 +1996,19 @@ COMPATEOF
    else
        log_json "ERROR" "NVIDIA-DKMS" "Perl one-liner failed to execute"
        log_json "INFO" "NVIDIA-DKMS" "Initiating Tier 2 fallback with preprocessor shim"
-       
+
        # Restore from backup to ensure clean state for Tier 2
        if ! grep -q "page_free" "$STAGED_MEMREMAP"; then
            log_json "INFO" "NVIDIA-DKMS" "Restoring original memremap.h before fallback"
            cp "$MEMREMAP_BAK" "$STAGED_MEMREMAP" 2>/dev/null || {
                log_json "WARNING" "NVIDIA-DKMS" "Cannot restore from backup"
            }
-           
+
            log_json "INFO" "NVIDIA-DKMS" "Appending compatibility shim via preprocessor"
-           
+
            # Ensure newline at EOF before appending
            [ -n "$(tail -c 1 "$STAGED_MEMREMAP")" ] && echo "" >> "$STAGED_MEMREMAP"
-           
+
            # Append the GOATD PHASE 9 compatibility header
            cat >> "$STAGED_MEMREMAP" << 'COMPATEOF'
 
@@ -1998,7 +2021,7 @@ struct goatd_dev_pagemap_ops {
 #define dev_pagemap_ops goatd_dev_pagemap_ops
 #endif
 COMPATEOF
-           
+
            if grep -q "page_free" "$STAGED_MEMREMAP" 2>/dev/null; then
                log_json "SUCCESS" "NVIDIA-DKMS" "Compatibility shim appended via preprocessor fallback"
                # SUCCESS: Commit the patch by removing backup
@@ -2010,7 +2033,7 @@ COMPATEOF
            fi
        fi
    fi
-   
+
    log_json "INFO" "NVIDIA-DKMS" "Shim processing complete"
    "#;
 
@@ -2055,19 +2078,19 @@ log_json() {
     local _message="${3:-<no message>}"
     local _metadata="${4:-}"
     local _timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-    
+
     local _json_entry="{"
     _json_entry+="\"timestamp\":\"${_timestamp}\","
     _json_entry+="\"level\":\"${_level}\","
     _json_entry+="\"phase\":\"${_phase}\","
     _json_entry+="\"message\":\"$(echo "$_message" | sed 's/"/\\"/g')\""
-    
+
     if [ -n "$_metadata" ]; then
         _json_entry+=",\"metadata\":${_metadata}"
     fi
-    
+
     _json_entry+="}"
-    
+
     echo "$_json_entry" >> /tmp/goatd_dkms.log 2>/dev/null
     printf "[%s] [%s] %s\n" "$_level" "$_phase" "$_message" >&2
 }
@@ -2082,34 +2105,34 @@ log_json() {
 # Detects actual kernel version, validates symlinks, and repairs if broken
 repair_module_symlinks() {
     # SILENT DISCOVERY PHASE: No output unless critical error
-    
+
     # STEP 1: Detect actual kernel version via uname -r (SILENT)
     KERNEL_RELEASE=$(uname -r)
-    
+
     if [ -z "$KERNEL_RELEASE" ]; then
         log_json "ERROR" "MODULE-REPAIR" "Could not detect kernel release via uname -r"
         return 1
     fi
-    
+
     # Silent discovery - only log to JSON, not to stderr
     echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery Phase: Detected kernel release\",\"metadata\":{\"release\":\"${KERNEL_RELEASE}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
-   
+
    # STEP 2: Resolve the correct source directory (QUIET VALIDATION PHASE)
    # Try multiple strategies to locate the correct headers directory
    # Silent discovery - no output unless critical issue
    SOURCE_DIR=""
    _discovery_method=""
-   
+
    # Strategy 1: Check standard '/usr/src/linux-{version}' location
    if [ -d "/usr/src/linux-${KERNEL_RELEASE}" ]; then
        SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
        _discovery_method="standard-location"
-   
+
    # Strategy 2: Try '/usr/src/linux' symlink (common fallback)
    elif [ -d "/usr/src/linux" ]; then
        SOURCE_DIR="/usr/src/linux"
        _discovery_method="fallback-symlink"
-   
+
    # Strategy 3: Search for any matching linux-* directory
    else
        SOURCE_DIR=$(find /usr/src -maxdepth 1 -type d -name "linux*" 2>/dev/null | head -n 1)
@@ -2120,23 +2143,23 @@ repair_module_symlinks() {
            _discovery_method="none"
        fi
    fi
-   
+
    # Silent discovery logging - JSON only, no stderr noise
    if [ -n "$SOURCE_DIR" ]; then
        echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery: Found source directory\",\"metadata\":{\"method\":\"${_discovery_method}\",\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
    fi
-   
+
    # STEP 3: Verify source directory validity (QUIET VALIDATION)
    if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR" ]; then
        log_json "ERROR" "MODULE-REPAIR" "Source directory does not exist"
        return 1
    fi
-   
+
    # Check for Makefile or Kconfig to confirm it's a kernel source directory (silent check)
    if [ ! -f "$SOURCE_DIR/Makefile" ] && [ ! -f "$SOURCE_DIR/Kconfig" ]; then
        echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"WARNING\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Validation: Source directory missing Makefile/Kconfig\",\"metadata\":{\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
    fi
-   
+
    # STEP 4: Ensure module directory exists (QUIET VALIDATION)
    MODULE_DIR="/usr/lib/modules/${KERNEL_RELEASE}"
    if [ ! -d "$MODULE_DIR" ]; then
@@ -2147,34 +2170,34 @@ repair_module_symlinks() {
            return 1
        }
    fi
-   
+
    # Silent validation - only log to JSON if needed
    echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Quiet Validation: Module directory exists\",\"metadata\":{\"path\":\"${MODULE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
-   
+
    # STEP 5: Validate and repair 'build' symlink (QUIET VALIDATION -> ACTION PHASE)
    BUILD_LINK="${MODULE_DIR}/build"
    EXPECTED_BUILD_TARGET="/usr/src/linux-${KERNEL_RELEASE}"
-   
+
    # Silent validation phase - no output
    if [ -L "$BUILD_LINK" ]; then
        # Symlink exists - verify it points to correct target (quiet check)
        CURRENT_TARGET=$(readlink "$BUILD_LINK")
-       
+
        if [ "$CURRENT_TARGET" != "$EXPECTED_BUILD_TARGET" ] && [ "$CURRENT_TARGET" != "$SOURCE_DIR" ]; then
            # ACTION PHASE: Log repair
            log_json "WARNING" "MODULE-REPAIR" "ACTION: build symlink points to unexpected location - repairing"
-           
+
            rm -f "$BUILD_LINK" || {
                log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove broken build symlink"
                return 1
            }
-           
+
            # Create new symlink pointing to standard location
            ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" || {
                log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink"
                return 1
            }
-           
+
            log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Repaired build symlink"
        else
            # Silent verification - only log to JSON
@@ -2183,53 +2206,53 @@ repair_module_symlinks() {
    elif [ -e "$BUILD_LINK" ]; then
        # File/directory exists but is not a symlink - ACTION PHASE: remove and recreate
        log_json "WARNING" "MODULE-REPAIR" "ACTION: build exists but is not a symlink - replacing"
-       
+
        rm -rf "$BUILD_LINK" || {
            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove non-symlink build entry"
            return 1
        }
-       
+
        ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" || {
            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink"
            return 1
        }
-       
+
        log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Replaced build with correct symlink"
    else
        # Symlink does not exist - ACTION PHASE: create it
        log_json "INFO" "MODULE-REPAIR" "ACTION: build symlink does not exist - creating"
-       
+
        ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" || {
            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink"
            return 1
        }
-       
+
        log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Created build symlink"
    fi
-   
+
    # STEP 6: Validate and repair 'source' symlink (QUIET VALIDATION -> ACTION PHASE)
    SOURCE_LINK="${MODULE_DIR}/source"
-   
+
    # Silent validation phase - no output
    if [ -L "$SOURCE_LINK" ]; then
        # Symlink exists - verify it points to correct target (quiet check)
        CURRENT_SOURCE=$(readlink "$SOURCE_LINK")
-       
+
        if [ "$CURRENT_SOURCE" != "$EXPECTED_BUILD_TARGET" ] && [ "$CURRENT_SOURCE" != "$SOURCE_DIR" ]; then
            # ACTION PHASE: Log repair
            log_json "WARNING" "MODULE-REPAIR" "ACTION: source symlink points to unexpected location - repairing"
-           
+
            rm -f "$SOURCE_LINK" || {
                log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove broken source symlink"
                return 1
            }
-           
+
            # Create new symlink pointing to standard location
            ln -sf "$EXPECTED_BUILD_TARGET" "$SOURCE_LINK" || {
                log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink"
                return 1
            }
-           
+
            log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Repaired source symlink"
        else
            # Silent verification - only log to JSON
@@ -2238,30 +2261,30 @@ repair_module_symlinks() {
    elif [ -e "$SOURCE_LINK" ]; then
        # File/directory exists but is not a symlink - ACTION PHASE: remove and recreate
        log_json "WARNING" "MODULE-REPAIR" "ACTION: source exists but is not a symlink - replacing"
-       
+
        rm -rf "$SOURCE_LINK" || {
            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove non-symlink source entry"
            return 1
        }
-       
+
        ln -sf "$EXPECTED_BUILD_TARGET" "$SOURCE_LINK" || {
            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink"
            return 1
        }
-       
+
        log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Replaced source with correct symlink"
    else
        # Symlink does not exist - ACTION PHASE: create it
        log_json "INFO" "MODULE-REPAIR" "ACTION: source symlink does not exist - creating"
-       
+
        ln -sf "$EXPECTED_BUILD_TARGET" "$SOURCE_LINK" || {
            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink"
            return 1
        }
-       
+
        log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Created source symlink"
    fi
-   
+
    # STEP 7: Final verification (COMPLETION PHASE)
    # Quiet validation with detail only on issues
    if [ -L "$BUILD_LINK" ] && [ -L "$SOURCE_LINK" ]; then
@@ -2284,7 +2307,7 @@ repair_module_symlinks() {
 # PHASE 4 (COMPLETION): Summary with status
 post_install() {
     log_json "INFO" "MODULE-REPAIR" "POST-INSTALL: Module Symlink Repair starting (Phase 1: Silent Discovery)"
-    
+
     if repair_module_symlinks; then
         log_json "SUCCESS" "MODULE-REPAIR" "POST-INSTALL: All phases completed successfully (Discovery->Validation->Action->Completion)"
     else
@@ -2301,7 +2324,7 @@ post_install() {
 # PHASE 4 (COMPLETION): Summary with status
 post_upgrade() {
     log_json "INFO" "MODULE-REPAIR" "POST-UPGRADE: Module Symlink Repair starting (Phase 1: Silent Discovery)"
-    
+
     if repair_module_symlinks; then
         log_json "SUCCESS" "MODULE-REPAIR" "POST-UPGRADE: All phases completed successfully (Discovery->Validation->Action->Completion)"
     else

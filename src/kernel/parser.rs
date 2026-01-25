@@ -127,7 +127,12 @@ fn normalize_content(content: &str) -> String {
             let mut prev_char = ' ';
 
             for ch in line.chars() {
-                if (ch == '"' || ch == '\'') && (prev_char == '=' || prev_char == '(' || prev_char == ' ' || prev_char == '\t') {
+                if (ch == '"' || ch == '\'')
+                    && (prev_char == '='
+                        || prev_char == '('
+                        || prev_char == ' '
+                        || prev_char == '\t')
+                {
                     in_quotes = true;
                     quote_char = ch;
                     result.push(ch);
@@ -370,9 +375,18 @@ CONFIG_CFI_CLANG=y
 CONFIG_SOMETHING="value"
 "#;
         let pb = parse_pkgbuild(content);
-        assert_eq!(pb.config_options.get("CONFIG_LTO_CLANG"), Some(&"y".to_string()));
-        assert_eq!(pb.config_options.get("CONFIG_CFI_CLANG"), Some(&"y".to_string()));
-        assert_eq!(pb.config_options.get("CONFIG_SOMETHING"), Some(&"value".to_string()));
+        assert_eq!(
+            pb.config_options.get("CONFIG_LTO_CLANG"),
+            Some(&"y".to_string())
+        );
+        assert_eq!(
+            pb.config_options.get("CONFIG_CFI_CLANG"),
+            Some(&"y".to_string())
+        );
+        assert_eq!(
+            pb.config_options.get("CONFIG_SOMETHING"),
+            Some(&"value".to_string())
+        );
     }
 
     // ======= Test 7: Empty patches array
@@ -437,7 +451,10 @@ CONFIG_DEBUG_KERNEL=n
         assert_eq!(pb.pkgver, "6.6.0");
         assert_eq!(pb.pkgrel, "1");
         assert_eq!(pb.patches.len(), 2);
-        assert_eq!(pb.config_options.get("CONFIG_LTO_CLANG"), Some(&"y".to_string()));
+        assert_eq!(
+            pb.config_options.get("CONFIG_LTO_CLANG"),
+            Some(&"y".to_string())
+        );
     }
 
     // ======= Test 12: Handle missing values

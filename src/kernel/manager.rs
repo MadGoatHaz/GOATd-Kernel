@@ -7,7 +7,6 @@
 /// - Parsing kernel package filenames
 ///
 /// All operations use strict filtering to ensure only actual kernel packages are involved.
-
 use std::path::PathBuf;
 
 // Import logging macros
@@ -36,15 +35,12 @@ impl KernelPackage {
 ///
 /// # Example
 /// ```
-/// let registry = KernelArtifactRegistry::new(
-///     "/path/to/linux-6.18.3-x86_64.pkg.tar.zst",
-///     kernel_name: "linux",
-///     kernel_release: "6.18.3-arch1-1",
+/// use std::path::PathBuf;
+/// let registry_result = goatd_kernel::kernel::manager::KernelArtifactRegistry::new(
+///     PathBuf::from("/path/to/linux-6.18.3-x86_64.pkg.tar.zst"),
+///     "linux".to_string(),
+///     "6.18.3-arch1-1".to_string(),
 /// );
-///
-/// // Verify and collect all related artifacts
-/// let artifacts = registry.validate_and_collect()?;
-/// // artifacts = [main_kernel, headers, docs]
 /// ```
 #[derive(Clone, Debug)]
 pub struct KernelArtifactRegistry {
@@ -80,9 +76,16 @@ impl KernelArtifactRegistry {
     /// 3. Then tries alternate prefixes with both version formats
     /// 4. Then tries fuzzy component matching
     /// 5. Finally tries variant prefix matching if needed
-    pub fn new(kernel_path: PathBuf, kernel_variant: String, kernel_release: String) -> Result<Self, String> {
+    pub fn new(
+        kernel_path: PathBuf,
+        kernel_variant: String,
+        kernel_release: String,
+    ) -> Result<Self, String> {
         if !kernel_path.exists() {
-            return Err(format!("Kernel package not found: {}", kernel_path.display()));
+            return Err(format!(
+                "Kernel package not found: {}",
+                kernel_path.display()
+            ));
         }
 
         let parent_dir = match kernel_path.parent() {
@@ -109,23 +112,31 @@ impl KernelArtifactRegistry {
             &kernel_variant,
             &kernel_release,
             filename_version.as_deref(),
-            "-headers"
+            "-headers",
         )?;
         let docs_path = Self::find_related_artifact(
             parent_dir,
             &kernel_variant,
             &kernel_release,
             filename_version.as_deref(),
-            "-docs"
+            "-docs",
         )?;
 
         // Mandatory Guard (Chunk 4): Enhanced diagnostic logging with attempted permutations
         if headers_path.is_none() {
             log_info!("[KernelArtifactRegistry] ⚠️⚠️⚠️ CRITICAL WARNING: Headers NOT FOUND ⚠️⚠️⚠️");
             log_info!("[KernelArtifactRegistry] Attempted Permutations:");
-            log_info!("[KernelArtifactRegistry]   1. {}-headers-{} (primary version match)", kernel_variant, kernel_release);
+            log_info!(
+                "[KernelArtifactRegistry]   1. {}-headers-{} (primary version match)",
+                kernel_variant,
+                kernel_release
+            );
             if let Some(ref fb_ver) = filename_version {
-                log_info!("[KernelArtifactRegistry]   2. {}-headers-{} (filename version fallback)", kernel_variant, fb_ver);
+                log_info!(
+                    "[KernelArtifactRegistry]   2. {}-headers-{} (filename version fallback)",
+                    kernel_variant,
+                    fb_ver
+                );
             }
             if !variant_core.is_empty() && variant_core != kernel_variant {
                 log_info!("[KernelArtifactRegistry]   3. linux-headers-{}-{} (alternate prefix - primary)", variant_core, kernel_release);
@@ -135,7 +146,10 @@ impl KernelArtifactRegistry {
             }
             log_info!("[KernelArtifactRegistry]   5. Fuzzy match: contains '{}' AND 'headers' AND '{}' (component-based)",
                 variant_core, version_core);
-            log_info!("[KernelArtifactRegistry]   6. {}-headers-* (final fallback - any version)", kernel_variant);
+            log_info!(
+                "[KernelArtifactRegistry]   6. {}-headers-* (final fallback - any version)",
+                kernel_variant
+            );
             log_info!("[KernelArtifactRegistry] Headers are MANDATORY for DKMS module builds!");
             log_info!("[KernelArtifactRegistry] This installation will result in Partial Success (no out-of-tree modules)");
             log_info!("[KernelArtifactRegistry] ⚠️⚠️⚠️ DKMS will fail to build out-of-tree modules without headers ⚠️⚠️⚠️");
@@ -143,7 +157,7 @@ impl KernelArtifactRegistry {
 
         // Phase 10: Deep validation - Verify tarball content if headers found
         let mut integrity_verified = headers_path.is_some();
-        
+
         if let Some(ref headers) = headers_path {
             // Create a temporary registry instance for calling verify_tarball_content
             let temp_registry = KernelArtifactRegistry {
@@ -154,10 +168,10 @@ impl KernelArtifactRegistry {
                 docs_path: None,
                 integrity_verified: false,
             };
-            
+
             // Define critical files to check in headers tarball
             let critical_files = ["include/linux/memremap.h"];
-            
+
             match temp_registry.verify_tarball_content(headers, &critical_files) {
                 Ok(true) => {
                     log_info!("[KernelArtifactRegistry] ✓ Deep validation PASSED: All critical files found in headers tarball");
@@ -173,7 +187,9 @@ impl KernelArtifactRegistry {
                 }
             }
         } else {
-            log_info!("[KernelArtifactRegistry] Skipping deep validation: Headers tarball not found");
+            log_info!(
+                "[KernelArtifactRegistry] Skipping deep validation: Headers tarball not found"
+            );
         }
 
         Ok(KernelArtifactRegistry {
@@ -199,14 +215,18 @@ impl KernelArtifactRegistry {
     /// - Uses `tar -tf` to list tarball contents without extracting
     /// - Normalizes paths by stripping leading './' and '/'
     /// - Logs detailed results for diagnostics
-    fn verify_tarball_content(&self, path: &PathBuf, critical_files: &[&str]) -> Result<bool, String> {
+    fn verify_tarball_content(
+        &self,
+        path: &PathBuf,
+        critical_files: &[&str],
+    ) -> Result<bool, String> {
         use std::process::Command;
 
         // Run tar -tf to list tarball contents
         // Use raw bytes to capture accurate path information
         let output = Command::new("tar")
             .args(&["-tf"])
-            .arg(path)  // Pass path as OsStr to preserve UTF-8 safety
+            .arg(path) // Pass path as OsStr to preserve UTF-8 safety
             .output()
             .map_err(|e| format!("Failed to run tar -tf on tarball: {}", e))?;
 
@@ -232,37 +252,37 @@ impl KernelArtifactRegistry {
 
             // Check if any line in tarball contents matches this critical file
             // Use suffix matching to handle Arch's deep directory structure (usr/lib/modules/*/build/...)
-            let found = tarball_contents
-                .lines()
-                .any(|line| {
-                    let normalized_line = line.trim_start_matches("./").trim_start_matches("/");
-                    
-                    // Exact match
-                    if normalized_line == normalized_critical {
+            let found = tarball_contents.lines().any(|line| {
+                let normalized_line = line.trim_start_matches("./").trim_start_matches("/");
+
+                // Exact match
+                if normalized_line == normalized_critical {
+                    return true;
+                }
+
+                // Directory prefix match (e.g., "include/linux/memremap.h/" is a directory)
+                if normalized_line.starts_with(&format!("{}/", normalized_critical)) {
+                    return true;
+                }
+
+                // Suffix match for deeply nested paths
+                // E.g., "usr/lib/modules/6.18/build/include/linux/memremap.h" ends with "include/linux/memremap.h"
+                if normalized_line.ends_with(normalized_critical) {
+                    // Verify it's a proper path boundary (preceded by / or at start)
+                    let prefix_len = normalized_line
+                        .len()
+                        .saturating_sub(normalized_critical.len());
+                    if prefix_len == 0 {
+                        return true; // Already checked above, but included for clarity
+                    }
+                    let preceding_char = normalized_line.chars().nth(prefix_len - 1);
+                    if preceding_char == Some('/') {
                         return true;
                     }
-                    
-                    // Directory prefix match (e.g., "include/linux/memremap.h/" is a directory)
-                    if normalized_line.starts_with(&format!("{}/", normalized_critical)) {
-                        return true;
-                    }
-                    
-                    // Suffix match for deeply nested paths
-                    // E.g., "usr/lib/modules/6.18/build/include/linux/memremap.h" ends with "include/linux/memremap.h"
-                    if normalized_line.ends_with(normalized_critical) {
-                        // Verify it's a proper path boundary (preceded by / or at start)
-                        let prefix_len = normalized_line.len().saturating_sub(normalized_critical.len());
-                        if prefix_len == 0 {
-                            return true; // Already checked above, but included for clarity
-                        }
-                        let preceding_char = normalized_line.chars().nth(prefix_len - 1);
-                        if preceding_char == Some('/') {
-                            return true;
-                        }
-                    }
-                    
-                    false
-                });
+                }
+
+                false
+            });
 
             if found {
                 log_info!(
@@ -317,7 +337,7 @@ impl KernelArtifactRegistry {
             .map_err(|e| format!("Failed to read directory: {}", e))?;
 
         let entries_vec: Vec<_> = entries.flatten().collect();
-        
+
         // PHASE 20: Dynamic Identity Builder Support with GOATd Pivot
         // Extract core identity from kernel_variant with GOATd branding awareness
         // E.g., "linux-zen-goatd-gaming" -> "zen-goatd-gaming"
@@ -326,7 +346,7 @@ impl KernelArtifactRegistry {
         } else {
             kernel_variant
         };
-        
+
         // NEW: Pivot on -goatd- to extract base variant and profile
         // E.g., "zen-goatd-gaming" -> base="zen", profile=Some("gaming")
         let (base_variant, profile) = if let Some(goatd_pos) = variant_core.find("-goatd-") {
@@ -336,14 +356,14 @@ impl KernelArtifactRegistry {
         } else {
             (variant_core, None)
         };
-        
+
         // Extract version core (base version without release number)
         // E.g., "6.19.0-rc6-1" -> "6.19" or "6.19rc6"
         let version_core = Self::extract_version_core(kernel_release);
-        
+
         // Build list of permutations to try
         let mut permutations: Vec<(String, &str)> = vec![];
-        
+
         // Permutation 1: STANDARDIZED IDENTITY STRATEGY - {pkgbase}-{suffix}-{pkgver}-{pkgrel}
         // This matches the specification format: /usr/src/${pkgbase}-${pkgver}-${pkgrel}
         // where headers are installed as {pkgbase}-headers-{pkgver}-{pkgrel}
@@ -355,64 +375,70 @@ impl KernelArtifactRegistry {
             let pkgver = pkgver_with_rel.replace('-', ".");
             permutations.push((
                 format!("{}{}-{}-{}", kernel_variant, suffix, pkgver, pkgrel),
-                "standardized identity (sanitized pkgver)"
+                "standardized identity (sanitized pkgver)",
             ));
             // Also try without sanitization in case it's already sanitized
             permutations.push((
-                format!("{}{}-{}-{}", kernel_variant, suffix, pkgver_with_rel, pkgrel),
-                "standardized identity (unsanitized pkgver)"
+                format!(
+                    "{}{}-{}-{}",
+                    kernel_variant, suffix, pkgver_with_rel, pkgrel
+                ),
+                "standardized identity (unsanitized pkgver)",
             ));
         }
-        
+
         // Permutation 1.5: Primary pattern: {variant}{suffix}-{kernel_release}
         permutations.push((
             format!("{}{}-{}", kernel_variant, suffix, kernel_release),
-            "primary version match"
+            "primary version match",
         ));
-        
+
         // Permutation 2: Fallback filename pattern: {variant}{suffix}-{filename_version}
         if let Some(fb_ver) = filename_version {
             permutations.push((
                 format!("{}{}-{}", kernel_variant, suffix, fb_ver),
-                "filename version fallback"
+                "filename version fallback",
             ));
         }
-        
+
         // Permutation 3: Alternate prefix: linux-{suffix}-{variant_core}-{kernel_release}
         if variant_core != kernel_variant && !variant_core.is_empty() {
             permutations.push((
                 format!("linux{}-{}-{}", suffix, variant_core, kernel_release),
-                "alternate prefix (primary version)"
+                "alternate prefix (primary version)",
             ));
         }
-        
+
         // Permutation 4: Alternate prefix with filename version
         if let Some(fb_ver) = filename_version {
             if variant_core != kernel_variant && !variant_core.is_empty() {
                 permutations.push((
                     format!("linux{}-{}-{}", suffix, variant_core, fb_ver),
-                    "alternate prefix (filename version)"
+                    "alternate prefix (filename version)",
                 ));
             }
         }
-        
+
         // Permutation 4b: GOATd-aware alternate prefix (PHASE 20)
         // For variants like "linux-zen-goatd-gaming", also try "linux-headers-zen-goatd-gaming-"
         if let Some(prof) = profile {
             if !base_variant.is_empty() {
                 permutations.push((
-                    format!("linux{}-{}-goatd-{}-{}", suffix, base_variant, prof, kernel_release),
-                    "GOATd-aware alternate (primary)"
+                    format!(
+                        "linux{}-{}-goatd-{}-{}",
+                        suffix, base_variant, prof, kernel_release
+                    ),
+                    "GOATd-aware alternate (primary)",
                 ));
                 if let Some(fb_ver) = filename_version {
                     permutations.push((
                         format!("linux{}-{}-goatd-{}-{}", suffix, base_variant, prof, fb_ver),
-                        "GOATd-aware alternate (filename)"
+                        "GOATd-aware alternate (filename)",
                     ));
                 }
             }
         }
-        
+
         // Try exact permutation matches
         for (pattern, strategy_name) in &permutations {
             for entry in &entries_vec {
@@ -420,8 +446,12 @@ impl KernelArtifactRegistry {
                     if metadata.is_file() {
                         if let Some(filename) = entry.file_name().to_str() {
                             if filename.starts_with(pattern) && filename.ends_with(".pkg.tar.zst") {
-                                log_info!("[KernelArtifactRegistry] ✓ Found {} via {}: {}",
-                                    suffix, strategy_name, filename);
+                                log_info!(
+                                    "[KernelArtifactRegistry] ✓ Found {} via {}: {}",
+                                    suffix,
+                                    strategy_name,
+                                    filename
+                                );
                                 return Ok(Some(entry.path()));
                             }
                         }
@@ -429,7 +459,7 @@ impl KernelArtifactRegistry {
                 }
             }
         }
-        
+
         // Permutation 5: Fuzzy component match with GOATd pivot (PHASE 20)
         // Any file containing variant AND suffix AND version core
         // If GOATd profile present, check for base, goatd, AND profile
@@ -440,19 +470,23 @@ impl KernelArtifactRegistry {
                         if let Some(filename) = entry.file_name().to_str() {
                             let has_suffix = filename.contains(suffix);
                             let has_version = filename.contains(&version_core);
-                            
+
                             // Check variant components
                             let has_variant = if let Some(prof) = profile {
                                 // GOATd variant: check for base, goatd, AND profile
-                                filename.contains(base_variant) &&
-                                filename.contains("-goatd-") &&
-                                filename.contains(prof)
+                                filename.contains(base_variant)
+                                    && filename.contains("-goatd-")
+                                    && filename.contains(prof)
                             } else {
                                 // Non-GOATd variant: check for variant_core
                                 filename.contains(variant_core)
                             };
-                            
-                            if has_suffix && has_variant && has_version && filename.ends_with(".pkg.tar.zst") {
+
+                            if has_suffix
+                                && has_variant
+                                && has_version
+                                && filename.ends_with(".pkg.tar.zst")
+                            {
                                 log_info!("[KernelArtifactRegistry] ✓ Found {} via fuzzy component match (GOATd-aware): {}",
                                     suffix, filename);
                                 return Ok(Some(entry.path()));
@@ -482,7 +516,7 @@ impl KernelArtifactRegistry {
 
         Ok(None)
     }
-    
+
     /// Extract core version from kernel release string (Chunk 2)
     ///
     /// # Examples
@@ -492,7 +526,7 @@ impl KernelArtifactRegistry {
     fn extract_version_core(kernel_release: &str) -> String {
         // Split by '-' and take the first segment
         let first_segment = kernel_release.split('-').next().unwrap_or("");
-        
+
         // For dotted versions like "6.19.0", take first two components
         let parts: Vec<&str> = first_segment.split('.').collect();
         if parts.len() >= 2 {
@@ -517,19 +551,19 @@ impl KernelArtifactRegistry {
             if let Some(filename_str) = filename.to_str() {
                 // Remove .pkg.tar.zst suffix
                 let base = filename_str.strip_suffix(".pkg.tar.zst")?;
-                
+
                 // Must start with "linux-"
                 if !base.starts_with("linux-") {
                     return None;
                 }
-                
+
                 let remainder = &base[6..]; // Skip "linux-"
-                
+
                 // Find where version starts: first dash followed by a digit
                 let mut version_start_pos = None;
                 for (i, ch) in remainder.char_indices() {
                     if ch == '-' {
-                        if let Some(next_ch) = remainder[i+1..].chars().next() {
+                        if let Some(next_ch) = remainder[i + 1..].chars().next() {
                             if next_ch.is_ascii_digit() {
                                 version_start_pos = Some(i);
                                 break;
@@ -537,10 +571,10 @@ impl KernelArtifactRegistry {
                         }
                     }
                 }
-                
+
                 if let Some(pos) = version_start_pos {
                     let version_with_arch = &remainder[pos + 1..];
-                    
+
                     // Remove architecture suffix (-x86_64, -i686, -aarch64, -armv7h, -riscv64)
                     let version = version_with_arch
                         .strip_suffix("-x86_64")
@@ -549,9 +583,13 @@ impl KernelArtifactRegistry {
                         .or_else(|| version_with_arch.strip_suffix("-armv7h"))
                         .or_else(|| version_with_arch.strip_suffix("-riscv64"))
                         .unwrap_or(version_with_arch);
-                    
+
                     if !version.is_empty() {
-                        log_info!("[KernelArtifactRegistry] Extracted filename version: {} from {}", version, filename_str);
+                        log_info!(
+                            "[KernelArtifactRegistry] Extracted filename version: {} from {}",
+                            version,
+                            filename_str
+                        );
                         return Some(version.to_string());
                     }
                 }
@@ -572,14 +610,17 @@ impl KernelArtifactRegistry {
     /// If a path doesn't exist, it's skipped with a warning log.
     pub fn collect_all_paths(&self) -> Vec<PathBuf> {
         let mut paths = vec![];
-        
+
         // Always include main kernel package (existence was verified in new())
         if self.kernel_path.exists() {
             paths.push(self.kernel_path.clone());
         } else {
-            log_info!("[KernelArtifactRegistry] [WARNING] Main kernel package does not exist: {}", self.kernel_path.display());
+            log_info!(
+                "[KernelArtifactRegistry] [WARNING] Main kernel package does not exist: {}",
+                self.kernel_path.display()
+            );
         }
-        
+
         // Add headers if found and existing
         if let Some(ref headers) = self.headers_path {
             if headers.exists() {
@@ -588,7 +629,7 @@ impl KernelArtifactRegistry {
                 log_info!("[KernelArtifactRegistry] [WARNING] Headers package path references non-existent file: {}", headers.display());
             }
         }
-        
+
         // Add docs if found and existing
         if let Some(ref docs) = self.docs_path {
             if docs.exists() {
@@ -597,29 +638,31 @@ impl KernelArtifactRegistry {
                 log_info!("[KernelArtifactRegistry] [WARNING] Docs package path references non-existent file: {}", docs.display());
             }
         }
-        
+
         paths
     }
 
     /// Get a summary of the registry for logging
     pub fn summary(&self) -> String {
-        let mut items = vec![self.kernel_path.file_name()
+        let mut items = vec![self
+            .kernel_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string()];
-        
+
         if let Some(ref headers) = self.headers_path {
             if let Some(name) = headers.file_name().and_then(|n| n.to_str()) {
                 items.push(name.to_string());
             }
         }
-        
+
         if let Some(ref docs) = self.docs_path {
             if let Some(name) = docs.file_name().and_then(|n| n.to_str()) {
                 items.push(name.to_string());
             }
         }
-        
+
         format!("[{}]", items.join(", "))
     }
 }
@@ -639,30 +682,36 @@ impl KernelManagerTrait for KernelManagerImpl {
     fn list_installed(&self) -> Vec<KernelPackage> {
         list_installed_kernels()
     }
-    
+
     fn scan_workspace(&self, path: &str) -> Vec<KernelPackage> {
         scan_workspace_kernels_impl(path)
     }
-    
+
     fn delete_built_artifact(&self, pkg: &KernelPackage) -> Result<(), String> {
         if let Some(path) = &pkg.path {
             // Get the parent directory where the kernel package is located
             let parent_dir = match path.parent() {
                 Some(p) => p,
-                None => return Err("Cannot determine parent directory for kernel package".to_string()),
+                None => {
+                    return Err("Cannot determine parent directory for kernel package".to_string())
+                }
             };
-            
+
             // Collect all matching files (main, headers, docs) before deletion
-            let matching_files = collect_matching_kernel_files(parent_dir, &pkg.name, &pkg.version)?;
-            
+            let matching_files =
+                collect_matching_kernel_files(parent_dir, &pkg.name, &pkg.version)?;
+
             if matching_files.is_empty() {
-                return Err(format!("No kernel packages found for {} ({})", pkg.name, pkg.version));
+                return Err(format!(
+                    "No kernel packages found for {} ({})",
+                    pkg.name, pkg.version
+                ));
             }
-            
+
             let mut deleted_count = 0;
             let mut main_deleted = false;
             let mut errors = vec![];
-            
+
             // Delete each matching file
             for file_path in matching_files {
                 let is_main = file_path == *path;
@@ -684,7 +733,8 @@ impl KernelManagerTrait for KernelManagerImpl {
                             log_info!(
                                 "[KernelManager] [SUCCESS] Deleted {} kernel artifact: {}",
                                 if is_main { "main" } else { "related" },
-                                file_path.file_name()
+                                file_path
+                                    .file_name()
                                     .and_then(|f| f.to_str())
                                     .unwrap_or("unknown")
                             );
@@ -701,7 +751,7 @@ impl KernelManagerTrait for KernelManagerImpl {
                     }
                 }
             }
-            
+
             // Success if we deleted the main file
             if main_deleted {
                 log_info!(
@@ -716,7 +766,10 @@ impl KernelManagerTrait for KernelManagerImpl {
                     errors.join("; ")
                 ))
             } else {
-                Err("Main kernel package was not among the matching files (unexpected state)".to_string())
+                Err(
+                    "Main kernel package was not among the matching files (unexpected state)"
+                        .to_string(),
+                )
             }
         } else {
             Err("Kernel package has no associated path".to_string())
@@ -732,75 +785,82 @@ impl KernelManagerTrait for KernelManagerImpl {
 /// Excludes: firmware, headers, docs, api-headers packages
 fn list_installed_kernels() -> Vec<KernelPackage> {
     use std::process::Command;
-    
-    let output = match Command::new("pacman")
-        .args(&["-Q"])
-        .output()
-    {
+
+    let output = match Command::new("pacman").args(&["-Q"]).output() {
         Ok(out) => out,
         Err(e) => {
             log_info!("[KernelManager] Failed to run pacman -Q: {}", e);
             return vec![];
         }
     };
-    
+
     if !output.status.success() {
         log_info!("[KernelManager] pacman -Q failed");
         return vec![];
     }
-    
+
     let output_str = String::from_utf8_lossy(&output.stdout);
     let mut kernels = vec![];
-    
+
     for line in output_str.lines() {
         // pacman -Q output format: "package_name version"
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 2 {
             let pkg_name = parts[0];
             let version = parts[1];
-            
+
             // Exclude firmware packages by EXACT match and PREFIX match
             // Catches: linux-firmware (base) AND linux-firmware-* (variants)
             if pkg_name == "linux-firmware" || pkg_name.starts_with("linux-firmware-") {
                 continue;
             }
-            
+
             // Filter out other non-kernel packages using known suffixes
             // These are packages that are related to kernels but not kernels themselves
             let excluded_suffixes = ["-docs", "-headers", "-api-headers"];
-            let is_excluded = excluded_suffixes.iter().any(|suffix| pkg_name.ends_with(suffix));
-            
+            let is_excluded = excluded_suffixes
+                .iter()
+                .any(|suffix| pkg_name.ends_with(suffix));
+
             if is_excluded {
                 continue;
             }
-            
+
             // Flexible filter: accept any package in the "linux-*" namespace
             // This includes: linux, linux-zen, linux-lts, linux-hardened, linux-mainline,
             // and any new variants like linux-goatd-gaming, linux-goatd-server, etc.
             let is_linux_kernel = pkg_name == "linux" || pkg_name.starts_with("linux-");
-            
+
             if is_linux_kernel {
                 // Preserve GOATd branding and profiles in the version string
                 let version_lower = version.to_lowercase();
                 let has_goatd = version_lower.contains("goatd") || pkg_name.contains("goatd");
-                
+
                 kernels.push(KernelPackage {
                     name: pkg_name.to_string(),
                     version: version.to_string(),
                     is_goatd: has_goatd,
                     path: None,
                 });
-                
+
                 // Log at debug level to keep terminal clean during scanning
                 #[cfg(debug_assertions)]
-                log_info!("[KernelManager] [DEBUG] Found kernel: {} version {} (GOATd: {})", pkg_name, version, has_goatd);
+                log_info!(
+                    "[KernelManager] [DEBUG] Found kernel: {} version {} (GOATd: {})",
+                    pkg_name,
+                    version,
+                    has_goatd
+                );
             }
         }
     }
-    
+
     // Only log summary at info level if this is a fresh scan (not every frame)
     if !kernels.is_empty() {
-        log_info!("[KernelManager] Kernel scan complete: {} installed kernels found", kernels.len());
+        log_info!(
+            "[KernelManager] Kernel scan complete: {} installed kernels found",
+            kernels.len()
+        );
     }
     kernels
 }
@@ -816,18 +876,24 @@ fn scan_workspace_kernels_impl(workspace_path: &str) -> Vec<KernelPackage> {
     } else {
         workspace_path
     };
-    
+
     let path = std::path::Path::new(workspace_to_scan);
-    
+
     if !path.exists() {
-        log_info!("[KernelManager] Workspace path does not exist: {}", workspace_path);
+        log_info!(
+            "[KernelManager] Workspace path does not exist: {}",
+            workspace_path
+        );
         return vec![];
     }
-    
+
     let mut kernels = vec![];
     scan_directory_recursive(&path, &mut kernels);
-    
-    log_info!("[KernelManager] Found {} built kernels in workspace", kernels.len());
+
+    log_info!(
+        "[KernelManager] Found {} built kernels in workspace",
+        kernels.len()
+    );
     kernels
 }
 
@@ -841,7 +907,7 @@ fn scan_directory_recursive(dir: &std::path::Path, kernels: &mut Vec<KernelPacka
                 let Ok(metadata) = entry.metadata() else {
                     continue;
                 };
-                
+
                 // Check if it's a file
                 if metadata.is_file() {
                     if let Some(filename) = entry.file_name().to_str() {
@@ -878,36 +944,38 @@ fn parse_kernel_package_to_struct(filename: &str, full_path: PathBuf) -> Option<
     if !filename.ends_with(".pkg.tar.zst") {
         return None;
     }
-    
+
     // Remove the .pkg.tar.zst suffix
     let base = filename.strip_suffix(".pkg.tar.zst")?;
-    
+
     // Remove the architecture suffix (e.g., -x86_64)
     let parts: Vec<&str> = base.split('-').collect();
     if parts.is_empty() {
         return None;
     }
-    
+
     let last_part = parts[parts.len() - 1];
     let without_arch = if ["x86_64", "i686", "aarch64", "armv7h", "riscv64"].contains(&last_part) {
         parts[..parts.len() - 1].join("-")
     } else {
         base.to_string()
     };
-    
+
     // Filter out non-kernel packages first
     // Exclude firmware packages by EXACT match and PREFIX match
     // Catches: linux-firmware (base) AND linux-firmware-* (variants)
     if without_arch == "linux-firmware" || without_arch.starts_with("linux-firmware-") {
         return None;
     }
-    
+
     // Check for other common non-kernel suffixes and substrings
-    if without_arch.contains("-headers") || without_arch.contains("-docs") ||
-       without_arch.contains("-api-headers") {
+    if without_arch.contains("-headers")
+        || without_arch.contains("-docs")
+        || without_arch.contains("-api-headers")
+    {
         return None;
     }
-    
+
     // Match kernel variants: linux, linux-zen, linux-lts, linux-hardened, linux-mainline
     // Handle both GOATd naming schemes (highest priority):
     // 1. Stable: linux-goatd-{profile}-{version}
@@ -917,9 +985,9 @@ fn parse_kernel_package_to_struct(filename: &str, full_path: PathBuf) -> Option<
         // DYNAMIC PROFILE NAMING SCHEME: linux-{variant}-goatd-{profile}-{version}
         // Also handles: linux-goatd-{profile}-{version} (stable variant, any profile after -goatd-)
         // Find the first segment that starts with a digit (version boundary)
-        
+
         let parts_vec: Vec<&str> = without_arch.split('-').collect();
-        
+
         // Find where the version starts (first segment with leading digit)
         let mut version_start_idx = parts_vec.len();
         for (idx, part) in parts_vec.iter().enumerate() {
@@ -928,7 +996,7 @@ fn parse_kernel_package_to_struct(filename: &str, full_path: PathBuf) -> Option<
                 break;
             }
         }
-        
+
         // Everything before version_start_idx is the kernel name
         // e.g., "linux-mainline-goatd-gaming" or "linux-goatd-gaming"
         if version_start_idx > 0 {
@@ -949,19 +1017,19 @@ fn parse_kernel_package_to_struct(filename: &str, full_path: PathBuf) -> Option<
     } else {
         return None;
     };
-    
+
     // Extract version: everything after the kernel name
     let version_start = kernel_name.len() + 1; // +1 for the '-' separator
     if version_start >= without_arch.len() {
         return None;
     }
-    
+
     let version = &without_arch[version_start..];
-    
+
     // Check if this kernel contains GOATd branding
     let version_lower = version.to_lowercase();
     let has_goatd = version_lower.contains("goatd");
-    
+
     Some(KernelPackage {
         name: kernel_name.to_string(),
         version: version.to_string(),
@@ -977,13 +1045,16 @@ fn parse_kernel_package_to_struct(filename: &str, full_path: PathBuf) -> Option<
 /// This will also find:
 /// - "linux-goatd-gaming-headers-6.18.3-arch1-1-x86_64.pkg.tar.zst"
 /// - "linux-goatd-gaming-docs-6.18.3-arch1-1-x86_64.pkg.tar.zst"
-fn collect_matching_kernel_files(dir: &std::path::Path, kernel_name: &str, version: &str) -> Result<Vec<std::path::PathBuf>, String> {
+fn collect_matching_kernel_files(
+    dir: &std::path::Path,
+    kernel_name: &str,
+    version: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
     let mut matching_files = vec![];
-    
+
     // Read the directory
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
-    
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+
     for entry in entries.flatten() {
         if let Ok(metadata) = entry.metadata() {
             if metadata.is_file() {
@@ -1000,7 +1071,7 @@ fn collect_matching_kernel_files(dir: &std::path::Path, kernel_name: &str, versi
             }
         }
     }
-    
+
     Ok(matching_files)
 }
 
@@ -1020,26 +1091,26 @@ fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, vers
     if !filename.ends_with(".pkg.tar.zst") {
         return false;
     }
-    
+
     // Remove the .pkg.tar.zst suffix and architecture suffix to normalize
     let base = match filename.strip_suffix(".pkg.tar.zst") {
         Some(b) => b,
         None => return false,
     };
-    
+
     // Remove architecture suffix (e.g., -x86_64, -i686, -aarch64, -armv7h, -riscv64)
     let parts: Vec<&str> = base.split('-').collect();
     if parts.is_empty() {
         return false;
     }
-    
+
     let last_part = parts[parts.len() - 1];
     let without_arch = if ["x86_64", "i686", "aarch64", "armv7h", "riscv64"].contains(&last_part) {
         parts[..parts.len() - 1].join("-")
     } else {
         base.to_string()
     };
-    
+
     // PHASE 20: Extract base variant and profile from kernel_variant if GOATd-branded
     let (base_variant, profile) = if let Some(goatd_pos) = kernel_variant.find("-goatd-") {
         let base = &kernel_variant[..goatd_pos];
@@ -1048,20 +1119,23 @@ fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, vers
     } else {
         (kernel_variant, None)
     };
-    
+
     // Use regex-based matching to prevent partial over-matching
     // Escape special regex characters in kernel_variant and version
     let variant_escaped = regex::escape(kernel_variant);
     let version_escaped = regex::escape(version);
-    
+
     // Build patterns with word boundaries to prevent partial matches
     // Pattern: {variant}(-headers|-docs)?-{version}(-\d+)?
     let patterns = [
-        format!(r"^{}-{}(?:-\d+)?$", variant_escaped, version_escaped),           // Main pattern
-        format!(r"^{}-headers-{}(?:-\d+)?$", variant_escaped, version_escaped),   // Headers pattern
-        format!(r"^{}-docs-{}(?:-\d+)?$", variant_escaped, version_escaped),      // Docs pattern
+        format!(r"^{}-{}(?:-\d+)?$", variant_escaped, version_escaped), // Main pattern
+        format!(
+            r"^{}-headers-{}(?:-\d+)?$",
+            variant_escaped, version_escaped
+        ), // Headers pattern
+        format!(r"^{}-docs-{}(?:-\d+)?$", variant_escaped, version_escaped), // Docs pattern
     ];
-    
+
     for pattern_str in &patterns {
         if let Ok(regex) = regex::Regex::new(pattern_str) {
             if regex.is_match(&without_arch) {
@@ -1069,20 +1143,29 @@ fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, vers
             }
         }
     }
-    
+
     // PHASE 20: GOATd-aware fallback patterns
     // For GOATd-branded variants, try alternate permutations
     if let Some(prof) = profile {
         let base_escaped = regex::escape(base_variant);
         let prof_escaped = regex::escape(prof);
-        
+
         // Try "base-goatd-profile" pattern variations with headers/docs
         let goatd_patterns = [
-            format!(r"^{}-goatd-{}-{}(?:-\d+)?$", base_escaped, prof_escaped, version_escaped),
-            format!(r"^{}-goatd-{}-headers-{}(?:-\d+)?$", base_escaped, prof_escaped, version_escaped),
-            format!(r"^{}-goatd-{}-docs-{}(?:-\d+)?$", base_escaped, prof_escaped, version_escaped),
+            format!(
+                r"^{}-goatd-{}-{}(?:-\d+)?$",
+                base_escaped, prof_escaped, version_escaped
+            ),
+            format!(
+                r"^{}-goatd-{}-headers-{}(?:-\d+)?$",
+                base_escaped, prof_escaped, version_escaped
+            ),
+            format!(
+                r"^{}-goatd-{}-docs-{}(?:-\d+)?$",
+                base_escaped, prof_escaped, version_escaped
+            ),
         ];
-        
+
         for pattern_str in &goatd_patterns {
             if let Ok(regex) = regex::Regex::new(pattern_str) {
                 if regex.is_match(&without_arch) {
@@ -1091,7 +1174,7 @@ fn is_matching_related_kernel_package(filename: &str, kernel_variant: &str, vers
             }
         }
     }
-    
+
     false
 }
 
@@ -1105,7 +1188,10 @@ fn delete_kernel_recursive(dir: &std::path::Path, kernel_variant: &str, version:
                     if metadata.is_file() {
                         if let Some(filename) = entry.file_name().to_str() {
                             if is_matching_kernel_package(filename, kernel_variant, version) {
-                                log_info!("[KernelManager] [CANDIDATE] Found matching file: {}", filename);
+                                log_info!(
+                                    "[KernelManager] [CANDIDATE] Found matching file: {}",
+                                    filename
+                                );
                                 if let Ok(()) = std::fs::remove_file(entry.path()) {
                                     if !entry.path().exists() {
                                         log_info!("[KernelManager] [SUCCESS] Kernel file deleted and verified gone: {}", filename);
@@ -1114,7 +1200,10 @@ fn delete_kernel_recursive(dir: &std::path::Path, kernel_variant: &str, version:
                                         log_info!("[KernelManager] [WARNING] File deletion reported success but file still exists: {}", filename);
                                     }
                                 } else {
-                                    log_info!("[KernelManager] [ERROR] Failed to delete kernel: {}", filename);
+                                    log_info!(
+                                        "[KernelManager] [ERROR] Failed to delete kernel: {}",
+                                        filename
+                                    );
                                 }
                             }
                         }
@@ -1148,128 +1237,170 @@ fn is_matching_kernel_package(filename: &str, kernel_variant: &str, version: &st
     if !filename.ends_with(".pkg.tar.zst") {
         return false;
     }
-    
+
     // Must NOT be a firmware package (use EXACT and PREFIX match for robustness)
     // Catches: linux-firmware (base) AND linux-firmware-* (variants)
     if filename == "linux-firmware" || filename.starts_with("linux-firmware") {
-        log_info!("[KernelManager] [FILTERED] Excluding firmware package: {}", filename);
+        log_info!(
+            "[KernelManager] [FILTERED] Excluding firmware package: {}",
+            filename
+        );
         return false;
     }
-    
+
     // Must NOT contain other excluded package types
     let excluded = ["-headers", "-docs", "-api-headers"];
     for exclude in &excluded {
         if filename.contains(exclude) {
-            log_info!("[KernelManager] [FILTERED] Excluding non-kernel package: {} (contains '{}')", filename, exclude);
+            log_info!(
+                "[KernelManager] [FILTERED] Excluding non-kernel package: {} (contains '{}')",
+                filename,
+                exclude
+            );
             return false;
         }
     }
-    
+
     // Must start with the kernel variant (e.g., "linux-" or "linux-zen-")
     let expected_prefix = format!("{}-", kernel_variant);
     if !filename.starts_with(&expected_prefix) {
         return false;
     }
-    
+
     // Must contain the version string
     if !filename.contains(version) {
         return false;
     }
-    
-    log_info!("[KernelManager] [MATCH] Package '{}' matches variant='{}', version='{}'", filename, kernel_variant, version);
+
+    log_info!(
+        "[KernelManager] [MATCH] Package '{}' matches variant='{}', version='{}'",
+        filename,
+        kernel_variant,
+        version
+    );
     true
 }
 
 /// Safely delete a built kernel file from the workspace with strict matching
 /// Returns true if successful, false otherwise
 pub fn delete_built_kernel(workspace_path: &str, kernel_display_name: &str) -> bool {
-     if workspace_path.is_empty() {
-         log_info!("[KernelManager] Cannot delete kernel: workspace path is empty");
-         return false;
-     }
-     
-     // kernel_display_name is formatted as "linux (6.18.3-arch1-1)"
-     // Extract the kernel variant and version: "linux" and "6.18.3-arch1-1"
-     let parts: Vec<&str> = kernel_display_name.split(' ').collect();
-     if parts.len() < 2 {
-         log_info!("[KernelManager] Invalid kernel display name format: {}", kernel_display_name);
-         return false;
-     }
-     
-     let kernel_variant = parts[0]; // "linux", "linux-zen", etc.
-     let version_part = parts[1].trim_matches(|c| c == '(' || c == ')'); // "6.18.3-arch1-1"
-     
-     log_info!("[KernelManager] Searching for kernel: variant='{}', version='{}'", kernel_variant, version_part);
-     
-     let path = PathBuf::from(workspace_path);
-     
-     if !path.exists() {
-         log_info!("[KernelManager] Workspace path does not exist: {}", workspace_path);
-         return false;
-     }
-     
-     // Use unified recursive search to find and delete the kernel file
-     delete_kernel_recursive(&path, kernel_variant, version_part)
+    if workspace_path.is_empty() {
+        log_info!("[KernelManager] Cannot delete kernel: workspace path is empty");
+        return false;
+    }
+
+    // kernel_display_name is formatted as "linux (6.18.3-arch1-1)"
+    // Extract the kernel variant and version: "linux" and "6.18.3-arch1-1"
+    let parts: Vec<&str> = kernel_display_name.split(' ').collect();
+    if parts.len() < 2 {
+        log_info!(
+            "[KernelManager] Invalid kernel display name format: {}",
+            kernel_display_name
+        );
+        return false;
+    }
+
+    let kernel_variant = parts[0]; // "linux", "linux-zen", etc.
+    let version_part = parts[1].trim_matches(|c| c == '(' || c == ')'); // "6.18.3-arch1-1"
+
+    log_info!(
+        "[KernelManager] Searching for kernel: variant='{}', version='{}'",
+        kernel_variant,
+        version_part
+    );
+
+    let path = PathBuf::from(workspace_path);
+
+    if !path.exists() {
+        log_info!(
+            "[KernelManager] Workspace path does not exist: {}",
+            workspace_path
+        );
+        return false;
+    }
+
+    // Use unified recursive search to find and delete the kernel file
+    delete_kernel_recursive(&path, kernel_variant, version_part)
 }
 
 /// Helper to find a kernel package file in the workspace
 /// Searches recursively for .pkg.tar.zst files matching the kernel variant and version
 /// Returns the absolute path to the matching file, or None if not found
-pub fn find_kernel_package_file(workspace_path: &str, kernel_variant: &str, version: &str) -> Option<PathBuf> {
-     if workspace_path.is_empty() {
-         log_info!("[KernelManager] Cannot find package: workspace path is empty");
-         return None;
-     }
-     
-     let path = PathBuf::from(workspace_path);
-     
-     if !path.exists() {
-         log_info!("[KernelManager] Workspace path does not exist: {}", workspace_path);
-         return None;
-     }
-     
-     // Use unified recursive search
-     find_kernel_package_recursive(&path, kernel_variant, version)
+pub fn find_kernel_package_file(
+    workspace_path: &str,
+    kernel_variant: &str,
+    version: &str,
+) -> Option<PathBuf> {
+    if workspace_path.is_empty() {
+        log_info!("[KernelManager] Cannot find package: workspace path is empty");
+        return None;
+    }
+
+    let path = PathBuf::from(workspace_path);
+
+    if !path.exists() {
+        log_info!(
+            "[KernelManager] Workspace path does not exist: {}",
+            workspace_path
+        );
+        return None;
+    }
+
+    // Use unified recursive search
+    find_kernel_package_recursive(&path, kernel_variant, version)
 }
 
 /// Recursively search for a kernel package file
 /// Uses unified recursion instead of nested directory scans
-fn find_kernel_package_recursive(dir: &std::path::Path, kernel_variant: &str, version: &str) -> Option<PathBuf> {
-     match std::fs::read_dir(dir) {
-         Ok(entries) => {
-             for entry in entries.flatten() {
-                 if let Ok(metadata) = entry.metadata() {
-                     if metadata.is_file() {
-                         if let Some(filename) = entry.file_name().to_str() {
-                             if is_matching_kernel_package(filename, kernel_variant, version) {
-                                 log_info!("[KernelManager] [MATCH] Found kernel package: {}", filename);
-                                 return Some(entry.path());
-                             }
-                         }
-                     } else if metadata.is_dir() {
-                         // Recursively search subdirectories
-                         if let Some(found) = find_kernel_package_recursive(&entry.path(), kernel_variant, version) {
-                             return Some(found);
-                         }
-                     }
-                 }
-             }
-         }
-         Err(e) => {
-             match e.kind() {
-                 std::io::ErrorKind::PermissionDenied => {
-                     // Silently skip permission denied
-                 }
-                 _ => {
-                     log_info!("[KernelManager] Error reading directory: {}", e);
-                 }
-             }
-         }
-     }
-     
-     log_info!("[KernelManager] No matching kernel package found for variant='{}', version='{}'", kernel_variant, version);
-     None
- }
+fn find_kernel_package_recursive(
+    dir: &std::path::Path,
+    kernel_variant: &str,
+    version: &str,
+) -> Option<PathBuf> {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_file() {
+                        if let Some(filename) = entry.file_name().to_str() {
+                            if is_matching_kernel_package(filename, kernel_variant, version) {
+                                log_info!(
+                                    "[KernelManager] [MATCH] Found kernel package: {}",
+                                    filename
+                                );
+                                return Some(entry.path());
+                            }
+                        }
+                    } else if metadata.is_dir() {
+                        // Recursively search subdirectories
+                        if let Some(found) =
+                            find_kernel_package_recursive(&entry.path(), kernel_variant, version)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            match e.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    // Silently skip permission denied
+                }
+                _ => {
+                    log_info!("[KernelManager] Error reading directory: {}", e);
+                }
+            }
+        }
+    }
+
+    log_info!(
+        "[KernelManager] No matching kernel package found for variant='{}', version='{}'",
+        kernel_variant,
+        version
+    );
+    None
+}
 
 /// DKMS Diagnostic Error Patterns
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1339,42 +1470,43 @@ impl DkmsDiagnostic {
             match error {
                 DkmsErrorPattern::MissingKernelHeaders => {
                     self.recommendations.push(
-                        "Install kernel headers matching your running kernel version".to_string()
+                        "Install kernel headers matching your running kernel version".to_string(),
                     );
                     self.recommendations.push(
-                        "Run: pacman -S linux-headers (adjust for your kernel variant)".to_string()
+                        "Run: pacman -S linux-headers (adjust for your kernel variant)".to_string(),
                     );
                 }
                 DkmsErrorPattern::CompilerMismatch => {
                     self.recommendations.push(
-                        "Ensure GCC version used for kernel build matches current GCC".to_string()
+                        "Ensure GCC version used for kernel build matches current GCC".to_string(),
                     );
-                    self.recommendations.push(
-                        "Check /var/log/pacman.log for compiler upgrade history".to_string()
-                    );
+                    self.recommendations
+                        .push("Check /var/log/pacman.log for compiler upgrade history".to_string());
                 }
                 DkmsErrorPattern::MissingPageFree => {
                     self.recommendations.push(
-                        "This out-of-tree module version is incompatible with your kernel".to_string()
+                        "This out-of-tree module version is incompatible with your kernel"
+                            .to_string(),
                     );
-                    self.recommendations.push(
-                        "Update the driver or downgrade kernel version".to_string()
-                    );
+                    self.recommendations
+                        .push("Update the driver or downgrade kernel version".to_string());
                 }
                 DkmsErrorPattern::SymbolNotFound => {
                     self.recommendations.push(
-                        "Kernel symbol mismatch detected - likely ABI incompatibility".to_string()
+                        "Kernel symbol mismatch detected - likely ABI incompatibility".to_string(),
                     );
                     self.recommendations.push(
-                        "Rebuild kernel with compatible configuration or update out-of-tree driver".to_string()
+                        "Rebuild kernel with compatible configuration or update out-of-tree driver"
+                            .to_string(),
                     );
                 }
                 DkmsErrorPattern::BuildFailure => {
                     self.recommendations.push(
-                        "Check full build log at the reported path for detailed error".to_string()
+                        "Check full build log at the reported path for detailed error".to_string(),
                     );
                     self.recommendations.push(
-                        "Ensure all prerequisites are installed (build-essential, linux-headers)".to_string()
+                        "Ensure all prerequisites are installed (build-essential, linux-headers)"
+                            .to_string(),
                     );
                 }
             }
@@ -1405,10 +1537,7 @@ pub fn diagnose_dkms_failure() -> DkmsDiagnostic {
         }
         None => {
             log_info!("[DKMS Diagnostic] No DKMS build log found");
-            return DkmsDiagnostic::failure(
-                vec![DkmsErrorPattern::BuildFailure],
-                None,
-            );
+            return DkmsDiagnostic::failure(vec![DkmsErrorPattern::BuildFailure], None);
         }
     };
 
@@ -1420,10 +1549,7 @@ pub fn diagnose_dkms_failure() -> DkmsDiagnostic {
         Ok(content) => content,
         Err(e) => {
             log_info!("[DKMS Diagnostic] Failed to read log file: {}", e);
-            return DkmsDiagnostic::failure(
-                vec![DkmsErrorPattern::BuildFailure],
-                Some(log_path),
-            );
+            return DkmsDiagnostic::failure(vec![DkmsErrorPattern::BuildFailure], Some(log_path));
         }
     };
 
@@ -1473,8 +1599,8 @@ pub fn diagnose_dkms_failure() -> DkmsDiagnostic {
 /// Find the latest DKMS build log
 /// Searches `/var/lib/dkms/*/build/make.log` for vendor-agnostic builds
 fn find_latest_dkms_log() -> Option<String> {
-    use std::process::Command;
     use std::path::PathBuf;
+    use std::process::Command;
 
     // Use find command to locate all out-of-tree module build logs
     let output = Command::new("find")

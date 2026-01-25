@@ -115,7 +115,9 @@ impl KernelSourceDB {
             "linux-mainline".to_string(),
             KernelSource {
                 git_url: "https://aur.archlinux.org/linux-mainline.git".to_string(),
-                pkgbuild_url: "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=linux-mainline".to_string(),
+                pkgbuild_url:
+                    "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=linux-mainline"
+                        .to_string(),
             },
         );
 
@@ -125,7 +127,9 @@ impl KernelSourceDB {
             "linux-tkg".to_string(),
             KernelSource {
                 git_url: "https://github.com/Frogging-Family/linux-tkg.git".to_string(),
-                pkgbuild_url: "https://raw.githubusercontent.com/Frogging-Family/linux-tkg/master/PKGBUILD".to_string(),
+                pkgbuild_url:
+                    "https://raw.githubusercontent.com/Frogging-Family/linux-tkg/master/PKGBUILD"
+                        .to_string(),
             },
         );
 

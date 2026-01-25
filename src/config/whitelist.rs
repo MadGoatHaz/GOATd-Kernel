@@ -71,34 +71,31 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     // These drivers are the MINIMAL set required for basic desktop
     // functionality. They are ONLY applied when use_modprobed is true.
     // All other device drivers are discovered dynamically via modprobed-db.
-    
+
     // Storage Controllers (CRITICAL for boot detection)
-    "nvme",      // NVMe SSD support (modern standard)
-    "ahci",      // SATA controller (fallback to SATA if NVMe fails)
-    "libata",    // LibATA framework (supports SATA)
-    "scsi",      // SCSI subsystem (for block devices)
-    
+    "nvme",   // NVMe SSD support (modern standard)
+    "ahci",   // SATA controller (fallback to SATA if NVMe fails)
+    "libata", // LibATA framework (supports SATA)
+    "scsi",   // SCSI subsystem (for block devices)
     // Filesystems (CRITICAL: boot and base USB/SD access)
-    "ext4",      // Common Linux filesystem
-    "btrfs",     // Btrfs filesystem (modern copy-on-write filesystem)
-    "vfat",      // FAT filesystem (boot partitions, USB compatibility)
-    "exfat",     // ExFAT filesystem (modern FAT extension, USB compatibility)
-    "nls_cp437", // DOS/Windows codepage for VFAT/ExFAT (US/English)
+    "ext4",          // Common Linux filesystem
+    "btrfs",         // Btrfs filesystem (modern copy-on-write filesystem)
+    "vfat",          // FAT filesystem (boot partitions, USB compatibility)
+    "exfat",         // ExFAT filesystem (modern FAT extension, USB compatibility)
+    "nls_cp437",     // DOS/Windows codepage for VFAT/ExFAT (US/English)
     "nls_iso8859_1", // ISO-8859-1 codepage for VFAT/ExFAT (Western European)
-    
     // Input Devices (CRITICAL: keyboard/mouse functionality)
-    "evdev",     // Input event device handler (base for all input)
-    "hid",       // Human Interface Device base (required before hid-generic)
+    "evdev",       // Input event device handler (base for all input)
+    "hid",         // Human Interface Device base (required before hid-generic)
     "hid-generic", // Generic HID driver (keyboards, mice, USB input)
-    "usbhid",    // USB HID protocol (USB keyboard/mouse support)
-    
+    "usbhid",      // USB HID protocol (USB keyboard/mouse support)
     // USB Subsystem (CRITICAL: USB storage and devices)
-    "usb_core",  // USB core framework (dependency for all USB)
+    "usb_core",    // USB core framework (dependency for all USB)
     "usb_storage", // USB mass storage (USB drives/external drives)
-    "usb-common", // USB common code
-    "xhci_hcd",  // USB 3.0 host controller (modern standard)
-    "ehci_hcd",  // USB 2.0 host controller (fallback)
-    "ohci_hcd",  // USB 1.1 host controller (legacy fallback)
+    "usb-common",  // USB common code
+    "xhci_hcd",    // USB 3.0 host controller (modern standard)
+    "ehci_hcd",    // USB 2.0 host controller (fallback)
+    "ohci_hcd",    // USB 1.1 host controller (legacy fallback)
 ];
 
 /// Get the list of essential drivers that must not be excluded.
@@ -150,9 +147,9 @@ pub fn get_essential_drivers() -> Vec<&'static str> {
 /// ```
 pub fn is_essential_driver(driver_name: &str) -> bool {
     let driver_lower = driver_name.to_lowercase();
-    ESSENTIAL_DRIVERS.iter().any(|&essential| {
-        essential.to_lowercase() == driver_lower
-    })
+    ESSENTIAL_DRIVERS
+        .iter()
+        .any(|&essential| essential.to_lowercase() == driver_lower)
 }
 
 /// Apply whitelist protection to kernel configuration.
@@ -181,9 +178,9 @@ pub fn is_essential_driver(driver_name: &str) -> bool {
 /// ```
 pub fn apply_whitelist(config: &mut KernelConfig) {
     // Remove any essential drivers from exclusions
-    config.driver_exclusions.retain(|excluded| {
-        !is_essential_driver(excluded)
-    });
+    config
+        .driver_exclusions
+        .retain(|excluded| !is_essential_driver(excluded));
 }
 
 /// Get list of whitelist violations in the configuration.
@@ -216,7 +213,8 @@ pub fn apply_whitelist(config: &mut KernelConfig) {
 /// assert!(violations.contains(&"ext4".to_string()));
 /// ```
 pub fn get_whitelist_violations(config: &KernelConfig) -> Vec<String> {
-    config.driver_exclusions
+    config
+        .driver_exclusions
         .iter()
         .filter(|excluded| is_essential_driver(excluded))
         .cloned()
@@ -254,16 +252,14 @@ pub fn get_whitelist_violations(config: &KernelConfig) -> Vec<String> {
 /// ```
 pub fn validate_whitelist(config: &KernelConfig) -> Result<(), ConfigError> {
     let violations = get_whitelist_violations(config);
-    
+
     if violations.is_empty() {
         Ok(())
     } else {
-        Err(ConfigError::ValidationFailed(
-            format!(
-                "Whitelist validation failed: essential drivers cannot be excluded: {}",
-                violations.join(", ")
-            )
-        ))
+        Err(ConfigError::ValidationFailed(format!(
+            "Whitelist validation failed: essential drivers cannot be excluded: {}",
+            violations.join(", ")
+        )))
     }
 }
 
@@ -333,7 +329,7 @@ mod tests {
         };
 
         apply_whitelist(&mut config);
-        
+
         // Both are essential and should be removed
         assert!(config.driver_exclusions.is_empty());
     }
@@ -347,7 +343,7 @@ mod tests {
         };
 
         apply_whitelist(&mut config);
-        
+
         // fake_driver is not essential, should remain
         assert_eq!(config.driver_exclusions.len(), 1);
         assert_eq!(config.driver_exclusions[0], "fake_driver");
@@ -367,11 +363,15 @@ mod tests {
         };
 
         apply_whitelist(&mut config);
-        
+
         // Only non-essential drivers should remain
         assert_eq!(config.driver_exclusions.len(), 2);
-        assert!(config.driver_exclusions.contains(&"fake_driver".to_string()));
-        assert!(config.driver_exclusions.contains(&"another_fake".to_string()));
+        assert!(config
+            .driver_exclusions
+            .contains(&"fake_driver".to_string()));
+        assert!(config
+            .driver_exclusions
+            .contains(&"another_fake".to_string()));
     }
 
     #[test]
@@ -383,7 +383,7 @@ mod tests {
         };
 
         apply_whitelist(&mut config);
-        
+
         // Case-insensitive matches should be removed
         assert!(config.driver_exclusions.is_empty());
     }
@@ -470,7 +470,7 @@ mod tests {
 
         let result = validate_whitelist(&config);
         assert!(result.is_err());
-        
+
         if let Err(e) = result {
             let msg = e.to_string();
             assert!(msg.contains("ext4"));
@@ -488,7 +488,7 @@ mod tests {
 
         let result = validate_whitelist(&config);
         assert!(result.is_err());
-        
+
         if let Err(e) = result {
             let msg = e.to_string();
             assert!(msg.contains("hid-generic"));
@@ -556,9 +556,9 @@ mod tests {
         assert!(is_essential_driver("usb_storage"));
         assert!(is_essential_driver("usb-common"));
         // USB host controller drivers (support all USB versions)
-        assert!(is_essential_driver("xhci_hcd"));  // USB 3.0
-        assert!(is_essential_driver("ehci_hcd"));  // USB 2.0
-        assert!(is_essential_driver("ohci_hcd"));  // USB 1.1
+        assert!(is_essential_driver("xhci_hcd")); // USB 3.0
+        assert!(is_essential_driver("ehci_hcd")); // USB 2.0
+        assert!(is_essential_driver("ohci_hcd")); // USB 1.1
     }
 
     #[test]
@@ -593,7 +593,7 @@ mod tests {
         let _ = get_whitelist_violations(&config);
         let _ = validate_whitelist(&config);
         let _ = is_essential_driver("");
-        
+
         let mut config_mut = config.clone();
         apply_whitelist(&mut config_mut);
     }

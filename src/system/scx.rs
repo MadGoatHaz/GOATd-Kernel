@@ -7,15 +7,15 @@
 //! - Polkit-elevated system-wide scheduler configuration
 //! - Self-healing environment provisioning
 
+use crate::log_info;
+use flate2::read::GzDecoder;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Child};
+use std::process::{Child, Command};
 use std::sync::Mutex;
-use std::time::{Instant, Duration};
-use flate2::read::GzDecoder;
-use serde::{Serialize, Deserialize};
-use crate::log_info;
+use std::time::{Duration, Instant};
 
 /// Recommendation level for scheduler/mode combinations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,12 +65,12 @@ impl ScxMetadata {
 // Cache for scheduler detection results (prevents repeated filesystem checks every frame)
 // Holds (Vec<String>, Instant) where Instant is the last check time
 static SCX_SCHEDULER_CACHE: Mutex<Option<(Vec<String>, Instant)>> = Mutex::new(None);
-const SCX_CACHE_DURATION: Duration = Duration::from_secs(300);  // 5-minute cache TTL
+const SCX_CACHE_DURATION: Duration = Duration::from_secs(300); // 5-minute cache TTL
 
 // Cache for SCX readiness checks (prevents log spam from repeated support checking every frame)
 // Holds (SCXReadiness, Instant) where Instant is the last check time
 static SCX_READINESS_CACHE: Mutex<Option<(SCXReadiness, Instant)>> = Mutex::new(None);
-const SCX_READINESS_CACHE_DURATION: Duration = Duration::from_secs(60);  // 60-second cache TTL
+const SCX_READINESS_CACHE_DURATION: Duration = Duration::from_secs(60); // 60-second cache TTL
 
 // State tracking for redundant log suppression
 // Stores the last logged SCXReadiness state to detect changes
@@ -212,26 +212,29 @@ pub struct PersistentSCXManager;
 /// - Same state as previously logged AND debug mode disabled
 fn should_log_scx_state_change(current_state: SCXReadiness) -> bool {
     // Check for debug override - force logging if SCX_DEBUG_LOG=1
-    if std::env::var("SCX_DEBUG_LOG").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("SCX_DEBUG_LOG")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
         return true;
     }
-    
+
     let mut last_state = SCX_READINESS_LOGGED_STATE.lock().unwrap();
-    
+
     // First detection - no prior state exists
     if last_state.is_none() {
         *last_state = Some(current_state);
         return true;
     }
-    
+
     let prior = last_state.unwrap();
-    
+
     // State changed (transition detected)
     if prior != current_state {
         *last_state = Some(current_state);
         return true;
     }
-    
+
     // State unchanged (redundant) and debug mode disabled
     false
 }
@@ -267,7 +270,7 @@ impl SCXManager {
             Ok(file) => {
                 let decoder = GzDecoder::new(file);
                 let mut contents = String::new();
-                
+
                 // Step 3: Read decompressed config
                 match std::io::BufReader::new(decoder).read_to_string(&mut contents) {
                     Ok(_) => {
@@ -275,7 +278,11 @@ impl SCXManager {
                         let supported = contents.lines().any(|line| line == SCX_CONFIG_KEY);
                         log::debug!(
                             "[SCXManager] SCX support check: {}",
-                            if supported { "SUPPORTED" } else { "NOT SUPPORTED" }
+                            if supported {
+                                "SUPPORTED"
+                            } else {
+                                "NOT SUPPORTED"
+                            }
                         );
                         supported
                     }
@@ -320,7 +327,7 @@ impl SCXManager {
                 }
             }
         }
-        
+
         // Cache miss or expired: perform filesystem check
         let scheduler_bins = vec![
             ("scx_bpfland", "/usr/bin/scx_bpfland"),
@@ -350,7 +357,7 @@ impl SCXManager {
 
         available
     }
-    
+
     /// Clear the SCX scheduler detection cache.
     ///
     /// Forces the next call to `is_scx_installed()` to perform a fresh filesystem check.
@@ -405,7 +412,10 @@ impl SCXManager {
         // Attempt to spawn the child process
         match cmd.spawn() {
             Ok(child) => {
-                log_info!("[SCXManager] Scheduler launched successfully with PID: {}", child.id());
+                log_info!(
+                    "[SCXManager] Scheduler launched successfully with PID: {}",
+                    child.id()
+                );
                 Ok(child)
             }
             Err(e) => {
@@ -464,20 +474,32 @@ impl SCXManager {
     pub fn find_scx_service() -> Option<String> {
         // Check both system and user-local service directories for both service names
         let service_candidates = [
-            ("/usr/lib/systemd/system/scx_loader.service", "scx_loader.service"),
-            ("/etc/systemd/system/scx_loader.service", "scx_loader.service"),
+            (
+                "/usr/lib/systemd/system/scx_loader.service",
+                "scx_loader.service",
+            ),
+            (
+                "/etc/systemd/system/scx_loader.service",
+                "scx_loader.service",
+            ),
             ("/usr/lib/systemd/system/scx.service", "scx.service"),
             ("/etc/systemd/system/scx.service", "scx.service"),
         ];
 
         for (path, service_name) in &service_candidates {
             if Path::new(path).exists() {
-                log::debug!("[SCXManager] Found SCX service: {} at {}", service_name, path);
+                log::debug!(
+                    "[SCXManager] Found SCX service: {} at {}",
+                    service_name,
+                    path
+                );
                 return Some(service_name.to_string());
             }
         }
 
-        log::debug!("[SCXManager] No SCX service found (checked both scx_loader.service and scx.service)");
+        log::debug!(
+            "[SCXManager] No SCX service found (checked both scx_loader.service and scx.service)"
+        );
         None
     }
 
@@ -500,7 +522,7 @@ impl SCXManager {
         } else {
             SCXReadiness::Ready
         };
-        
+
         // Check if state has changed since last logged
         if should_log_scx_state_change(current_state) {
             // Log only when state transitions occur
@@ -563,11 +585,12 @@ impl SCXManager {
         // Write config content to a temporary file
         let mut temp_config = tempfile::NamedTempFile::new()
             .map_err(|e| format!("Failed to create temp config file: {}", e))?;
-        
+
         use std::io::Write;
-        temp_config.write_all(config_content.as_bytes())
+        temp_config
+            .write_all(config_content.as_bytes())
             .map_err(|e| format!("Failed to write temp config file: {}", e))?;
-        
+
         let temp_path = temp_config.path().to_string_lossy().to_string();
         log_info!("[SCXManager] Config template written to: {}", temp_path);
 
@@ -590,21 +613,20 @@ impl SCXManager {
         log_info!("[SCXManager] ✓ Using SCX service: {}", scx_service);
 
         // Safely escape the temporary file path for shell interpolation
-         let escaped_temp_path = escape_shell_arg(&temp_path);
+        let escaped_temp_path = escape_shell_arg(&temp_path);
 
-         // Construct the provisioning command with all steps chained atomically
-         // Step 1: Create /etc/scx_loader directory
-         // Step 2: Copy config file to /etc/scx_loader/config.toml
-         // Step 3: Reload systemd daemon
-         // Step 4: Enable the detected SCX service (scx_loader.service or scx.service)
-         let cmd = format!(
-             "mkdir -p /etc/scx_loader && \
+        // Construct the provisioning command with all steps chained atomically
+        // Step 1: Create /etc/scx_loader directory
+        // Step 2: Copy config file to /etc/scx_loader/config.toml
+        // Step 3: Reload systemd daemon
+        // Step 4: Enable the detected SCX service (scx_loader.service or scx.service)
+        let cmd = format!(
+            "mkdir -p /etc/scx_loader && \
               cp {} /etc/scx_loader/config.toml && \
               systemctl daemon-reload && \
               systemctl enable {}",
-             escaped_temp_path,
-             scx_service
-         );
+            escaped_temp_path, scx_service
+        );
 
         let pkexec_cmd = format!("pkexec bash -c '{}'", cmd);
         log_info!("[SCXManager] Executing provisioning command with pkexec (4-step atomic chain)");
@@ -621,7 +643,7 @@ impl SCXManager {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            
+
             // Diagnose which step likely failed based on output patterns
             let error_msg = Self::diagnose_provisioning_failure(&stderr, &stdout);
             log_info!("[SCXManager] ERROR: {}", error_msg);
@@ -641,18 +663,20 @@ impl SCXManager {
     /// Granular error message identifying the likely failure point
     fn diagnose_provisioning_failure(stderr: &str, stdout: &str) -> String {
         // Check for network-related errors
-        if stderr.contains("Connection refused") ||
-           stderr.contains("Name or service not known") ||
-           stderr.contains("Connection timed out") ||
-           stderr.contains("Temporary failure") ||
-           stdout.contains("Unknown server") {
+        if stderr.contains("Connection refused")
+            || stderr.contains("Name or service not known")
+            || stderr.contains("Connection timed out")
+            || stderr.contains("Temporary failure")
+            || stdout.contains("Unknown server")
+        {
             return "Network error: Cannot reach package repositories (no internet or DNS failure). Verify internet connectivity and try again.".to_string();
         }
 
         // Check for missing packages
-        if stderr.contains("not found") ||
-           stderr.contains("not in any repo") ||
-           stdout.contains("target not found") {
+        if stderr.contains("not found")
+            || stderr.contains("not in any repo")
+            || stdout.contains("target not found")
+        {
             return "Package error: scx-tools or scx-scheds not found in official repositories. Verify packages are installed from Arch Linux official repos.".to_string();
         }
 
@@ -676,9 +700,10 @@ impl SCXManager {
         }
 
         // Check for service not found (unit file doesn't exist)
-        if stderr.contains("not find a unit") ||
-           stderr.contains("No such file") ||
-           stderr.contains("does not exist") {
+        if stderr.contains("not find a unit")
+            || stderr.contains("No such file")
+            || stderr.contains("does not exist")
+        {
             return "Service file not found: scx_loader.service does not exist. \
                     This indicates an incomplete scx-scheds installation. Please reinstall from official Arch Linux repositories.".to_string();
         }
@@ -689,7 +714,6 @@ impl SCXManager {
             stderr, stdout
         )
     }
-
 }
 
 /// Escape a string for use as a literal argument in shell commands
@@ -709,7 +733,6 @@ fn escape_shell_arg(arg: &str) -> String {
 }
 
 impl PersistentSCXManager {
-
     /// Apply granular SCX scheduler configuration via direct scheduler and mode selection
     ///
     /// This method allows UI to directly specify scheduler binary and mode without relying on profiles.
@@ -763,9 +786,7 @@ impl PersistentSCXManager {
         // Write TOML configuration to temp file
         match std::fs::write(&temp_path, &config_toml) {
             Ok(_) => {
-                log_info!(
-                    "[PersistentSCXManager] ✓ TOML configuration written to temp file"
-                );
+                log_info!("[PersistentSCXManager] ✓ TOML configuration written to temp file");
             }
             Err(e) => {
                 let msg = format!("Failed to write temp TOML file: {}", e);
@@ -806,19 +827,13 @@ impl PersistentSCXManager {
                     return Ok(());
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    let msg = format!(
-                        "Failed to activate scheduler {}: {}",
-                        scheduler, stderr
-                    );
+                    let msg = format!("Failed to activate scheduler {}: {}", scheduler, stderr);
                     log_info!("[PersistentSCXManager] ERROR: {}", msg);
                     return Err(msg);
                 }
             }
             Err(e) => {
-                let msg = format!(
-                    "Failed to execute pkexec for {}: {}",
-                    scheduler, e
-                );
+                let msg = format!("Failed to execute pkexec for {}: {}", scheduler, e);
                 log_info!("[PersistentSCXManager] ERROR: {}", msg);
                 return Err(msg);
             }
@@ -1102,10 +1117,7 @@ mod tests {
     fn test_launch_with_empty_binary_fails() {
         let result = SCXManager::launch("", "");
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "Scheduler binary name cannot be empty"
-        );
+        assert_eq!(result.unwrap_err(), "Scheduler binary name cannot be empty");
     }
 
     #[test]
