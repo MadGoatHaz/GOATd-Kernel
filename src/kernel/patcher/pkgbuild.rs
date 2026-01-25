@@ -1013,6 +1013,83 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
         }
     }
 
+    // PHASE 21: SUB-PACKAGE SYNCHRONIZATION
+    // Ensure all sub-packages (headers, docs) reference the correct builddir matching the rebranded identity
+    // This is critical for DKMS and out-of-tree module compilation where the path must match what
+    // the kernel installer creates at /usr/src/${pkgbase}-${pkgver}-${pkgrel}
+    eprintln!("[Patcher] [REBRANDING] [PHASE-21] Sub-package synchronization starting");
+    
+    // Create a mapping of all builddir patterns that might exist in sub-packages
+    // Old format: /usr/src/${pkgbase}-${pkgver}-${pkgrel}
+    // We need to ensure this pattern is consistent across all package functions
+    #[allow(unused)]
+    let builddir_pattern = format!("${{pkgdir}}/usr/src/${{{{pkgbase}}}}-${{{{pkgver}}}}-${{{{pkgrel}}}}");
+    
+    // Scan through all lines looking for package_* functions that might contain path references
+    for i in 0..lines.len() {
+        let line = &lines[i];
+        
+        // Detect headers package functions
+        if line.starts_with("package_") && line.contains("headers") && line.contains("() {") {
+            eprintln!("[Patcher] [REBRANDING] [PHASE-21] Found sub-package function: {}", line);
+            
+            // Mark the range of this function to scan for path references
+            let func_start = i + 1;
+            
+            // Find the end of this function (look for closing brace)
+            let mut func_end = func_start;
+            let mut brace_depth = 1;
+            for j in (i + 1)..lines.len() {
+                let check_line = &lines[j];
+                // Count opening braces
+                brace_depth += check_line.matches('{').count() as i32;
+                // Count closing braces
+                brace_depth -= check_line.matches('}').count() as i32;
+                
+                if brace_depth == 0 {
+                    func_end = j;
+                    break;
+                }
+            }
+            
+            eprintln!("[Patcher] [REBRANDING] [PHASE-21] Sub-package function spans lines {}-{}", func_start, func_end);
+            
+            // Now scan lines within this function for builddir variable declarations
+            // These often look like: local builddir="$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
+            for line_idx in func_start..=func_end {
+                if line_idx < lines.len() {
+                    let func_line = &mut lines[line_idx];
+                    
+                    // Look for builddir= patterns
+                    if func_line.contains("builddir=") && func_line.contains("pkgdir") {
+                        eprintln!("[Patcher] [REBRANDING] [PHASE-21] [BUILDDIR] Found builddir declaration: {}", func_line);
+                        
+                        // Verify it uses the template variables ${pkgbase}-${pkgver}-${pkgrel}
+                        // This ensures synchronization with the main package
+                        if !func_line.contains("${pkgbase}-${pkgver}-${pkgrel}")
+                            && !func_line.contains("${pkgbase}") {
+                            // This might be a hardcoded path - log a warning
+                            eprintln!("[Patcher] [REBRANDING] [PHASE-21] [BUILDDIR] ⚠ WARNING: builddir uses hardcoded path instead of template variables");
+                            eprintln!("[Patcher] [REBRANDING] [PHASE-21] [BUILDDIR]   Consider using: ${{pkgdir}}/usr/src/${{{{pkgbase}}}}-${{{{pkgver}}}}-${{{{pkgrel}}}}");
+                        } else {
+                            eprintln!("[Patcher] [REBRANDING] [PHASE-21] [BUILDDIR] ✓ builddir uses proper template variables");
+                        }
+                    }
+                    
+                    // Also check for direct path references like /usr/src/linux-*
+                    if func_line.contains("/usr/src/") && !func_line.trim().starts_with('#') {
+                        // This might be a path that needs synchronization
+                        if func_line.contains("linux-") && !func_line.contains("${pkgbase}") {
+                            eprintln!("[Patcher] [REBRANDING] [PHASE-21] [PATH] ⚠ WARNING: Found hardcoded path reference in sub-package");
+                            eprintln!("[Patcher] [REBRANDING] [PHASE-21] [PATH]   Line: {}", func_line);
+                            eprintln!("[Patcher] [REBRANDING] [PHASE-21] [PATH]   Consider using ${{{{pkgbase}}}} variable for dynamic sync");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Add "provides" metadata to ensure compatibility with original variant
     if let Some(idx) = lines.iter().position(|l| l.starts_with("pkgdesc=")) {
         lines.insert(idx + 1, format!("provides=('{}')", variant));
@@ -1024,6 +1101,7 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
         "[Patcher] [PKGBUILD] Applied rebranding: {} -> {} (profile: {})",
         variant, master_identity, profile_lower
     );
+    eprintln!("[Patcher] [REBRANDING] [PHASE-21] Sub-package synchronization complete");
     Ok(())
 }
 

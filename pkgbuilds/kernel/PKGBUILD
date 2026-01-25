@@ -61,14 +61,48 @@ package_linux-headers() {
     cd $_srcname
     make INSTALL_HDR_PATH="$pkgdir/usr" headers_install
     
-    # Copy Kbuild and Makefile
-    mkdir -p "$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
-    cp -a Makefile "$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}/"
-    cp -a Kbuild "$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}/"
+    # DKMS package directory
+    local builddir="$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
+    mkdir -p "$builddir"
+    
+    # Copy critical build infrastructure files for DKMS
+    # These are required for out-of-tree module compilation
+    cp -a Makefile "$builddir/"
+    cp -a Kbuild "$builddir/"
+    cp -a .config "$builddir/" 2>/dev/null || true
+    
+    # Copy Module.symvers for module dependency resolution
+    if [ -f Module.symvers ]; then
+        cp -a Module.symvers "$builddir/"
+    fi
+    
+    # Copy Scripts directory (contains mod, sign-file, etc.)
+    if [ -d scripts ]; then
+        mkdir -p "$builddir/scripts"
+        cp -a scripts "$builddir/" || true
+    fi
+    
+    # Copy architecture-specific build headers
+    # These are essential for DKMS module compilation on target architecture
+    if [ -d arch ]; then
+        mkdir -p "$builddir/arch"
+        cp -a arch "$builddir/" || true
+    fi
+    
+    # Copy tools directory if present (some kernels have it)
+    if [ -d tools ]; then
+        mkdir -p "$builddir/tools"
+        cp -a tools "$builddir/" || true
+    fi
+    
+    # Copy kernel version and build info
+    if [ -f include/config/kernel.release ]; then
+        mkdir -p "$builddir/include/config"
+        cp -a include/config/kernel.release "$builddir/include/config/"
+    fi
     
     # Install Rust metadata files using find instead of glob expansion
     # This ensures proper handling when .rmeta or .so files may not exist
-    local builddir="$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
     if [ -d rust ]; then
         echo "Installing Rust files..."
         # Use find to safely handle cases where .rmeta or .so files may not exist
