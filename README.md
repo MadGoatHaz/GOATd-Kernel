@@ -1,6 +1,6 @@
 # GOATd Kernel Builder
 
-**A single-developer kernel orchestration suite for Arch Linux built with pure Rust core, egui native UI, and Tokio async runtime. Delivers laboratory-grade hardened custom Linux kernels via standardized profile-aware installation, workspace path validation and leakage prevention, hardware-aware system with modprobed-db driver auto-discovery and Desktop Experience safety-net whitelist, robust build pipeline with environment purity controls and 5-phase lock-in enforcement, and high-fidelity performance diagnostics with 7-metric spectrum analysis.**
+**A kernel orchestration suite for Arch Linux built with pure Rust core, egui native UI, and Tokio async runtime. Build you own custom Linux kernels via standardized profile-aware installation with modprobed-db driver auto-discovery and Desktop Experience safety-net whitelist and high-fidelity performance diagnostics with 7-metric spectrum analysis.**
 
 ## Purpose
 
