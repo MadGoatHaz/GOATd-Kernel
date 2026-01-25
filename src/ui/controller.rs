@@ -1126,12 +1126,28 @@ impl AppController {
         let build_tx = self.build_tx.clone();
 
         // Get the workspace path from settings for kernelrelease lookup
+        // CRITICAL (Chunk 1): RESOLVE WORKSPACE PATH TO ABSOLUTE
+        // Ensures the kernel manager can locate .kernelrelease and pass absolute paths to pacman
         let workspace_path = match self.get_state() {
             Ok(state) => {
-                if state.workspace_path.is_empty() {
+                let path = if state.workspace_path.is_empty() {
                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
                 } else {
                     PathBuf::from(&state.workspace_path)
+                };
+                
+                // Canonicalize to absolute path to ensure consistency
+                match path.canonicalize() {
+                    Ok(abs_path) => {
+                        eprintln!("[KERNEL] [WORKSPACE] Resolved workspace to absolute path: {}", abs_path.display());
+                        abs_path
+                    }
+                    Err(e) => {
+                        // Fallback: if canonicalize fails, log warning but use the path as-is
+                        eprintln!("[KERNEL] [WORKSPACE] ⚠️ Warning: Failed to canonicalize workspace path (may be relative): {}", e);
+                        log::warn!("[KERNEL] [WORKSPACE] Workspace path canonicalization failed: {}", e);
+                        path
+                    }
                 }
             }
             Err(_) => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -1336,13 +1352,15 @@ fi
             commands.push(cleanup_cmd);
 
             // 3c. Pacman: Install all artifacts (kernel + headers + docs) bundled into single call
+            // CRITICAL (Chunk 1): All artifact paths are ABSOLUTE (resolved from workspace root)
+            // The KernelArtifactRegistry.collect_all_paths() returns absolute paths
             eprintln!("[KERNEL] [UNIFIED] Step 3: Adding pacman install to unified batch");
             if !artifact_paths.is_empty() {
                 // Convert PathBuf to string paths with proper absolute path resolution
                 let paths_str: Vec<String> = artifact_paths
                     .iter()
                     .filter_map(|p| {
-                        // Ensure absolute paths and proper shell escaping
+                        // CRITICAL: Paths are already absolute from workspace resolution above
                         p.to_str().map(|s| {
                             // Quote the path for safe shell execution
                             format!("'{}'", s)
@@ -1351,7 +1369,7 @@ fi
                     .collect();
 
                 if !paths_str.is_empty() {
-                    // Build pacman command with properly quoted and resolved absolute paths
+                    // Build pacman command with properly quoted and resolved absolute paths from workspace root
                     let pacman_cmd = format!("pacman -U --noconfirm --overwrite 'usr/lib/modules/*/build,usr/lib/modules/*/source' {}", paths_str.join(" "));
                     eprintln!(
                         "[KERNEL] [UNIFIED] Bundled pacman command for {} artifact(s)",

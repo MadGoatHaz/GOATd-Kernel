@@ -600,12 +600,14 @@ impl KernelArtifactRegistry {
 
     /// Collect all artifact paths in order for pacman installation
     ///
-    /// Returns a Vec of absolute paths in the order they should be installed:
+    /// Returns a Vec of PathBuf entries in the order they should be installed:
     /// 1. Main kernel package
     /// 2. Headers (if found and existing)
     /// 3. Docs (if found and existing)
     ///
-    /// # Safety
+    /// # Important
+    /// Paths are returned as stored during initialization. Callers must handle path
+    /// canonicalization (see src/ui/controller.rs for examples using PathBuf::canonicalize()).
     /// This method performs existence checks on all collected paths before returning them.
     /// If a path doesn't exist, it's skipped with a warning log.
     pub fn collect_all_paths(&self) -> Vec<PathBuf> {

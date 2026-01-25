@@ -1234,71 +1234,75 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
         format!(
             r#"
            # =====================================================================
-            # PHASE-E2: HARDENED HEADER NAMING - LITERAL INJECTION (PRIORITY 0)
-            # =====================================================================
-            # CRITICAL: Hardcoded kernel version from Rust orchestrator
-            # This is the NUCLEAR OPTION - version is baked in, no discovery needed
-            # Implements hardened Version Bridge with explicit build symlinks
+             # PHASE-E2: HARDENED HEADER NAMING - LITERAL INJECTION (PRIORITY 0)
+             # =====================================================================
+             # CRITICAL: Hardcoded kernel version from Rust orchestrator
+             # This is the NUCLEAR OPTION - version is baked in, no discovery needed
+             # Implements hardened Version Bridge with explicit build symlinks
+             # DYNAMIC PKGBASE: Uses rebranded ${{pkgbase}} for headers directory naming
 
-            _actual_ver="{}"
-            echo "[PHASE-E2] KERNELRELEASE[0-HARDCODED]: Using Rust-injected literal: ${{_actual_ver}}" >&2
+             _actual_ver="{}"
+             echo "[PHASE-E2] KERNELRELEASE[0-HARDCODED]: Using Rust-injected literal: ${{_actual_ver}}" >&2
 
-            # SUCCESS: _actual_ver is now set from PRIORITY 0 hardcoded literal
-            if [ -n "${{_actual_ver}}" ]; then
-                # Create /usr/src/linux-{{kernelrelease}} directory for headers installation
-                echo "[PHASE-E2] Installing headers to: /usr/src/linux-${{_actual_ver}}" >&2
-                mkdir -p "${{pkgdir}}/usr/src/linux-${{_actual_ver}}"
-                mkdir -p "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}"
+             # SUCCESS: _actual_ver is now set from PRIORITY 0 hardcoded literal
+             if [ -n "${{_actual_ver}}" ]; then
+                 # Create /usr/src/{{pkgbase}}-{{pkgver}}-{{pkgrel}} directory for headers installation
+                 # This uses the rebranded pkgbase (e.g., linux-goatd-gaming) to ensure proper DKMS discovery
+                 _headers_dir="${{pkgdir}}/usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}}"
+                 echo "[PHASE-E2] Installing headers to: /usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}}" >&2
+                 mkdir -p "$_headers_dir"
+                 mkdir -p "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}"
 
-                # =====================================================================
-                # HARDENED: EXPLICIT build SYMLINK CREATION WITHIN MODULE DIRECTORY
-                # =====================================================================
-                # CRITICAL: DKMS searches for /usr/lib/modules/\$(uname -r)/build
-                # We MUST create this symlink EXPLICITLY pointing to the headers directory
-                if [ -d "${{pkgdir}}/usr/src/linux-${{_actual_ver}}" ]; then
-                    (cd "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}" && \
-                     ln -sf /usr/src/linux-${{_actual_ver}} build) 2>/dev/null
-                    echo "[PHASE-E2] Created build symlink: /usr/lib/modules/${{_actual_ver}}/build -> /usr/src/linux-${{_actual_ver}}" >&2
-                fi
+                 # =====================================================================
+                 # HARDENED: EXPLICIT build SYMLINK CREATION WITHIN MODULE DIRECTORY
+                 # =====================================================================
+                 # CRITICAL: DKMS searches for /usr/lib/modules/\$(uname -r)/build
+                 # We MUST create this symlink EXPLICITLY pointing to the headers directory
+                 # Use absolute path to headers: /usr/src/{{pkgbase}}-{{pkgver}}-{{pkgrel}}
+                 if [ -d "$_headers_dir" ]; then
+                     (cd "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}" && \
+                      ln -sf /usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}} build) 2>/dev/null
+                     echo "[PHASE-E2] Created build symlink: /usr/lib/modules/${{_actual_ver}}/build -> /usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}}" >&2
+                 fi
 
-                # =====================================================================
-                # HARDENED: MULTI-ALIAS BRIDGE (LOOPING THROUGH ALIASES)
-                # =====================================================================
-                _pretty_ver="${{pkgver}}-${{pkgrel}}-${{pkgbase#linux-}}"
-                _uname_r_expected="${{_actual_ver}}"
+                 # =====================================================================
+                 # HARDENED: MULTI-ALIAS BRIDGE (LOOPING THROUGH ALIASES)
+                 # =====================================================================
+                 _pretty_ver="${{pkgver}}-${{pkgrel}}-${{pkgbase#linux-}}"
+                 _uname_r_expected="${{_actual_ver}}"
 
-                # Loop through both _actual_ver and _pretty_ver to create alias bridges
-                for _bridge_alias in "${{_uname_r_expected}}" "${{_pretty_ver}}"; do
-                    if [ -n "${{_bridge_alias}}" ] && [ "${{_bridge_alias}}" != "${{_uname_r_expected}}" ]; then
-                        echo "[PHASE-E2] Creating multi-alias bridge: ${{_bridge_alias}} -> ${{_uname_r_expected}}" >&2
-                        (cd "${{pkgdir}}/usr/lib/modules" && ln -sf "${{_uname_r_expected}}" "${{_bridge_alias}}") 2>/dev/null
-                        mkdir -p "${{pkgdir}}/usr/lib/modules/${{_bridge_alias}}"
-                        (cd "${{pkgdir}}/usr/lib/modules/${{_bridge_alias}}" && \
-                         ln -sf /usr/src/linux-${{_uname_r_expected}} build) 2>/dev/null
-                        echo "[PHASE-E2] Created build symlink for alias: /usr/lib/modules/${{_bridge_alias}}/build" >&2
-                    fi
-                done
+                 # Loop through both _actual_ver and _pretty_ver to create alias bridges
+                 for _bridge_alias in "${{_uname_r_expected}}" "${{_pretty_ver}}"; do
+                     if [ -n "${{_bridge_alias}}" ] && [ "${{_bridge_alias}}" != "${{_uname_r_expected}}" ]; then
+                         echo "[PHASE-E2] Creating multi-alias bridge: ${{_bridge_alias}} -> ${{_uname_r_expected}}" >&2
+                         (cd "${{pkgdir}}/usr/lib/modules" && ln -sf "${{_uname_r_expected}}" "${{_bridge_alias}}") 2>/dev/null
+                         mkdir -p "${{pkgdir}}/usr/lib/modules/${{_bridge_alias}}"
+                         (cd "${{pkgdir}}/usr/lib/modules/${{_bridge_alias}}" && \
+                          ln -sf /usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}} build) 2>/dev/null
+                         echo "[PHASE-E2] Created build symlink for alias: /usr/lib/modules/${{_bridge_alias}}/build" >&2
+                     fi
+                 done
 
-                # =====================================================================
-                # HARDENED: FINAL VERIFICATION STEP
-                # =====================================================================
-                echo "[PHASE-E2] VERIFICATION: Checking symlink creation..." >&2
-                _verify_pass=0
-                if [ -L "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}/build" ]; then
-                    echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${{_actual_ver}}/build -> /usr/src/linux-${{_actual_ver}}" >&2
-                       _verify_pass=$(({{_verify_pass}} + 1))
-                else
-                    echo "[PHASE-E2] ✗ Failed: /usr/lib/modules/${{_actual_ver}}/build not created" >&2
-                fi
-                if [ -L "${{pkgdir}}/usr/lib/modules/${{_pretty_ver}}/build" ] && [ "${{_pretty_ver}}" != "${{_actual_ver}}" ]; then
-                    echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${{_pretty_ver}}/build -> /usr/src/linux-${{_actual_ver}}" >&2
-                       _verify_pass=$(({{_verify_pass}} + 1))
-                fi
-                echo "[PHASE-E2] Verification result: ${{_verify_pass}} symlink(s) verified" >&2
+                 # =====================================================================
+                 # HARDENED: FINAL VERIFICATION STEP
+                 # =====================================================================
+                 echo "[PHASE-E2] VERIFICATION: Checking symlink creation..." >&2
+                 _verify_pass=0
+                 if [ -L "${{pkgdir}}/usr/lib/modules/${{_actual_ver}}/build" ]; then
+                     echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${{_actual_ver}}/build -> /usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}}" >&2
+                        _verify_pass=$(({{_verify_pass}} + 1))
+                 else
+                     echo "[PHASE-E2] ✗ Failed: /usr/lib/modules/${{_actual_ver}}/build not created" >&2
+                 fi
+                 if [ -L "${{pkgdir}}/usr/lib/modules/${{_pretty_ver}}/build" ] && [ "${{_pretty_ver}}" != "${{_actual_ver}}" ]; then
+                     echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${{_pretty_ver}}/build -> /usr/src/${{pkgbase}}-${{pkgver}}-${{pkgrel}}" >&2
+                        _verify_pass=$(({{_verify_pass}} + 1))
+                 fi
+                 echo "[PHASE-E2] Verification result: ${{_verify_pass}} symlink(s) verified" >&2
 
-                echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${{_actual_ver}}" >&2
-            fi
-            "#,
+                 echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${{_actual_ver}}" >&2
+             fi
+             "#,
             actual_ver
         )
     } else {
@@ -2068,6 +2072,7 @@ pub const MODULE_REPAIR_INSTALL: &str = r#"#!/bin/bash
 # This script repairs broken /usr/lib/modules/$(uname -r)/build and source symlinks
 # Run automatically by pacman during package installation and upgrade.
 # Critical for ensuring DKMS and out-of-tree module builds work correctly.
+# ENHANCEMENT: Uses absolute paths and is more aggressive in repairing symlinks
 
 # =====================================================================
 # PHASE 16: LOAD JSON TELEMETRY LOGGING FUNCTION
@@ -2102,6 +2107,7 @@ log_json() {
 # PHASE 2 (QUIET VALIDATION): Validates symlinks silently
 # PHASE 3 (ACTION LOGGING): Detailed logs only for repairs and errors
 #
+# AGGRESSIVE FIX: Uses absolute paths and robust symlink verification
 # Detects actual kernel version, validates symlinks, and repairs if broken
 repair_module_symlinks() {
     # SILENT DISCOVERY PHASE: No output unless critical error
@@ -2117,185 +2123,141 @@ repair_module_symlinks() {
     # Silent discovery - only log to JSON, not to stderr
     echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery Phase: Detected kernel release\",\"metadata\":{\"release\":\"${KERNEL_RELEASE}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
 
-   # STEP 2: Resolve the correct source directory (QUIET VALIDATION PHASE)
-   # Try multiple strategies to locate the correct headers directory
-   # Silent discovery - no output unless critical issue
-   SOURCE_DIR=""
-   _discovery_method=""
+    # STEP 2: Resolve the correct source directory (QUIET VALIDATION PHASE)
+    # AGGRESSIVE FIX: Use multiple strategies with absolute path resolution
+    # Try to find headers in order of preference
+    SOURCE_DIR=""
+    _discovery_method=""
 
-   # Strategy 1: Check standard '/usr/src/linux-{version}' location
-   if [ -d "/usr/src/linux-${KERNEL_RELEASE}" ]; then
-       SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
-       _discovery_method="standard-location"
+    # Strategy 1: Use dynamic pkgbase pattern first (matches our new naming scheme)
+    # Try common prefixes for pkgbase-based naming: linux-*, linux-zen-*, etc.
+    for candidate in /usr/src/linux-*-${KERNEL_RELEASE} /usr/src/linux-*-*-${KERNEL_RELEASE}; do
+        if [ -d "$candidate" ] 2>/dev/null; then
+            SOURCE_DIR="$candidate"
+            _discovery_method="dynamic-pkgbase"
+            break
+        fi
+    done
 
-   # Strategy 2: Try '/usr/src/linux' symlink (common fallback)
-   elif [ -d "/usr/src/linux" ]; then
-       SOURCE_DIR="/usr/src/linux"
-       _discovery_method="fallback-symlink"
+    # Strategy 2: Check standard '/usr/src/linux-{version}' location
+    if [ -z "$SOURCE_DIR" ] && [ -d "/usr/src/linux-${KERNEL_RELEASE}" ]; then
+        SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
+        _discovery_method="standard-location"
 
-   # Strategy 3: Search for any matching linux-* directory
-   else
-       SOURCE_DIR=$(find /usr/src -maxdepth 1 -type d -name "linux*" 2>/dev/null | head -n 1)
-       if [ -n "$SOURCE_DIR" ]; then
-           _discovery_method="dynamic-search"
-       else
-           log_json "WARNING" "MODULE-REPAIR" "Could not locate kernel source directory - proceeding with validation"
-           _discovery_method="none"
-       fi
-   fi
+    # Strategy 3: Try '/usr/src/linux' symlink (common fallback)
+    elif [ -z "$SOURCE_DIR" ] && [ -d "/usr/src/linux" ]; then
+        SOURCE_DIR="/usr/src/linux"
+        _discovery_method="fallback-symlink"
 
-   # Silent discovery logging - JSON only, no stderr noise
-   if [ -n "$SOURCE_DIR" ]; then
-       echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery: Found source directory\",\"metadata\":{\"method\":\"${_discovery_method}\",\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
-   fi
+    # Strategy 4: Search for any matching linux-* directory (ultimate fallback)
+    elif [ -z "$SOURCE_DIR" ]; then
+        SOURCE_DIR=$(find /usr/src -maxdepth 1 -type d -name "linux*" 2>/dev/null | head -n 1)
+        if [ -n "$SOURCE_DIR" ]; then
+            _discovery_method="dynamic-search"
+        else
+            log_json "WARNING" "MODULE-REPAIR" "Could not locate kernel source directory - attempting with standard path"
+            SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
+            _discovery_method="fallback-standard"
+        fi
+    fi
 
-   # STEP 3: Verify source directory validity (QUIET VALIDATION)
-   if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR" ]; then
-       log_json "ERROR" "MODULE-REPAIR" "Source directory does not exist"
-       return 1
-   fi
+    # Resolve to absolute path
+    if [ -n "$SOURCE_DIR" ]; then
+        SOURCE_DIR=$(cd "$SOURCE_DIR" 2>/dev/null && pwd) || SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
+    fi
 
-   # Check for Makefile or Kconfig to confirm it's a kernel source directory (silent check)
-   if [ ! -f "$SOURCE_DIR/Makefile" ] && [ ! -f "$SOURCE_DIR/Kconfig" ]; then
-       echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"WARNING\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Validation: Source directory missing Makefile/Kconfig\",\"metadata\":{\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
-   fi
+    # Silent discovery logging - JSON only, no stderr noise
+    echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery: Resolved source directory\",\"metadata\":{\"method\":\"${_discovery_method}\",\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
 
-   # STEP 4: Ensure module directory exists (QUIET VALIDATION)
-   MODULE_DIR="/usr/lib/modules/${KERNEL_RELEASE}"
-   if [ ! -d "$MODULE_DIR" ]; then
-       # ACTION PHASE: Log creation attempt
-       log_json "INFO" "MODULE-REPAIR" "ACTION: Creating missing module directory"
-       mkdir -p "$MODULE_DIR" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create module directory"
-           return 1
-       }
-   fi
+    # STEP 3: Verify source directory or use absolute path (QUIET VALIDATION)
+    MODULE_DIR="/usr/lib/modules/${KERNEL_RELEASE}"
+    
+    # STEP 4: Ensure module directory exists (QUIET VALIDATION)
+    if [ ! -d "$MODULE_DIR" ]; then
+        # ACTION PHASE: Log creation attempt
+        log_json "INFO" "MODULE-REPAIR" "ACTION: Creating missing module directory"
+        mkdir -p "$MODULE_DIR" || {
+            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create module directory"
+            return 1
+        }
+    fi
 
-   # Silent validation - only log to JSON if needed
-   echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Quiet Validation: Module directory exists\",\"metadata\":{\"path\":\"${MODULE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
+    # Silent validation - only log to JSON if needed
+    echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Quiet Validation: Module directory exists\",\"metadata\":{\"path\":\"${MODULE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
 
-   # STEP 5: Validate and repair 'build' symlink (QUIET VALIDATION -> ACTION PHASE)
-   BUILD_LINK="${MODULE_DIR}/build"
-   EXPECTED_BUILD_TARGET="/usr/src/linux-${KERNEL_RELEASE}"
+    # STEP 5: AGGRESSIVE build symlink repair (QUIET VALIDATION -> ACTION PHASE)
+    BUILD_LINK="${MODULE_DIR}/build"
+    # Use absolute path to the resolved source directory
+    EXPECTED_BUILD_TARGET="${SOURCE_DIR}"
 
-   # Silent validation phase - no output
-   if [ -L "$BUILD_LINK" ]; then
-       # Symlink exists - verify it points to correct target (quiet check)
-       CURRENT_TARGET=$(readlink "$BUILD_LINK")
+    # AGGRESSIVE: Remove and recreate symlink regardless of current state
+    # This ensures broken symlinks are never left in place
+    if [ -e "$BUILD_LINK" ] || [ -L "$BUILD_LINK" ]; then
+        # Build link exists (valid symlink, broken symlink, or file) - remove it
+        log_json "INFO" "MODULE-REPAIR" "ACTION: Removing existing build entry"
+        rm -f "$BUILD_LINK" || {
+            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove build entry"
+            return 1
+        }
+    fi
 
-       if [ "$CURRENT_TARGET" != "$EXPECTED_BUILD_TARGET" ] && [ "$CURRENT_TARGET" != "$SOURCE_DIR" ]; then
-           # ACTION PHASE: Log repair
-           log_json "WARNING" "MODULE-REPAIR" "ACTION: build symlink points to unexpected location - repairing"
+    # Create fresh symlink with absolute path
+    ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" 2>/dev/null || {
+        log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink at absolute path"
+        return 1
+    }
 
-           rm -f "$BUILD_LINK" || {
-               log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove broken build symlink"
-               return 1
-           }
+    # Verify
+    if [ -L "$BUILD_LINK" ]; then
+        log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Created build symlink with absolute path"
+    else
+        log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Symlink creation verification failed"
+        return 1
+    fi
 
-           # Create new symlink pointing to standard location
-           ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" || {
-               log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink"
-               return 1
-           }
+    # STEP 6: AGGRESSIVE source symlink repair (QUIET VALIDATION -> ACTION PHASE)
+    SOURCE_LINK="${MODULE_DIR}/source"
+    # Use absolute path to the resolved source directory
+    EXPECTED_SOURCE_TARGET="${SOURCE_DIR}"
 
-           log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Repaired build symlink"
-       else
-           # Silent verification - only log to JSON
-           echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Quiet Validation: build symlink is correct\",\"metadata\":{\"path\":\"${BUILD_LINK}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
-       fi
-   elif [ -e "$BUILD_LINK" ]; then
-       # File/directory exists but is not a symlink - ACTION PHASE: remove and recreate
-       log_json "WARNING" "MODULE-REPAIR" "ACTION: build exists but is not a symlink - replacing"
+    # AGGRESSIVE: Remove and recreate symlink regardless of current state
+    if [ -e "$SOURCE_LINK" ] || [ -L "$SOURCE_LINK" ]; then
+        # Source link exists - remove it
+        log_json "INFO" "MODULE-REPAIR" "ACTION: Removing existing source entry"
+        rm -f "$SOURCE_LINK" || {
+            log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove source entry"
+            return 1
+        }
+    fi
 
-       rm -rf "$BUILD_LINK" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove non-symlink build entry"
-           return 1
-       }
+    # Create fresh symlink with absolute path
+    ln -sf "$EXPECTED_SOURCE_TARGET" "$SOURCE_LINK" 2>/dev/null || {
+        log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink at absolute path"
+        return 1
+    }
 
-       ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink"
-           return 1
-       }
+    # Verify
+    if [ -L "$SOURCE_LINK" ]; then
+        log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Created source symlink with absolute path"
+    else
+        log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Source symlink creation verification failed"
+        return 1
+    fi
 
-       log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Replaced build with correct symlink"
-   else
-       # Symlink does not exist - ACTION PHASE: create it
-       log_json "INFO" "MODULE-REPAIR" "ACTION: build symlink does not exist - creating"
-
-       ln -sf "$EXPECTED_BUILD_TARGET" "$BUILD_LINK" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create build symlink"
-           return 1
-       }
-
-       log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Created build symlink"
-   fi
-
-   # STEP 6: Validate and repair 'source' symlink (QUIET VALIDATION -> ACTION PHASE)
-   SOURCE_LINK="${MODULE_DIR}/source"
-
-   # Silent validation phase - no output
-   if [ -L "$SOURCE_LINK" ]; then
-       # Symlink exists - verify it points to correct target (quiet check)
-       CURRENT_SOURCE=$(readlink "$SOURCE_LINK")
-
-       if [ "$CURRENT_SOURCE" != "$EXPECTED_BUILD_TARGET" ] && [ "$CURRENT_SOURCE" != "$SOURCE_DIR" ]; then
-           # ACTION PHASE: Log repair
-           log_json "WARNING" "MODULE-REPAIR" "ACTION: source symlink points to unexpected location - repairing"
-
-           rm -f "$SOURCE_LINK" || {
-               log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove broken source symlink"
-               return 1
-           }
-
-           # Create new symlink pointing to standard location
-           ln -sf "$EXPECTED_BUILD_TARGET" "$SOURCE_LINK" || {
-               log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink"
-               return 1
-           }
-
-           log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Repaired source symlink"
-       else
-           # Silent verification - only log to JSON
-           echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Quiet Validation: source symlink is correct\",\"metadata\":{\"path\":\"${SOURCE_LINK}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
-       fi
-   elif [ -e "$SOURCE_LINK" ]; then
-       # File/directory exists but is not a symlink - ACTION PHASE: remove and recreate
-       log_json "WARNING" "MODULE-REPAIR" "ACTION: source exists but is not a symlink - replacing"
-
-       rm -rf "$SOURCE_LINK" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not remove non-symlink source entry"
-           return 1
-       }
-
-       ln -sf "$EXPECTED_BUILD_TARGET" "$SOURCE_LINK" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink"
-           return 1
-       }
-
-       log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Replaced source with correct symlink"
-   else
-       # Symlink does not exist - ACTION PHASE: create it
-       log_json "INFO" "MODULE-REPAIR" "ACTION: source symlink does not exist - creating"
-
-       ln -sf "$EXPECTED_BUILD_TARGET" "$SOURCE_LINK" || {
-           log_json "ERROR" "MODULE-REPAIR" "ACTION FAILED: Could not create source symlink"
-           return 1
-       }
-
-       log_json "SUCCESS" "MODULE-REPAIR" "ACTION COMPLETE: Created source symlink"
-   fi
-
-   # STEP 7: Final verification (COMPLETION PHASE)
-   # Quiet validation with detail only on issues
-   if [ -L "$BUILD_LINK" ] && [ -L "$SOURCE_LINK" ]; then
-       # COMPLETION PHASE: Success summary
-       log_json "SUCCESS" "MODULE-REPAIR" "COMPLETION: Module symlinks are valid and ready for DKMS"
-       return 0
-   else
-       # COMPLETION PHASE: Failure summary
-       log_json "ERROR" "MODULE-REPAIR" "COMPLETION FAILED: One or more symlinks still invalid"
-       return 1
-   fi
+    # STEP 7: Final verification (COMPLETION PHASE)
+    # Verify both symlinks exist and point to absolute paths
+    if [ -L "$BUILD_LINK" ] && [ -L "$SOURCE_LINK" ]; then
+        BUILD_TARGET=$(readlink "$BUILD_LINK")
+        SOURCE_TARGET=$(readlink "$SOURCE_LINK")
+        
+        # Completion Phase: Success summary
+        log_json "SUCCESS" "MODULE-REPAIR" "COMPLETION: Module symlinks valid and ready for DKMS" "{\"build\":\"${BUILD_TARGET}\",\"source\":\"${SOURCE_TARGET}\"}"
+        return 0
+    else
+        # COMPLETION PHASE: Failure summary
+        log_json "ERROR" "MODULE-REPAIR" "COMPLETION FAILED: One or more symlinks invalid after repair"
+        return 1
+    fi
 }
 
 # =====================================================================

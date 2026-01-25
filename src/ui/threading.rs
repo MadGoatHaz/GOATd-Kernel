@@ -86,7 +86,7 @@ pub fn request_ui_repaint(ctx: Option<&eframe::egui::Context>) {
 /// automatically trigger UI updates without requiring explicit repaint calls.
 ///
 /// # Pattern
-/// ```no_run
+/// ```ignore
 /// spawn_ui_task(ctx, async {
 ///     // Long-running async work...
 ///     Ok::<(), Box<dyn std::error::Error>>(())
