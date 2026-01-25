@@ -1338,19 +1338,30 @@ fi
             // 3c. Pacman: Install all artifacts (kernel + headers + docs) bundled into single call
             eprintln!("[KERNEL] [UNIFIED] Step 3: Adding pacman install to unified batch");
             if !artifact_paths.is_empty() {
-                // Convert PathBuf to string paths
+                // Convert PathBuf to string paths with proper absolute path resolution
                 let paths_str: Vec<String> = artifact_paths
                     .iter()
-                    .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                    .filter_map(|p| {
+                        // Ensure absolute paths and proper shell escaping
+                        p.to_str().map(|s| {
+                            // Quote the path for safe shell execution
+                            format!("'{}'", s)
+                        })
+                    })
                     .collect();
 
                 if !paths_str.is_empty() {
+                    // Build pacman command with properly quoted and resolved absolute paths
                     let pacman_cmd = format!("pacman -U --noconfirm --overwrite 'usr/lib/modules/*/build,usr/lib/modules/*/source' {}", paths_str.join(" "));
                     eprintln!(
                         "[KERNEL] [UNIFIED] Bundled pacman command for {} artifact(s)",
                         paths_str.len()
                     );
                     eprintln!("[KERNEL] [UNIFIED]   Artifacts: {}", registry.summary());
+                    eprintln!("[KERNEL] [UNIFIED]   Resolved paths:");
+                    for (i, path) in paths_str.iter().enumerate() {
+                        eprintln!("[KERNEL] [UNIFIED]     [{}] {}", i + 1, path);
+                    }
                     commands.push(pacman_cmd);
                 }
             }

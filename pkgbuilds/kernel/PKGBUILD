@@ -37,32 +37,58 @@ prepare() {
 
 build() {
     cd $_srcname
-    make -j$(nproc) KERNELRELEASE="${pkgver}-${pkgrel}" all
+    # Let the kernel determine its own release string (do NOT override KERNELRELEASE)
+    # This allows the actual kernel release to be read from include/config/kernel.release
+    make -j$(nproc) all
 }
 
 package_linux() {
     cd $_srcname
-    make KERNELRELEASE="${pkgver}-${pkgrel}" INSTALL_MOD_PATH="$pkgdir" modules_install
+    
+    # CRITICAL FIX: Read actual kernel release from build tree instead of using ${pkgver}-${pkgrel}
+    # This ensures the installed kernel matches what the build actually created
+    # The kernel's internal release may differ from PKGBUILD's pkgver-pkgrel if CONFIG_LOCALVERSION is set
+    local _kernver
+    if [ -f include/config/kernel.release ]; then
+        _kernver=$(cat include/config/kernel.release)
+    else
+        # Fallback: query from kernel build
+        _kernver=$(make -s kernelrelease)
+    fi
+    
+    # Use the actual kernel release for all installation paths
+    make KERNELRELEASE="${_kernver}" INSTALL_MOD_PATH="$pkgdir" modules_install
     
     # Install kernel image
     install -Dm644 arch/x86/boot/bzImage "$pkgdir/boot/vmlinuz-linux"
     
-    # Install System.map
-    install -Dm644 System.map "$pkgdir/boot/System.map-${pkgver}-${pkgrel}"
+    # Install System.map with actual kernel version
+    install -Dm644 System.map "$pkgdir/boot/System.map-${_kernver}"
     
-    # Install kernel config
-    install -Dm644 .config "$pkgdir/boot/config-${pkgver}-${pkgrel}"
+    # Install kernel config with actual kernel version
+    install -Dm644 .config "$pkgdir/boot/config-${_kernver}"
     
-    # Install kernel release info
-    echo "${pkgver}-${pkgrel}" > "$pkgdir/boot/.kernelrelease"
+    # Install kernel release info - CRITICAL: This is the "Source of Truth" for DKMS
+    echo "${_kernver}" > "$pkgdir/boot/.kernelrelease"
 }
 
 package_linux-headers() {
     cd $_srcname
     make INSTALL_HDR_PATH="$pkgdir/usr" headers_install
     
-    # DKMS package directory
-    local builddir="$pkgdir/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
+    # CRITICAL FIX: Read actual kernel release from build tree (Source of Truth for version alignment)
+    # Instead of hardcoding ${pkgver}-${pkgrel}, we use the kernel's actual release string
+    # This ensures DKMS symlinks in /usr/lib/modules/{_kernver}/build match the installed kernel
+    local _kernver
+    if [ -f include/config/kernel.release ]; then
+        _kernver=$(cat include/config/kernel.release)
+    else
+        # Fallback: query from kernel build
+        _kernver=$(make -s kernelrelease)
+    fi
+    
+    # DKMS package directory - uses actual kernel version, not PKGBUILD version
+    local builddir="$pkgdir/usr/src/${pkgbase}-${_kernver}"
     mkdir -p "$builddir"
     
     # Copy critical build infrastructure files for DKMS
@@ -109,4 +135,23 @@ package_linux-headers() {
         find rust -maxdepth 1 -type f -name '*.rmeta' -exec install -Dt "$builddir/rust" -m644 {} +
         find rust -maxdepth 1 -type f -name '*.so' -exec install -Dt "$builddir/rust" {} +
     fi
+    
+    # === CRITICAL: Create DKMS symlinks for module compilation ===
+    # These symlinks allow DKMS and kernel module compilation to find the build headers.
+    # The symlinks must point to the headers directory installed above.
+    # This is a required step for DKMS to function correctly on custom kernels like GOATd.
+    #
+    # CRITICAL FIX: Use actual kernel release (_kernver) instead of hardcoded ${pkgver}-${pkgrel}
+    # This ensures the /usr/lib/modules/{_kernver}/build symlink matches the running kernel
+    local modules_dir="$pkgdir/usr/lib/modules/${_kernver}"
+    mkdir -p "$modules_dir"
+    
+    # Create /usr/lib/modules/{kernel-release}/build symlink
+    # Points to /usr/src/linux-{_kernver} where kernel headers are installed
+    # The symlink path MUST match the kernel's actual release string for DKMS to find it
+    ln -sf "/usr/src/${pkgbase}-${_kernver}" "$modules_dir/build"
+    
+    # Create /usr/lib/modules/{kernel-release}/source symlink
+    # Points to the same headers directory (required by some module systems)
+    ln -sf "/usr/src/${pkgbase}-${_kernver}" "$modules_dir/source"
 }
