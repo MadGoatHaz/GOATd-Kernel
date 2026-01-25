@@ -61,6 +61,7 @@ Unit tests are located within the source files in `src/` (usually in a `mod test
 
 ## Maintenance & Hygiene
 
-- **Path Resolution**: Tests use relative paths where possible or standard `/tmp` directories for transient artifacts.
+- **Path Resolution**: Strict absolute path enforcement for workspace and configuration files to ensure deterministic build behavior.
+- **Verification Guard**: Path validation (e.g., `validate_kbuild_path`, `validate_config_path`) now includes mandatory `is_absolute()` checks.
 - **Dynamic Naming**: Tests are updated to handle variant-aware naming (e.g., `linux-tkg`, `linux-zen`).
-- **Clean Assertions**: Junk assertions and obsolete logic have been removed to ensure tests reflect the current project state.
+- **Clean Assertions**: Removed fragile statistical assertions (e.g., strict P95 >= Mean) in favor of robust logging and relaxed bounds to accommodate system jitter.

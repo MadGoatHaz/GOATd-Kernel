@@ -29,97 +29,227 @@ Disk (/): 16.98 GiB / 406.10 GiB (4%) - btrfs
 ---
 Error while installing, it seems that the header files are still messed up during kernel creation.
 ------
-
-[elf64-x86-64] to `/home/testgoat/Documents/GOATd-Kernel-master/linux/pkg/linux-goatd-workstation-headers/usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/stxsDk9O' [elf64-x86-64]
-[10:28:33.528] Adding symlink...
-[10:28:33.532] ==> Tidying install...
-[10:28:33.532] ==> Tidying install...
-[10:28:33.534]   -> Removing libtool files...
-[10:28:33.617]   -> Removing static library files...
-[10:28:33.702]   -> Purging unwanted files...
-[10:28:33.867]   -> Compressing man and info pages...
-[10:28:33.871] ==> Checking for packaging issues...
-[10:28:33.871] ==> Checking for packaging issues...
-[10:28:34.800] [STDERR] ==> WARNING: Package contains reference to $srcdir
-[10:28:34.800] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/vmlinux
-[10:28:34.800] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libcompiler_builtins.rmeta
-[10:28:34.800] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libbuild_error.rmeta
-[10:28:34.800] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libffi.rmeta
-[10:28:34.800] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libpin_init.rmeta
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libuapi.rmeta
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libbindings.rmeta
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libkernel.rmeta
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libpin_init_internal.so
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libmacros.so
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/vdso/vdso32.so
-[10:28:34.801] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/vdso/vdso64.so
-[10:28:35.346] ==> Creating package "linux-goatd-workstation-headers"...
-[10:28:35.346] ==> Creating package "linux-goatd-workstation-headers"...
-[10:28:35.348]   -> Generating .PKGINFO file...
-[10:28:36.251]   -> Generating .BUILDINFO file...
-[10:28:36.569]   -> Generating .MTREE file...
-[10:28:37.828]   -> Compressing package...
-[10:28:39.104] ==> Starting package_linux-goatd-workstation-docs()...
-[10:28:39.104] ==> Starting package_linux-goatd-workstation-docs()...
-[10:28:39.104] Installing documentation...
-[10:28:58.933] Adding symlink...
-[10:28:58.936] ==> Tidying install...
-[10:28:58.936] ==> Tidying install...
-[10:28:58.938]   -> Removing libtool files...
-[10:28:58.991]   -> Removing static library files...
-[10:28:59.044]   -> Purging unwanted files...
-[10:28:59.152]   -> Compressing man and info pages...
-[10:28:59.156] ==> Checking for packaging issues...
-[10:28:59.156] ==> Checking for packaging issues...
-[10:29:02.141] ==> Creating package "linux-goatd-workstation-docs"...
-[10:29:02.141] ==> Creating package "linux-goatd-workstation-docs"...
-[10:29:02.143]   -> Generating .PKGINFO file...
-[10:29:03.390]   -> Generating .BUILDINFO file...
-[10:29:03.700]   -> Generating .MTREE file...
-[10:29:05.490]   -> Compressing package...
-[10:29:07.055] ==> Leaving fakeroot environment.
-[10:29:07.055] ==> Leaving fakeroot environment.
-[10:29:07.058] ==> Finished making: linux-goatd-workstation 6.18.7.arch1-1 (Sun 25 Jan 2026 10:29:07 AM MST)
-[10:29:07.058] ==> Finished making: linux-goatd-workstation 6.18.7.arch1-1 (Sun 25 Jan 2026 10:29:07 AM MST)
-[10:29:07.059] PHASE TRANSITION: Validation
-[10:29:07.059] PHASE TRANSITION: Completed
-[11:01:55.783] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux'
-[11:01:55.783] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-tkg'
-[11:01:55.815] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-lts'
-[11:01:55.815] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-hardened'
-[11:01:55.902] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-mainline'
-[11:01:55.902] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux-zen'
-[11:01:56.294] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
-[11:01:56.313] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-tkg': '${_basekernel}-273'
-[11:01:56.528] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux': '6.18.7.arch1-1'
-[11:01:56.536] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-hardened': '6.17.13.hardened1-2'
-[11:01:56.536] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-zen': '6.18.7.zen1-1'
-[11:01:56.632] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-lts': '6.12.67-1'
-[11:01:56.653] [INFO] [KernelManager] Found 1 built kernels in workspace
-[11:01:56.656] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux-mainline': '6.19rc6-1'
-[11:01:58.309] [INFO] [AppController] [KERNEL] Starting async kernel installation from: ./linux/linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst
-[11:01:58.309] [INFO] [KERNEL] [RESOLVE] Starting kernel version resolution
-[11:01:58.309] [INFO] [KERNEL] [RESOLVE] Found .kernelrelease in package directory: 6.18.7-arch1-1-goatd-workstation
-[11:01:58.309] [INFO] [KernelArtifactRegistry] Extracted filename version: 6.18.7.arch1-1 from linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst
-[11:01:58.309] [INFO] [KernelArtifactRegistry] Kernel Identity: variant='linux-goatd-workstation', internal_version='6.18.7-arch1-1-goatd-workstation', filename_version=Some("6.18.7.arch1-1")
-[11:01:58.309] [INFO] [KernelArtifactRegistry] ✓ Found -headers via filename version fallback: linux-goatd-workstation-headers-6.18.7.arch1-1-x86_64.pkg.tar.zst
-[11:01:58.309] [INFO] [KernelArtifactRegistry] ✓ Found -docs via filename version fallback: linux-goatd-workstation-docs-6.18.7.arch1-1-x86_64.pkg.tar.zst
-[11:01:58.528] [INFO] [KernelArtifactRegistry] ✓ Critical file found in tarball: include/linux/memremap.h (including deeply nested paths)
-[11:01:58.528] [INFO] [KernelArtifactRegistry] ✓ Deep validation PASSED: All critical files found in headers tarball
-[11:01:58.528] [INFO] [SystemWrapper] Executing batch privileged commands (7 steps)
-[11:02:01.785] [INFO] [batch privileged] stdout: loading packages...
+[13:03:17.683] [INFO] [AppController] [BUILD] Full build log: /home/testgoat/Documents/GOATd-Kernel-master/logs/full/build_20260125_130317.683.log
+[13:03:17.683] [INFO] [BUILD] Configuration synchronized: variant=linux, profile=Workstation, lto=none, hardening=Minimal
+[13:03:17.860] [INFO] [BUILD] [CONFIG_VALIDATION] version field: 'latest' (should be 'latest' for dynamic resolution)
+[13:03:17.860] [INFO] [BUILD] [CONFIG_VALIDATION] kernel_variant field: 'linux' (identifies which variant to fetch)
+[13:03:17.860] [INFO] [BUILD] Config: variant=latest, lto=None, profile=Workstation
+[13:03:22.036] PHASE TRANSITION: Configuration
+[13:03:22.037] [INFO] [ORCHESTRATOR] [VERSION] [ENTRY] Incoming config state - version: 'latest', variant: 'linux'
+[13:03:22.037] [INFO] [ORCHESTRATOR] [VERSION] Resolving dynamic version for variant: 'linux'
+[13:03:22.037] [INFO] [ORCHESTRATOR] [VERSION] [PRIORITY-1] Fetching latest version for variant: 'linux'
+[13:03:22.037] [INFO] [PKGBUILD] [GET_VERSION] Fetching latest version for variant: 'linux'
+[13:03:22.595] [INFO] [PKGBUILD] [GET_VERSION] Successfully fetched version for 'linux': '6.18.7.arch1-1'
+[13:03:22.595] [INFO] [ORCHESTRATOR] [VERSION] [PRIORITY-1] Successfully resolved 'latest' to: '6.18.7.arch1-1'
+[13:03:22.595] [INFO] [ORCHESTRATOR] [VERSION] Config updated with resolved version: '6.18.7.arch1-1'
+[13:03:22.595] [INFO] [ORCHESTRATOR] [PREPARATION] Version resolution complete. Using version: '6.18.7.arch1-1'
+[13:03:22.595] PHASE TRANSITION: Patching
+[13:03:22.629] PHASE TRANSITION: Building
+[13:03:22.630] [INFO] [Patcher] [SOURCE-REPAIR] Validating PKGBUILD for variant: 'linux' with version: '6.18.7.arch1-1'
+[13:03:22.630] [WARN] [Patcher] [SOURCE-REPAIR] Repairing PKGBUILD: variant_mismatch=false, version_mismatch=true
+[13:03:24.774] ==> Making package: linux-goatd-workstation 6.18.7.arch1-1 (Sun 25 Jan 2026 01:03:24 PM MST)
+[13:03:24.774] ==> Making package: linux-goatd-workstation 6.18.7.arch1-1 (Sun 25 Jan 2026 01:03:24 PM MST)
+[13:03:24.775] ==> Checking runtime dependencies...
+[13:03:24.775] ==> Checking runtime dependencies...
+[13:03:24.777] ==> Checking buildtime dependencies...
+[13:03:24.777] ==> Checking buildtime dependencies...
+[13:03:24.791] ==> Retrieving sources...
+[13:03:24.791] ==> Retrieving sources...
+[13:03:24.799]   -> Downloading linux-6.18.7.tar.xz...
+[13:03:24.803] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[13:03:24.803] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[13:04:06.675] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+  0 147.1M   0   2472   0      0   2338      0 18h 20m   00:01 18h 20m   2340
+  1 147.1M   1  1.49M   0      0 747.0k      0   03:21   00:02   03:19 747.4k
+  3 147.1M   3  5.35M   0      0  1.75M      0   01:23   00:03   01:20  1.75M
+  6 147.1M   6  9.98M   0      0  2.46M      0   00:59   00:04   00:55  2.46M
+ 10 147.1M  10 14.95M   0      0  2.95M      0   00:49   00:05   00:44  2.95M
+ 12 147.1M  12 18.34M   0      0  3.02M      0   00:48   00:06   00:42  3.66M
+ 14 147.1M  14 21.40M   0      0  3.03M      0   00:48   00:07   00:41  3.98M
+ 16 147.1M  16 24.71M   0      0  3.06M      0   00:47   00:08   00:39  3.87M
+ 19 147.1M  19 28.70M   0      0  3.16M      0   00:46   00:09   00:37  3.74M
+ 22 147.1M  22 33.17M   0      0  3.29M      0   00:44   00:10   00:34  3.64M
+ 25 147.1M  25 37.96M   0      0  3.43M      0   00:42   00:11   00:31  3.92M
+ 29 147.1M  29 43.40M   0      0  3.59M      0   00:40   00:12   00:28  4.39M
+ 32 147.1M  32 48.00M   0      0  3.67M      0   00:40   00:13   00:27  4.65M
+ 36 147.1M  36 52.99M   0      0  3.77M      0   00:39   00:14   00:25  4.85M
+ 39 147.1M  39 58.24M   0      0  3.86M      0   00:38   00:15   00:23  5.01M
+ 42 147.1M  42 63.15M   0      0  3.93M      0   00:37   00:16   00:21  5.03M
+ 46 147.1M  46 68.17M   0      0  3.99M      0   00:36   00:17   00:19  4.95M
+ 48 147.1M  48 71.57M   0      0  3.96M      0   00:37   00:18   00:19  4.71M
+ 50 147.1M  50 74.37M   0      0  3.90M      0   00:37   00:19   00:18  4.27M
+ 52 147.1M  52 77.65M   0      0  3.87M      0   00:38   00:20   00:18  3.88M
+ 55 147.1M  55 81.38M   0      0  3.86M      0   00:38   00:21   00:17  3.64M
+ 57 147.1M  57 84.51M   0      0  3.83M      0   00:38   00:22   00:16  3.26M
+ 59 147.1M  59 87.53M   0      0  3.79M      0   00:38   00:23   00:15  3.19M
+ 61 147.1M  61 90.49M   0      0  3.76M      0   00:39   00:24   00:15  3.22M
+ 63 147.1M  63 93.73M   0      0  3.74M      0   00:39   00:25   00:14  3.21M
+ 65 147.1M  65 96.85M   0      0  3.71M      0   00:39   00:26   00:13  3.09M
+ 67 147.1M  67 99.01M   0      0  3.65M      0   00:40   00:27   00:13  2.89M
+ 68 147.1M  68 101.0M   0      0  3.60M      0   00:40   00:28   00:12  2.70M
+ 70 147.1M  70 103.4M   0      0  3.55M      0   00:41   00:29   00:12  2.58M
+ 72 147.1M  72 106.0M   0      0  3.52M      0   00:41   00:30   00:11  2.45M
+ 73 147.1M  73 107.9M   0      0  3.47M      0   00:42   00:31   00:11  2.20M
+ 74 147.1M  74 110.1M   0      0  3.43M      0   00:42   00:32   00:10  2.21M
+ 76 147.1M  76 112.1M   0      0  3.38M      0   00:43   00:33   00:10  2.20M
+ 77 147.1M  77 114.6M   0      0  3.36M      0   00:43   00:34   00:09  2.22M
+ 79 147.1M  79 117.3M   0      0  3.34M      0   00:43   00:35   00:08  2.25M
+ 81 147.1M  81 120.2M   0      0  3.33M      0   00:44   00:36   00:08  2.46M
+ 83 147.1M  83 123.5M   0      0  3.33M      0   00:44   00:37   00:07  2.66M
+ 86 147.1M  86 126.9M   0      0  3.33M      0   00:44   00:38   00:06  2.95M
+ 88 147.1M  88 130.7M   0      0  3.34M      0   00:44   00:39   00:05  3.21M
+ 91 147.1M  91 135.1M   0      0  3.37M      0   00:43   00:40   00:03  3.55M
+ 95 147.1M  95 141.1M   0      0  3.43M      0   00:42   00:41   00:01  4.16M
+100 147.1M 100 147.1M   0      0  3.51M      0   00:41   00:41          4.16M
+100 147.1M 100 147.1M   0      0  3.51M      0   00:41   00:41          4.16M
+100 147.1M 100 147.1M   0      0  3.51M      0   00:41   00:41          4.16M
+[13:04:06.685]   -> Downloading linux-6.18.7.tar.sign...
+[13:04:06.689] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[13:04:06.689] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[13:04:06.977] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+100    989 100    989   0      0   3436      0                              0
+100    989 100    989   0      0   3436      0                              0
+100    989 100    989   0      0   3435      0                              0
+[13:04:06.987]   -> Downloading linux-v6.18.7-arch1.patch.zst...
+[13:04:06.991] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[13:04:06.991] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[13:04:07.324] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+[13:04:07.521] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+100   3882 100   3882   0      0   7333      0                              0
+100   3882 100   3882   0      0   7333      0                              0
+100   3882 100   3882   0      0   7332      0                              0
+[13:04:07.532]   -> Downloading linux-v6.18.7-arch1.patch.zst.sig...
+[13:04:07.536] [STDERR]   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+[13:04:07.536] [STDERR]                                  Dload  Upload  Total   Spent   Left   Speed
+[13:04:07.889] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+  0      0   0      0   0      0      0      0                              0
+[13:04:08.086] [STDERR]
+  0      0   0      0   0      0      0      0                              0
+100    228 100    228   0      0    414      0                              0
+100    228 100    228   0      0    414      0                              0
+100    228 100    228   0      0    414      0                              0
+[13:04:08.094]   -> Found config
+[13:04:08.096] ==> Validating source files with sha256sums...
+[13:04:08.096] ==> Validating source files with sha256sums...
+[13:04:08.443] [STDERR]     linux-6.18.7.tar.xz ... Passed
+[13:04:08.445] [STDERR]     linux-6.18.7.tar.sign ... Skipped
+[13:04:08.453] [STDERR]     linux-v6.18.7-arch1.patch.zst ... Passed
+[13:04:08.455] [STDERR]     linux-v6.18.7-arch1.patch.zst.sig ... Skipped
+[13:04:08.463] [STDERR]     config ... Passed
+[13:04:08.465] ==> Validating source files with b2sums...
+[13:04:08.465] ==> Validating source files with b2sums...
+[13:04:08.632] [STDERR]     linux-6.18.7.tar.xz ... Passed
+[13:04:08.634] [STDERR]     linux-6.18.7.tar.sign ... Skipped
+[13:04:08.641] [STDERR]     linux-v6.18.7-arch1.patch.zst ... Passed
+[13:04:08.643] [STDERR]     linux-v6.18.7-arch1.patch.zst.sig ... Skipped
+[13:04:08.650] [STDERR]     config ... Passed
+[13:04:08.655] ==> Verifying source file signatures with gpg...
+[13:04:08.655] ==> Verifying source file signatures with gpg...
+[13:04:10.647] [STDERR]     linux-6.18.7.tar ... Passed
+[13:04:10.663] [STDERR]     linux-v6.18.7-arch1.patch.zst ... Passed
+[13:04:10.666] ==> Extracting sources...
+[13:04:10.666] ==> Extracting sources...
+[13:04:10.713]   -> Extracting linux-6.18.7.tar.xz with bsdtar
+[13:04:20.156]   -> Extracting linux-v6.18.7-arch1.patch.zst with zstd
+[13:04:20.186] ==> Starting prepare()...
+[13:04:20.186] ==> Starting prepare()...
+[13:04:20.186] [STDERR] [MODPROBED] [PATH-DETECTION] HOME env var: $HOME
+[13:04:20.186] [STDERR] [MODPROBED] [PATH-DETECTION] Resolved modprobed.db path: /home/testgoat/.config/modprobed.db
+[13:04:20.187] [STDERR] [MODPROBED] [PATH-DETECTION] Checked: $HOME/.config/modprobed.db, /root/.config/modprobed.db, /home/*/.config/modprobed.db
+[13:04:20.187] [STDERR] [MODPROBED] Found modprobed-db at /home/testgoat/.config/modprobed.db
+[13:04:20.187] [STDERR] [MODPROBED] Running localmodconfig to filter kernel modules...
+[13:04:20.187] [STDERR] [MODPROBED] This will automatically filter kernel modules to those in use
+[13:04:20.187] [STDERR] [MODPROBED] Using modprobed database: /home/testgoat/.config/modprobed.db
+[13:04:20.188] [STDERR] [MODPROBED] Found kernel source directory: /home/testgoat/Documents/GOATd-Kernel-master/linux/src/linux-6.18.7
+[13:04:20.189] [STDERR] [MODPROBED] Changed to kernel source directory
+[13:04:20.189] [STDERR] [MODPROBED] Running: yes "" | make LLVM=1 LLVM_IAS=1 LSMOD=/home/testgoat/.config/modprobed.db localmodconfig
+------
+[elf64-x86-64] to `/home/testgoat/Documents/GOATd-Kernel-master/linux/pkg/linux-goatd-workstation-headers/usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/stEPafKU' [elf64-x86-64]
+[13:19:31.085] Adding symlink...
+[13:19:31.089] ==> Tidying install...
+[13:19:31.089] ==> Tidying install...
+[13:19:31.090]   -> Removing libtool files...
+[13:19:31.175]   -> Removing static library files...
+[13:19:31.259]   -> Purging unwanted files...
+[13:19:31.426]   -> Compressing man and info pages...
+[13:19:31.430] ==> Checking for packaging issues...
+[13:19:31.430] ==> Checking for packaging issues...
+[13:19:32.913] [STDERR] ==> WARNING: Package contains reference to $srcdir
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/vmlinux
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libcompiler_builtins.rmeta
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libbuild_error.rmeta
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libffi.rmeta
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libpin_init.rmeta
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libuapi.rmeta
+[13:19:32.914] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libbindings.rmeta
+[13:19:32.915] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libkernel.rmeta
+[13:19:32.915] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libpin_init_internal.so
+[13:19:32.915] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build/rust/libmacros.so
+[13:19:32.915] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/vdso/vdso32.so
+[13:19:32.915] [STDERR] usr/lib/modules/6.18.7-arch1-1-goatd-workstation/vdso/vdso64.so
+[13:19:33.460] ==> Creating package "linux-goatd-workstation-headers"...
+[13:19:33.460] ==> Creating package "linux-goatd-workstation-headers"...
+[13:19:33.463]   -> Generating .PKGINFO file...
+[13:19:34.368]   -> Generating .BUILDINFO file...
+[13:19:34.685]   -> Generating .MTREE file...
+[13:19:35.941]   -> Compressing package...
+[13:19:37.187] ==> Starting package_linux-goatd-workstation-docs()...
+[13:19:37.187] ==> Starting package_linux-goatd-workstation-docs()...
+[13:19:37.187] Installing documentation...
+[13:19:56.834] Adding symlink...
+[13:19:56.838] ==> Tidying install...
+[13:19:56.838] ==> Tidying install...
+[13:19:56.840]   -> Removing libtool files...
+[13:19:56.892]   -> Removing static library files...
+[13:19:56.947]   -> Purging unwanted files...
+[13:19:57.053]   -> Compressing man and info pages...
+[13:19:57.057] ==> Checking for packaging issues...
+[13:19:57.057] ==> Checking for packaging issues...
+[13:19:59.335] ==> Creating package "linux-goatd-workstation-docs"...
+[13:19:59.335] ==> Creating package "linux-goatd-workstation-docs"...
+[13:19:59.337]   -> Generating .PKGINFO file...
+[13:20:00.580]   -> Generating .BUILDINFO file...
+[13:20:00.892]   -> Generating .MTREE file...
+[13:20:02.661]   -> Compressing package...
+[13:20:04.264] ==> Leaving fakeroot environment.
+[13:20:04.264] ==> Leaving fakeroot environment.
+[13:20:04.267] ==> Finished making: linux-goatd-workstation 6.18.7.arch1-1 (Sun 25 Jan 2026 01:20:04 PM MST)
+[13:20:04.267] ==> Finished making: linux-goatd-workstation 6.18.7.arch1-1 (Sun 25 Jan 2026 01:20:04 PM MST)
+[13:20:04.268] PHASE TRANSITION: Validation
+[13:20:04.268] PHASE TRANSITION: Completed
+[13:20:08.643] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[13:20:09.014] [INFO] [KernelManager] Found 1 built kernels in workspace
+[13:20:11.511] [INFO] [AppController] [KERNEL] Starting async kernel installation from: ./linux/linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[13:20:11.511] [INFO] [KERNEL] [RESOLVE] Starting kernel version resolution
+[13:20:11.511] [INFO] [KERNEL] [RESOLVE] Found .kernelrelease in package directory: 6.18.7-arch1-1-goatd-workstation
+[13:20:11.511] [INFO] [KernelArtifactRegistry] Extracted filename version: 6.18.7.arch1-1 from linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[13:20:11.511] [INFO] [KernelArtifactRegistry] Kernel Identity: variant='linux-goatd-workstation', internal_version='6.18.7-arch1-1-goatd-workstation', filename_version=Some("6.18.7.arch1-1")
+[13:20:11.511] [INFO] [KernelArtifactRegistry] ✓ Found -headers via filename version fallback: linux-goatd-workstation-headers-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[13:20:11.511] [INFO] [KernelArtifactRegistry] ✓ Found -docs via filename version fallback: linux-goatd-workstation-docs-6.18.7.arch1-1-x86_64.pkg.tar.zst
+[13:20:11.737] [INFO] [KernelArtifactRegistry] ✓ Critical file found in tarball: include/linux/memremap.h (including deeply nested paths)
+[13:20:11.737] [INFO] [KernelArtifactRegistry] ✓ Deep validation PASSED: All critical files found in headers tarball
+[13:20:11.737] [INFO] [SystemWrapper] Executing batch privileged commands (7 steps)
+[13:20:14.281] [INFO] [batch privileged] stdout: loading packages...
 DKMS_FAILED_SYMLINKS
 DKMS_FAILED_MODULES
 
-[11:02:01.785] [INFO] [batch privileged] stderr: error: './linux/linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
+[13:20:14.281] [INFO] [batch privileged] stderr: error: './linux/linux-goatd-workstation-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
 error: './linux/linux-goatd-workstation-headers-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
 error: './linux/linux-goatd-workstation-docs-6.18.7.arch1-1-x86_64.pkg.tar.zst': could not find or read package
 
 Error! Your kernel headers for kernel 6.18.7-arch1-1-goatd-workstation cannot be found at /usr/lib/modules/6.18.7-arch1-1-goatd-workstation/build or /usr/lib/modules/6.18.7-arch1-1-goatd-workstation/source.
 Please install the linux-headers-6.18.7-arch1-1-goatd-workstation package or use the --kernelsourcedir option to tell DKMS where it's located.
 
-[11:02:01.785] [INFO] [SystemWrapper] Batch execution succeeded
-[11:02:01.802] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
-[11:02:02.153] [INFO] [KernelManager] Found 1 built kernels in workspace
-[11:03:10.760] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
-[11:03:11.110] [INFO] [KernelManager] Found 1 built kernels in workspace
+[13:20:14.281] [INFO] [SystemWrapper] Batch execution succeeded
+[13:20:14.304] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[13:20:14.680] [INFO] [KernelManager] Found 1 built kernels in workspace
+[13:20:16.303] [INFO] [KernelManager] Kernel scan complete: 1 installed kernels found
+[13:20:16.674] [INFO] [KernelManager] Found 1 built kernels in workspace

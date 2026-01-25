@@ -81,6 +81,14 @@ pub fn validate_config_path(path: &Path) -> Result<(), ConfigError> {
         ));
     }
 
+    // Path must be absolute
+    if !path.is_absolute() {
+        return Err(ConfigError::ValidationFailed(format!(
+            "Configuration path must be absolute: {}",
+            path.display()
+        )));
+    }
+
     // Check file extension
     match path.extension() {
         Some(ext) if ext == "json" => {}
@@ -216,9 +224,15 @@ mod tests {
 
     #[test]
     fn test_validate_config_path_valid() {
-        assert!(validate_config_path(Path::new("config.json")).is_ok());
+        // Must be absolute OR it will fail
         assert!(validate_config_path(Path::new("/tmp/config.json")).is_ok());
-        assert!(validate_config_path(Path::new("./configs/kernel.json")).is_ok());
+        assert!(validate_config_path(Path::new("/home/user/config.json")).is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_path_relative_fails() {
+        assert!(validate_config_path(Path::new("config.json")).is_err());
+        assert!(validate_config_path(Path::new("./configs/kernel.json")).is_err());
     }
 
     #[test]
@@ -235,6 +249,7 @@ mod tests {
 
     #[test]
     fn test_load_nonexistent_file() {
+        // Must use absolute path
         let result = load_config_from_file(Path::new("/nonexistent/path/config.json"));
         assert!(matches!(result, Err(ConfigError::FileNotFound(_))));
     }

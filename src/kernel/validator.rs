@@ -263,6 +263,13 @@ pub fn validate_kbuild_path(path: &Path) -> std::result::Result<(), AppError> {
         AppError::InvalidPath("Path contains invalid UTF-8 characters".to_string())
     })?;
 
+    if !path.is_absolute() {
+        return Err(AppError::InvalidPath(format!(
+            "Path must be absolute: {}",
+            path_str
+        )));
+    }
+
     if path_str.contains(' ') {
         return Err(AppError::InvalidPath(format!(
             "Path contains spaces: {}",

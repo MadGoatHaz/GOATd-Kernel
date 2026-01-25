@@ -88,6 +88,18 @@ impl KernelArtifactRegistry {
             ));
         }
 
+        // CRITICAL (Chunk 1): CANONICALIZE kernel_path immediately
+        // Ensures absolute path for privileged execution context
+        let kernel_path = match kernel_path.canonicalize() {
+            Ok(abs_path) => {
+                log_info!("[KernelArtifactRegistry] [CANONICALIZE] Resolved kernel_path to absolute: {}", abs_path.display());
+                abs_path
+            }
+            Err(e) => {
+                return Err(format!("Failed to canonicalize kernel_path: {}", e));
+            }
+        };
+
         let parent_dir = match kernel_path.parent() {
             Some(p) => p,
             None => return Err("Cannot determine parent directory of kernel package".to_string()),
@@ -452,7 +464,25 @@ impl KernelArtifactRegistry {
                                     strategy_name,
                                     filename
                                 );
-                                return Ok(Some(entry.path()));
+                                // CRITICAL (Chunk 1): CANONICALIZE before returning
+                                // Ensures absolute path for privileged execution context
+                                let artifact_path = match entry.path().canonicalize() {
+                                    Ok(abs_path) => {
+                                        log_info!(
+                                            "[KernelArtifactRegistry] [CANONICALIZE] Resolved artifact path to absolute: {}",
+                                            abs_path.display()
+                                        );
+                                        abs_path
+                                    }
+                                    Err(e) => {
+                                        return Err(format!(
+                                            "Failed to canonicalize artifact path {}: {}",
+                                            entry.path().display(),
+                                            e
+                                        ));
+                                    }
+                                };
+                                return Ok(Some(artifact_path));
                             }
                         }
                     }
@@ -489,7 +519,24 @@ impl KernelArtifactRegistry {
                             {
                                 log_info!("[KernelArtifactRegistry] ✓ Found {} via fuzzy component match (GOATd-aware): {}",
                                     suffix, filename);
-                                return Ok(Some(entry.path()));
+                                // CRITICAL (Chunk 1): CANONICALIZE before returning
+                                let artifact_path = match entry.path().canonicalize() {
+                                    Ok(abs_path) => {
+                                        log_info!(
+                                            "[KernelArtifactRegistry] [CANONICALIZE] Resolved artifact path to absolute: {}",
+                                            abs_path.display()
+                                        );
+                                        abs_path
+                                    }
+                                    Err(e) => {
+                                        return Err(format!(
+                                            "Failed to canonicalize artifact path {}: {}",
+                                            entry.path().display(),
+                                            e
+                                        ));
+                                    }
+                                };
+                                return Ok(Some(artifact_path));
                             }
                         }
                     }
@@ -507,7 +554,24 @@ impl KernelArtifactRegistry {
                         if filename.starts_with(&prefix) && filename.ends_with(".pkg.tar.zst") {
                             log_info!("[KernelArtifactRegistry] ⚠ Found {} via fuzzy prefix match (version may differ): {}",
                                 suffix, filename);
-                            return Ok(Some(entry.path()));
+                            // CRITICAL (Chunk 1): CANONICALIZE before returning
+                            let artifact_path = match entry.path().canonicalize() {
+                                Ok(abs_path) => {
+                                    log_info!(
+                                        "[KernelArtifactRegistry] [CANONICALIZE] Resolved artifact path to absolute: {}",
+                                        abs_path.display()
+                                    );
+                                    abs_path
+                                }
+                                Err(e) => {
+                                    return Err(format!(
+                                        "Failed to canonicalize artifact path {}: {}",
+                                        entry.path().display(),
+                                        e
+                                    ));
+                                }
+                            };
+                            return Ok(Some(artifact_path));
                         }
                     }
                 }

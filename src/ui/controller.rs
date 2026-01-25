@@ -1155,6 +1155,21 @@ impl AppController {
 
         // Spawn background task for installation
         tokio::spawn(async move {
+            // CRITICAL (Chunk 1): CANONICALIZE the entry kernel_path immediately
+            // Ensures absolute path for privileged execution context (pacman in particular)
+            let path = match path.canonicalize() {
+                Ok(abs_path) => {
+                    eprintln!("[KERNEL] [PATH_CANON] Entry path canonicalized to absolute: {}", abs_path.display());
+                    abs_path
+                }
+                Err(e) => {
+                    let msg = format!("Failed to canonicalize entry kernel path: {}", e);
+                    eprintln!("[KERNEL] [PATH_CANON] ✗ {}", msg);
+                    let _ = build_tx.try_send(BuildEvent::Error(msg.clone()));
+                    return;
+                }
+            };
+
             // === STEP 0: Resolve kernel version (Source of Truth) ===
             let resolved_kernel_version =
                 Self::resolve_kernel_version_static(&path, &workspace_path);
@@ -1362,15 +1377,32 @@ fi
                     .filter_map(|p| {
                         // CRITICAL: Paths are already absolute from workspace resolution above
                         p.to_str().map(|s| {
-                            // Quote the path for safe shell execution
+                            // CRITICAL (Chunk 2): Wrap in strict single-quotes for shell safety in privileged context
                             format!("'{}'", s)
                         })
                     })
                     .collect();
 
                 if !paths_str.is_empty() {
+                    // CRITICAL (Chunk 2): Build verification guard batch with fail-fast via &&
+                    // Each path gets an ls -l check BEFORE pacman to verify existence
+                    // Chain entire batch with && to stop at first failure
+                    let mut verification_batch = Vec::new();
+                    
+                    // Add ls -l verification for each artifact path
+                    for path in &paths_str {
+                        verification_batch.push(format!("ls -l {}", path));
+                    }
+                    
                     // Build pacman command with properly quoted and resolved absolute paths from workspace root
                     let pacman_cmd = format!("pacman -U --noconfirm --overwrite 'usr/lib/modules/*/build,usr/lib/modules/*/source' {}", paths_str.join(" "));
+                    verification_batch.push(pacman_cmd);
+                    
+                    // CRITICAL (Chunk 2): Join entire batch with && for fail-fast execution
+                    let batch_cmd = verification_batch.join(" && ");
+                    
+                    // CRITICAL (Chunk 2): Diagnostic logging showing exact batch command
+                    // Log the command with paths masked for legibility if too long
                     eprintln!(
                         "[KERNEL] [UNIFIED] Bundled pacman command for {} artifact(s)",
                         paths_str.len()
@@ -1380,7 +1412,19 @@ fi
                     for (i, path) in paths_str.iter().enumerate() {
                         eprintln!("[KERNEL] [UNIFIED]     [{}] {}", i + 1, path);
                     }
-                    commands.push(pacman_cmd);
+                    
+                    // CRITICAL (Chunk 2): Log diagnostic showing exact batch with verification guards
+                    eprintln!("[KERNEL] [UNIFIED] ═════════════════════════════════════════════════════");
+                    eprintln!("[KERNEL] [UNIFIED] BATCH COMMAND WITH VERIFICATION GUARD:");
+                    if batch_cmd.len() > 500 {
+                        eprintln!("[KERNEL] [UNIFIED] (command length: {} bytes, showing structure)", batch_cmd.len());
+                        eprintln!("[KERNEL] [UNIFIED] Structure: {} ls checks && pacman install", paths_str.len());
+                    } else {
+                        eprintln!("[KERNEL] [UNIFIED] Full command: {}", batch_cmd);
+                    }
+                    eprintln!("[KERNEL] [UNIFIED] ═════════════════════════════════════════════════════");
+                    
+                    commands.push(batch_cmd);
                 }
             }
 
