@@ -2,6 +2,8 @@
 
 This document provides a comprehensive inventory of the tests available in the GOATd Kernel project, their purpose, and instructions for execution.
 
+**Total Test Count: 479** – Including unit tests across source modules, integration tests, UI scaling and sync tests, and lifecycle pipeline integration tests.
+
 ## Execution Instructions
 
 Run the full test suite:

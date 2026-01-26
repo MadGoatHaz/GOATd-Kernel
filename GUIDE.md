@@ -125,14 +125,46 @@ GOATd Kernel manages builds in isolated workspaces to maintain clean separation 
 - **Caching**: ccache and build state for incremental rebuilds
 - **Logging**: Complete build transcripts for debugging and verification
 
-#### Workspace Detection
+#### Workspace Resolution Priority (Hierarchical)
 
-The application automatically detects your workspace root via:
-1. **Configuration File Location**: Looks for `.goatdrc` or similar marker in project root
-2. **Fallback Detection**: Uses current working directory or environment variable `GOATD_HOME`
-3. **Canonical Path Resolution**: Converts all paths to absolute filesystem paths to prevent symlink issues
+The application detects your workspace root using the following **mandatory hierarchical resolution flow**. The system evaluates each source in strict order and uses the **first one found**:
 
-If you move the GOATd Kernel directory, workspace detection automatically adjusts. For custom workspace locations, set the `GOATD_HOME` environment variable before launching.
+| Priority | Source | Method | Example |
+|----------|--------|--------|---------|
+| **1 (Highest)** | CLI Arguments | Direct command-line parameter | `goatdkernel --workspace=/custom/path` |
+| **2** | `GOATD_HOME` Environment Variable | Environment variable (persistent per session) | `export GOATD_HOME=/opt/goatd && goatdkernel` |
+| **3** | `.goatdrc` Configuration File | Local project root marker file | Auto-detected when `.goatdrc` present in directory |
+| **4 (Fallback)** | Current Working Directory (CWD) | Default workspace = directory where `goatdkernel` launched | Running `goatdkernel` from `/home/user/GOATd` uses that as workspace |
+
+**Resolution Example**:
+```bash
+# If GOATD_HOME=/home/workspace is set AND
+# .goatdrc exists at /home/project/
+# AND you run: goatdkernel --workspace=/override/path
+
+# Result: /override/path is used (CLI wins all other sources)
+```
+
+#### Absolute Path Enforcement
+
+All workspace paths, kernel artifacts, and header files **MUST be converted to absolute filesystem paths** before any operation. This mandatory enforcement:
+
+- **Prevents Symlink Issues**: Resolves symlinks to canonical paths, avoiding build inconsistencies
+- **Ensures Portability**: Absolute paths work correctly regardless of pwd or environment
+- **Guarantees Artifact Location**: Kernel images and modules always written to deterministic locations
+- **Enables Verification**: Build system can independently verify artifact authenticity and location
+
+**Path Resolution Details**:
+
+1. **Input Path Provided** (CLI, `GOATD_HOME`, `.goatdrc`, or CWD)
+2. **Symlink Resolution** — All symlinks followed to canonical path
+3. **Expansion** — Environment variables (`$HOME`, `~/`) expanded
+4. **Normalization** — Path simplified (removes `.`, `..`, trailing slashes)
+5. **Absolute Conversion** — Relative paths prefixed with current filesystem root
+6. **Validation** — Resulting absolute path verified to exist and be readable
+7. **Storage** — All subsequent operations use only this absolute path
+
+**Critical Requirement**: If the resolved absolute path is invalid or inaccessible, the application will fail with a clear error message identifying the path that failed validation. This prevents silent build failures where artifacts are written to unexpected locations.
 
 #### Build Pipeline Guarantee
 
@@ -141,6 +173,8 @@ All critical operations run through the **Unified Surgical Engine** ([`KernelPat
 - **Verification Before Commit**: All patches validated via dry-run before actual file modification
 - **Rollback Capability**: Original files preserved; easy revert if build fails verification
 - **Audit Trail**: All modifications logged with timestamps and context for future reference
+
+**[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: Understanding modprobed-db](#understanding-modprobed-db)**
 
 ---
 
@@ -230,6 +264,8 @@ When building your kernel, select the **whitelist strategy**. This applies the "
 - **Virtual Devices**: Loopback device, UEFI support
 
 This ensures your kernel boots reliably on any desktop system while still benefiting from module filtering.
+
+**[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: Understanding Performance Metrics](#understanding-performance-metrics)**
 
 ---
 
@@ -386,6 +422,8 @@ Each metric is normalized to 0-1000 before weighting.
 3. **Understand Trade-Offs**: Optimizing for latency may reduce throughput; choose your priorities
 4. **Watch Thermal**: If thermal increases while optimizing, you're pushing too hard; consider better cooling
 5. **Test Multiple Kernels**: Build 2-3 kernels with different profile/LTO combinations and benchmark each
+
+**[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: The GOAT Recipe](#the-goat-recipe-optimal-configuration)**
 
 ---
 
@@ -576,6 +614,8 @@ If you score below 750, check:
 2. Is bpfland SCX scheduler actually running? (`scxctl status`)
 3. Are there background processes consuming CPU during benchmarks?
 4. Is your system thermals stable (no throttling)?
+
+**[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: Dashboard Flow](#dashboard-flow--first-run-guide)**
 
 ---
 
@@ -835,6 +875,8 @@ Should output a version number (e.g., `modprobed-db 2.43`).
 - If satisfied (GOAT Score 750+), set as default kernel
 - If not satisfied, try a different profile/LTO combination and rebuild
 - Compare multiple kernels side-by-side using the result comparison UI
+
+**[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: Troubleshooting](#troubleshooting)**
 
 ---
 
@@ -1218,6 +1260,8 @@ If you encounter issues not covered above:
    dmesg | tail -50  # Last 50 kernel messages
    ```
 5. **Report on GitHub Issues** — Include dashboard screenshots and log excerpts
+
+**[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: Advanced Topics](#advanced-topics)**
 
 ---
 
