@@ -246,6 +246,21 @@ impl KernelArtifactRegistry {
                     integrity_verified = false;
                 }
             }
+
+            // Phase 11: Mandatory .kernelrelease validation (Tarball Peeking)
+            if integrity_verified {
+                log_info!("[KernelArtifactRegistry] Starting .kernelrelease tarball peeking validation...");
+                match temp_registry.validate_kernelrelease_in_tarball(headers) {
+                    Ok(true) => {
+                        log_info!("[KernelArtifactRegistry] ✓ .kernelrelease VALIDATION PASSED");
+                        integrity_verified = true;
+                    }
+                    Ok(false) | Err(_) => {
+                        log_info!("[KernelArtifactRegistry] ✗ .kernelrelease VALIDATION FAILED - Headers rejected");
+                        integrity_verified = false;
+                    }
+                }
+            }
         } else {
             log_info!(
                 "[KernelArtifactRegistry] Skipping deep validation: Headers tarball not found"
@@ -359,6 +374,74 @@ impl KernelArtifactRegistry {
         }
 
         Ok(all_files_found)
+    }
+
+    /// Deep validation: Extract and verify .kernelrelease from headers tarball
+    /// Peeks into tarball to ensure headers match the kernel release version
+    fn validate_kernelrelease_in_tarball(
+        &self,
+        headers_path: &PathBuf,
+    ) -> Result<bool, String> {
+        use std::process::Command;
+
+        // Extract .kernelrelease from headers tarball using tar -xOf
+        let output = Command::new("tar")
+            .args(&["-xOf"])
+            .arg(headers_path)
+            .arg("usr/lib/modules/*/build/.kernelrelease") // Wildcard for any kernel version subdir
+            .output();
+
+        let output = match output {
+            Ok(o) => o,
+            Err(_) => {
+                // Try alternate path without wildcard
+                match Command::new("tar")
+                    .args(&["-xOf"])
+                    .arg(headers_path)
+                    .arg(".kernelrelease")
+                    .output()
+                {
+                    Ok(alt_o) => alt_o,
+                    Err(e) => {
+                        log_info!("[KernelArtifactRegistry] ⚠️ Cannot extract .kernelrelease from headers: {}", e);
+                        return Err(format!("Failed to peek into headers tarball: {}", e));
+                    }
+                }
+            }
+        };
+
+        if !output.status.success() {
+            log_info!(
+                "[KernelArtifactRegistry] ⚠️ .kernelrelease tar extraction failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return Err("Failed to extract .kernelrelease from headers tarball".to_string());
+        }
+
+        let tarball_kernel_release = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        
+        if tarball_kernel_release.is_empty() {
+            log_info!("[KernelArtifactRegistry] ⚠️ .kernelrelease file in tarball is empty");
+            return Err(".kernelrelease is empty in headers tarball".to_string());
+        }
+
+        // Validate exact match with stored kernel_release
+        if tarball_kernel_release == self.kernel_release {
+            log_info!(
+                "[KernelArtifactRegistry] ✓ .kernelrelease VERIFIED: {} matches kernel_release",
+                tarball_kernel_release
+            );
+            Ok(true)
+        } else {
+            log_info!(
+                "[KernelArtifactRegistry] ✗ .kernelrelease MISMATCH: tarball='{}' vs kernel_release='{}'",
+                tarball_kernel_release, self.kernel_release
+            );
+            Err(format!(
+                "Kernel release mismatch in headers: tarball contains '{}', expected '{}'",
+                tarball_kernel_release, self.kernel_release
+            ))
+        }
     }
 
     /// Find a related artifact (headers or docs) using hyper-heuristic permutation discovery
@@ -778,6 +861,26 @@ impl KernelArtifactRegistry {
         }
 
         format!("[{}]", items.join(", "))
+    }
+
+    /// Get absolute path to the kernel package
+    pub fn get_kernel_path(&self) -> &PathBuf {
+        &self.kernel_path
+    }
+
+    /// Get absolute path to the headers package (if present)
+    pub fn get_headers_path(&self) -> Option<&PathBuf> {
+        self.headers_path.as_ref()
+    }
+
+    /// Get absolute path to the docs package (if present)
+    pub fn get_docs_path(&self) -> Option<&PathBuf> {
+        self.docs_path.as_ref()
+    }
+
+    /// Check if integrity validation passed
+    pub fn is_integrity_verified(&self) -> bool {
+        self.integrity_verified
     }
 }
 

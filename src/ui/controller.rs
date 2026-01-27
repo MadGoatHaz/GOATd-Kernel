@@ -1429,28 +1429,54 @@ fi
                 }
             }
 
-            // 3c. Fallback symlinks with DYNAMIC header discovery (Soft Failure)
-            // CRITICAL: Instead of hardcoding /usr/src/linux-{ver}, we dynamically find the actual
-            // installed headers directory via intelligent shell search. This fixes the root cause of
-            // DKMS symlink failures on custom kernels (e.g., linux-goatd-gaming-6.18.6).
+            // 3c. Hardened symlinks with VALIDATED header paths (Soft Failure)
+            // CRITICAL (Best Practice): Use validated paths from KernelArtifactRegistry instead of naive discovery.
+            // This eliminates shell-based search heuristics and ensures we link to validated artifacts.
             //
-            // Search Strategy:
-            // 1. Try to find GOATd-specific headers first: linux-*-goatd* matches (most specific)
-            // 2. Fall back to any available linux-* headers directory if GOATd-specific not found
-            // 3. Only create symlinks if a headers directory is actually found
+            // Path Injection Protocol:
+            // 1. Use registry.get_headers_path() to get validated absolute path
+            // 2. Inject path directly into shell command (no discovery)
+            // 3. Add final .kernelrelease safety boundary check
             // 4. Wrapped in soft failure pattern to allow DKMS to proceed even if this step fails
-            eprintln!("[KERNEL] [UNIFIED] Step 3: Adding DYNAMIC symlink creation to unified batch (intelligent header discovery, soft failure)");
-            let dynamic_symlink_cmd = format!(
-                "(hdr_dir=$(ls -d /usr/src/linux-*-goatd* 2>/dev/null | head -1) && \
-                 [ -z \"$hdr_dir\" ] && hdr_dir=$(ls -d /usr/src/linux-* 2>/dev/null | head -1); \
-                 if [ -n \"$hdr_dir\" ]; then \
-                   ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/build && \
-                   ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/source; \
-                 else \
-                   echo \"DKMS_FAILED_SYMLINKS: No headers directory found in /usr/src/\"; \
-                 fi) || echo \"DKMS_FAILED_SYMLINKS\"",
-                ver = resolved_kernel_version
-            );
+            eprintln!("[KERNEL] [UNIFIED] Step 3: Adding HARDENED symlink creation with validated paths (registry-injected, soft failure)");
+            let dynamic_symlink_cmd = if let Some(headers_path) = registry.get_headers_path() {
+                let headers_display = headers_path.display().to_string();
+                eprintln!("[KERNEL] [UNIFIED] Injecting validated headers path: {}", headers_display);
+                format!(
+                    "(hdr_dir=\"{}\" && \
+                     if [ -f \"$hdr_dir/.kernelrelease\" ]; then \
+                       hdr_ver=$(cat \"$hdr_dir/.kernelrelease\") && \
+                       if [ \"$hdr_ver\" = \"{ver}\" ]; then \
+                         ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/build && \
+                         ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/source; \
+                       else \
+                         echo \"DKMS_FAILED_SYMLINKS: Version mismatch in $hdr_dir\"; \
+                       fi; \
+                     else \
+                       echo \"DKMS_FAILED_SYMLINKS: No .kernelrelease in $hdr_dir\"; \
+                     fi) || echo \"DKMS_FAILED_SYMLINKS\"",
+                    headers_display,
+                    ver = resolved_kernel_version
+                )
+            } else {
+                eprintln!("[KERNEL] [UNIFIED] ⚠️ No validated headers from registry - using fallback discovery");
+                format!(
+                    "(hdr_dir=$(ls -d /usr/src/linux-*-goatd* 2>/dev/null | head -1) && \
+                     [ -z \"$hdr_dir\" ] && hdr_dir=$(ls -d /usr/src/linux-* 2>/dev/null | head -1); \
+                     if [ -n \"$hdr_dir\" ] && [ -f \"$hdr_dir/.kernelrelease\" ]; then \
+                       hdr_ver=$(cat \"$hdr_dir/.kernelrelease\") && \
+                       if [ \"$hdr_ver\" = \"{ver}\" ]; then \
+                         ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/build && \
+                         ln -sf \"$hdr_dir\" /usr/lib/modules/{ver}/source; \
+                       else \
+                         echo \"DKMS_FAILED_SYMLINKS: Version mismatch in $hdr_dir\"; \
+                       fi; \
+                     else \
+                       echo \"DKMS_FAILED_SYMLINKS: No headers directory found or .kernelrelease missing\"; \
+                     fi) || echo \"DKMS_FAILED_SYMLINKS\"",
+                    ver = resolved_kernel_version
+                )
+            };
             commands.push(dynamic_symlink_cmd);
 
             // 3d. DKMS autoinstall (Soft Failure: continues on error)
