@@ -705,10 +705,11 @@ pub const PHASE_G2_ENFORCER: &str = r#"
              ( cd "$KERNEL_SRC_DIR" || exit 1; {
                  if [[ -f ".config" ]]; then
                      # CRITICAL FIX: Protect the filtered 170 modules from olddefconfig re-expansion
+                     # WITH WHITELIST PROTECTION: Also preserve essential drivers in ENFORCER_SAFE_LIST
                      #
                      # After localmodconfig filters to 170 modules, olddefconfig's Kconfig dependency
                      # expansion can remove some of these modules if they become optional dependencies.
-                     # We HARD LOCK them by extracting and restoring them after olddefconfig.
+                     # We HARD LOCK them AND preserve whitelisted essential drivers.
 
                      # STEP 1: Create a backup and extract all filtered modules (CONFIG_*=m lines)
                      cp ".config" ".config.pre_g2"
@@ -717,11 +718,21 @@ pub const PHASE_G2_ENFORCER: &str = r#"
 
                      printf "[PHASE-G2] HARD LOCK: Extracted $FILTERED_MODULE_COUNT filtered modules from localmodconfig\n" >&2
 
+                     # STEP 1.5: Build safe list regex if ENFORCER_SAFE_LIST is defined
+                     SAFE_PATTERN=""
+                     if [[ -n "$ENFORCER_SAFE_LIST" ]]; then
+                         # Convert safe list (space-separated) to regex pattern matching CONFIG_NAME
+                         # Safe list format: "exfat nls_cp437 nls_iso8859_1 nls_utf8 fat vfat"
+                         SAFE_PATTERN="^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))(=[ym]$)"
+                         printf "[PHASE-G2] WHITELIST: Using enforcer safe list: $ENFORCER_SAFE_LIST\n" >&2
+                         printf "[PHASE-G2] WHITELIST: Safe pattern: $SAFE_PATTERN\n" >&2
+                     fi
+
                      # STEP 2: Run olddefconfig to handle consistent Kconfig dependencies
                      # This may add NEW dependencies but we'll restore our 170 filtered modules afterward
                      printf "[PHASE-G2] Running: make LLVM=1 LLVM_IAS=1 olddefconfig\n" >&2
                      if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
-                         # STEP 3: Restore the original filtered modules if any were removed
+                         # STEP 3: Restore the original filtered modules AND whitelisted modules
                          # Create a temporary file with all non-module configs
                          TEMP_CONFIG=$(mktemp)
                          grep -v "=m$" ".config" > "$TEMP_CONFIG"
@@ -729,13 +740,21 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                          # Append the original filtered modules back
                          echo "$FILTERED_MODULES" >> "$TEMP_CONFIG"
 
-                         # Replace .config with hard-locked version
-                         mv "$TEMP_CONFIG" ".config"
+                         # STEP 3.5: Restore whitelisted modules from pre_g2 backup if not already in result
+                         if [[ -n "$SAFE_PATTERN" ]]; then
+                             # Extract whitelisted entries from backup that match safe pattern
+                             grep -E "$SAFE_PATTERN" ".config.pre_g2" >> "$TEMP_CONFIG" 2>/dev/null || true
+                             printf "[PHASE-G2] WHITELIST: Restored whitelisted essential drivers from safe list\n" >&2
+                         fi
+
+                         # Deduplicate and sort
+                         sort -u "$TEMP_CONFIG" > ".config"
+                         rm "$TEMP_CONFIG"
 
                          # Count final module count
                          FINAL_MODULE_COUNT=$(grep -c "=m" ".config" 2>/dev/null || echo "unknown")
-                         printf "[PHASE-G2] Module count: $FILTERED_MODULE_COUNT → $FINAL_MODULE_COUNT (hard-locked to filtered set)\n" >&2
-                         printf "[PHASE-G2] SUCCESS: Filtered modules protected and dependencies finalized\n" >&2
+                         printf "[PHASE-G2] Module count: $FILTERED_MODULE_COUNT → $FINAL_MODULE_COUNT (hard-locked to filtered set + whitelisted drivers)\n" >&2
+                         printf "[PHASE-G2] SUCCESS: Filtered modules protected, whitelisted drivers preserved, dependencies finalized\n" >&2
                      else
                          printf "[PHASE-G2] WARNING: olddefconfig failed\n" >&2
                      fi

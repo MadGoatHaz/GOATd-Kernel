@@ -1149,6 +1149,31 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
     Ok(())
 }
 
+/// Generate the enforcer safe list from ESSENTIAL_DRIVERS
+///
+/// Returns a space-separated string of critical module names to preserve.
+/// This list includes:
+/// - Storage: exfat, fat, vfat
+/// - Filesystem NLS: nls_cp437, nls_iso8859_1, nls_utf8
+/// - Essential drivers from whitelist::ESSENTIAL_DRIVERS
+///
+/// The safe list is injected into PHASE_G2_ENFORCER to ensure critical
+/// modules survive the modprobed filtering process.
+fn get_enforcer_safe_list() -> String {
+    let mut safe_list = crate::config::whitelist::get_essential_drivers();
+    
+    // Ensure critical modules are ALWAYS included regardless of ESSENTIAL_DRIVERS state
+    let critical = vec!["exfat", "nls_cp437", "nls_iso8859_1", "nls_utf8", "fat", "vfat"];
+    for critical_module in critical {
+        if !safe_list.iter().any(|&m| m.eq_ignore_ascii_case(critical_module)) {
+            safe_list.push(critical_module);
+        }
+    }
+    
+    // Return space-separated list of module names
+    safe_list.join(" ")
+}
+
 /// Inject post-modprobed hard enforcer into prepare() function
 /// Protects filtered modules from re-expansion by olddefconfig
 fn inject_post_modprobed_hard_enforcer(src_dir: &Path, use_modprobed: bool) -> PatchResult<()> {
@@ -1158,6 +1183,10 @@ fn inject_post_modprobed_hard_enforcer(src_dir: &Path, use_modprobed: bool) -> P
     }
 
     let (path, mut content) = read_pkgbuild(src_dir)?;
+
+    // Generate the enforcer safe list from ESSENTIAL_DRIVERS
+    let safe_list = get_enforcer_safe_list();
+    eprintln!("[Patcher] [PHASE-G2] Generated enforcer safe list: {}", safe_list);
 
     // Find the prepare() function body start
     if let Some(prepare_start) = find_function_body_start(&content, "prepare") {
@@ -1195,10 +1224,21 @@ fn inject_post_modprobed_hard_enforcer(src_dir: &Path, use_modprobed: bool) -> P
 
         // Check if PHASE G2 enforcer already exists (idempotent)
         if !content.contains("PHASE G2 POST-MODPROBED: Hard enforcer") {
+            // First inject ENFORCER_SAFE_LIST export at the beginning of prepare()
+            let safe_list_export = format!(
+                "\n    # BEGIN ENFORCER SAFE LIST EXPORT (PHASE-G2 WHITELIST PROTECTION)\n    export ENFORCER_SAFE_LIST=\"{}\"\n    # END ENFORCER SAFE LIST EXPORT\n",
+                safe_list
+            );
+            content.insert_str(prepare_start, &safe_list_export);
+
+            // Now inject the PHASE_G2_ENFORCER template at the adjusted injection point
+            let adjusted_injection_point = injection_point + safe_list_export.len();
             let snippet = templates::PHASE_G2_ENFORCER;
-            content.insert_str(injection_point, &format!("\n{}\n", snippet));
+            content.insert_str(adjusted_injection_point, &format!("\n{}\n", snippet));
+            
             fs::write(path, content).map_err(|e| PatchError::PatchFailed(e.to_string()))?;
-            eprintln!("[Patcher] [PKGBUILD] [PHASE-G2] Injected post-modprobed hard enforcer into prepare()");
+            eprintln!("[Patcher] [PKGBUILD] [PHASE-G2] Exported ENFORCER_SAFE_LIST and injected post-modprobed hard enforcer into prepare()");
+            eprintln!("[Patcher] [PHASE-G2] Safe list details: {}", safe_list);
         }
     }
 
