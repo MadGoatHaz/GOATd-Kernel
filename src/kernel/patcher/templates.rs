@@ -1305,6 +1305,16 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                  fi
                  echo "[PHASE-E2] Verification result: ${{_verify_pass}} symlink(s) verified" >&2
 
+                 # =====================================================================
+                 # PHASE-E2.1: CORE METADATA INJECTION (.kernelrelease)
+                 # =====================================================================
+                 # CRITICAL: Create root-level .kernelrelease for "Strict Protocol" hooks
+                 # This ensures /usr/src/{{pkgbase}}-{{pkgver}}-{{pkgrel}}/.kernelrelease exists
+                 if [ -n "${{_actual_ver}}" ] && [ -d "$_headers_dir" ]; then
+                     echo "${{_actual_ver}}" > "$_headers_dir/.kernelrelease"
+                     echo "[PHASE-E2.1] Created root metadata: $_headers_dir/.kernelrelease" >&2
+                 fi
+
                  echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${{_actual_ver}}" >&2
              fi
              "#,
@@ -1417,6 +1427,16 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
                 _verify_pass=$((${_verify_pass} + 1))
             fi
             echo "[PHASE-E2] Verification result: ${_verify_pass} symlink(s) verified" >&2
+
+            # =====================================================================
+            # PHASE-E2.1: CORE METADATA INJECTION (.kernelrelease)
+            # =====================================================================
+            # CRITICAL: Create root-level .kernelrelease for "Strict Protocol" hooks
+            # This ensures /usr/src/linux-${_actual_ver}/.kernelrelease exists
+            if [ -n "${_actual_ver}" ] && [ -d "${pkgdir}/usr/src/linux-${_actual_ver}" ]; then
+                echo "${_actual_ver}" > "${pkgdir}/usr/src/linux-${_actual_ver}/.kernelrelease"
+                echo "[PHASE-E2.1] Created root metadata: ${pkgdir}/usr/src/linux-${_actual_ver}/.kernelrelease" >&2
+            fi
 
             echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${_actual_ver}" >&2
         fi
