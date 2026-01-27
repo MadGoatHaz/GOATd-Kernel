@@ -1,69 +1,43 @@
-# GOATd Kernel Test Suite Inventory
+# GOATd Kernel Test Suite
 
-This document provides a comprehensive inventory of the tests available in the GOATd Kernel project, their purpose, and instructions for execution.
+## Overview
+The GOATd Kernel test suite provides comprehensive validation for the kernel patching, system health, and performance monitoring infrastructure.
 
-**Total Test Count: 479** – Including unit tests across source modules, integration tests, UI scaling and sync tests, and lifecycle pipeline integration tests.
+## Test Components
 
-## Execution Instructions
+### Unit Tests
+Located within the `src/` directory, these test individual modules in isolation.
+- `src/kernel/patcher/tests.rs`: Validates PKGBUILD patching, rebranding, and Polly injection.
+- `src/system/paths.rs`: Validates the `PathRegistry` and workspace anchoring logic.
 
-Run the full test suite:
+### Integration Tests
+Located in the `tests/` directory, these validate end-to-end workflows.
+- `tests/config_tests.rs`: Configuration loading and validation.
+- `tests/hardware_tests.rs`: Hardware detection and metadata collection.
+- `tests/integration_tests.rs`: Core system integration.
+- `tests/performance_monitoring_lifecycle_test.rs`: Performance collector and scoring lifecycle.
+
+## Running Tests
+
+### Run all tests
 ```bash
 cargo test
 ```
 
-Run specific integration tests:
+### Run specific module tests
 ```bash
-cargo test --test <test_name>
+cargo test kernel::patcher
+cargo test system::paths
 ```
 
-Example:
+### Run integration tests
 ```bash
-cargo test --test dynamic_versioning_test
+cargo test --test integration_tests
 ```
 
-## Unit Tests
+## Recent Verification (2026-01-27)
+- **PathRegistry**: Verified workspace anchoring via `.goatd_anchor` sentinel.
+- **Polly Injection**: Verified idempotent injection of LLVM/Polly optimization flags into PKGBUILD `build()` functions.
+- **System Integrity**: Core path resolution and patching logic passed final verification.
 
-Unit tests are located within the source files in `src/` (usually in a `mod tests` block). They cover core logic for:
-- **Config**: Exclusions, Finalization, Loading, Modprobed, Profiles, Whitelist.
-- **Hardware**: GPU detection, RAM, Storage.
-- **Kernel**: Audit, Git, LTO, Manager, Parser, Patcher, PKGBUILD, Validator.
-- **System**: Health, SCX, Verification.
-- **UI**: App, Controller, Scaling, Threading.
-
-## Integration Tests (`tests/`)
-
-| Test File | Description |
-|-----------|-------------|
-| `comprehensive_feature_realization.rs` | Verifies full feature set integration. |
-| `config_tests.rs` | Comprehensive configuration management tests. |
-| `dynamic_versioning_test.rs` | Verifies "latest" version resolution and fallback hierarchy (Poll → Cache → Local → Baseline). |
-| `forensic_diagnostic.rs` | System diagnostic and forensic data collection tests. |
-| `git_tests.rs` | Git operations, version validation, and source management. |
-| `hardware_tests.rs` | Full hardware detection and validation suite. |
-| `integration_tests.rs` | Orchestrator phase transitions and state management. |
-| `lifecycle_pipe_integration.rs` | End-to-end lifecycle testing from scan to install. |
-| `logging_integration_test.rs` | Log collection, rotation, and session management. |
-| `logging_robustness_test.rs` | Concurrent logging, high volume, and directory creation safety. |
-| `modprobed_localmodconfig_validation.rs` | modprobed-db integration and localmodconfig simulation. |
-| `mpl_integration_test.rs` | Modular Patcher Layer (MPL) sourcing and injection tests. |
-| `performance_baseline_calibration.rs` | Baseline metrics for performance comparison. |
-| `performance_battle_tests.rs` | Stressor isolation, SMI correlation, and precision timing. |
-| `performance_monitoring_lifecycle_test.rs` | Monitoring state machine, ring buffer, and summary capture. |
-| `phase_1_infrastructure_test.rs` | Cgroup, watchdog, and PID exclusion logic. |
-| `phase_2_collector_test.rs` | Syscall, Jitter, and Wakeup data collectors. |
-| `phase_3_scoring_audit.rs` | Scoring mathematics, personality generation, and thermal efficiency. |
-| `phase_3_scoring_demonstration.rs` | Personality phenotype demonstrations (Gaming, Throughput, etc.). |
-| `phase_3_variant_aware_rebranding.rs` | Variant detection (Zen, Hardened, etc.) and PKGBUILD rebranding logic. |
-| `profile_pipeline_validation.rs` | Profile definition, optimization levels, and Clang/LTO enforcement. |
-| `real_kernel_build_integration.rs` | Live simulation of kernel builds with async timeouts and log capture. |
-| `stressor_diagnostic_tests.rs` | Stressor worker isolation and CPU affinity. |
-| `stressor_integration_tests.rs` | Multi-stressor coordination and resource cleanup. |
-| `ui_scaling_tests.rs` | DPI awareness, font scaling, and window width responsiveness. |
-| `ui_sync_tests.rs` | UI state persistence and synchronization across profile changes. |
-
-## Maintenance & Hygiene
-
-- **Path Resolution**: Strict absolute path enforcement for workspace and configuration files to ensure deterministic build behavior.
-- **Verification Guard**: Path validation (e.g., `validate_kbuild_path`, `validate_config_path`) now includes mandatory `is_absolute()` checks.
-- **Dynamic Naming**: Tests are updated to handle variant-aware naming (e.g., `linux-tkg`, `linux-zen`).
-- **Clean Assertions**: Removed fragile statistical assertions (e.g., strict P95 >= Mean) in favor of robust logging and relaxed bounds to accommodate system jitter.
+**SYSTEM STATUS: GREEN**

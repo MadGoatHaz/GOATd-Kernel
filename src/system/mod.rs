@@ -3,6 +3,7 @@ pub mod performance;
 /// System module: security-validated command execution, input validation
 pub mod scx;
 pub mod verification;
+pub mod paths;
 
 use crate::hardware::gpu;
 use crate::models::GpuVendor;

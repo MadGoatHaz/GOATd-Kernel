@@ -13,7 +13,7 @@ pub mod storage;
 
 // Re-export detection functions for convenient access
 pub use boot::{detect_boot_manager, detect_boot_type};
-pub use cpu::{detect_cpu_cores, detect_cpu_model, detect_cpu_threads};
+pub use cpu::{detect_cpu_cores, detect_cpu_model, detect_cpu_threads, detect_cpu_vendor};
 pub use gpu::{detect_gpu_model, detect_gpu_vendor};
 pub use init::detect_init_system;
 pub use ram::detect_ram_gb;

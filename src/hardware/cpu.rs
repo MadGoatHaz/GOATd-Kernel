@@ -68,6 +68,28 @@ pub fn detect_cpu_threads() -> Result<u32, HardwareError> {
     Ok(threads)
 }
 
+/// Detect CPU vendor from /proc/cpuinfo.
+///
+/// Returns "GenuineIntel" for Intel processors, "AuthenticAMD" for AMD processors,
+/// or the detected vendor string from /proc/cpuinfo.
+pub fn detect_cpu_vendor() -> Result<String, HardwareError> {
+    match fs::read_to_string("/proc/cpuinfo") {
+        Ok(content) => {
+            for line in content.lines() {
+                if line.starts_with("vendor_id") {
+                    if let Some(value) = line.split(": ").nth(1) {
+                        return Ok(value.to_string());
+                    }
+                }
+            }
+            Ok("Unknown".to_string())
+        }
+        Err(e) => Err(HardwareError::GpuDetectionFailed(
+            format!("Failed to read /proc/cpuinfo for CPU vendor: {}", e),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

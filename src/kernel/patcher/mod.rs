@@ -95,7 +95,7 @@ pub mod templates;
 use crate::error::PatchError;
 use crate::hardware::gpu;
 use crate::kernel::lto;
-use crate::models::GpuVendor;
+use crate::models::{GpuVendor, HardwareContext};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
@@ -2000,7 +2000,17 @@ export READELF=llvm-readelf
         eprintln!(
             "[Patcher] [ORCHESTRATION] PHASE 2.A: Applying Kconfig with Phase 5 LTO hard enforcer"
         );
-        self.apply_kconfig(config_options.clone(), lto_type)?;
+        
+        // Create HardwareContext for vendor-specific safety cluster configurations
+        let hw_context = HardwareContext {
+            gpu_vendors: crate::hardware::gpu::detect_all_gpu_vendors()
+                .unwrap_or_else(|_| vec![crate::models::GpuVendor::Unknown]),
+            cpu_vendor: crate::hardware::detect_cpu_vendor()
+                .unwrap_or_else(|_| "Unknown".to_string()),
+            is_hybrid: false,
+        };
+        
+        self.apply_kconfig(config_options.clone(), lto_type, hw_context)?;
 
         // PHASE 2.B: Generate .config.override for KCONFIG_ALLCONFIG safety net
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 2.B: Generating .config.override for native KConfig injection");
@@ -2108,7 +2118,14 @@ export READELF=llvm-readelf
         // PHASE 3.G: Inject NVIDIA DKMS shim into headers package function (only if NVIDIA GPU detected)
         if has_nvidia {
             eprintln!("[Patcher] [ORCHESTRATION] PHASE 3.G: NVIDIA GPU detected - injecting NVIDIA DKMS shim into headers package function");
-            let header_shim_count = self.inject_nvidia_dkms_shim_into_headers_package()?;
+            // Create HardwareContext from detected GPU vendors
+            let hardware_context = HardwareContext {
+                gpu_vendors: crate::hardware::gpu::detect_all_gpu_vendors()
+                    .unwrap_or_else(|_| vec![crate::models::GpuVendor::Unknown]),
+                cpu_vendor: "Unknown".to_string(),
+                is_hybrid: false,
+            };
+            let header_shim_count = self.inject_nvidia_dkms_shim_into_headers_package(&hardware_context)?;
             eprintln!(
                 "[Patcher] [ORCHESTRATION] PHASE 3.G: Injected {} header package shim(s)",
                 header_shim_count

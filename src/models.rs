@@ -113,12 +113,30 @@ impl Default for HardeningLevel {
 }
 
 /// GPU vendor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum GpuVendor {
     Nvidia,
     Amd,
     Intel,
     Unknown,
+}
+
+/// Hardware context for multi-vendor GPU and CPU detection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HardwareContext {
+    pub gpu_vendors: Vec<GpuVendor>,  // All detected GPU vendors
+    pub cpu_vendor: String,            // CPU vendor (e.g., "GenuineIntel", "AuthenticAMD")
+    pub is_hybrid: bool,               // Whether system has hybrid CPU architecture
+}
+
+impl Default for HardwareContext {
+    fn default() -> Self {
+        HardwareContext {
+            gpu_vendors: vec![GpuVendor::Unknown],
+            cpu_vendor: "Unknown".to_string(),
+            is_hybrid: false,
+        }
+    }
 }
 
 /// Storage type.

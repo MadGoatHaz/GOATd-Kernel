@@ -5,6 +5,32 @@ use crate::models::GpuVendor;
 use regex::Regex;
 use std::fs;
 use std::process::Command;
+use std::collections::HashSet;
+
+/// Detect all GPU vendors present on the system.
+/// Returns a Vec of all detected GPU vendors, allowing multi-vendor systems.
+pub fn detect_all_gpu_vendors() -> Result<Vec<GpuVendor>, HardwareError> {
+    let mut vendors = HashSet::new();
+
+    // Collect from lspci
+    vendors.extend(detect_via_lspci_all());
+
+    // Collect from proc modules
+    vendors.extend(detect_via_proc_modules_all());
+
+    // Collect from commands
+    vendors.extend(detect_via_commands());
+
+    // Convert to Vec and ensure Unknown is only present if no other vendors found
+    let mut vec: Vec<GpuVendor> = vendors.into_iter().collect();
+    if vec.is_empty() {
+        vec.push(GpuVendor::Unknown);
+    } else if vec.contains(&GpuVendor::Unknown) {
+        vec.retain(|v| v != &GpuVendor::Unknown);
+    }
+
+    Ok(vec)
+}
 
 /// Detect GPU vendor via lspci, /proc/modules, or command existence.
 pub fn detect_gpu_vendor() -> Result<GpuVendor, HardwareError> {
@@ -155,6 +181,47 @@ pub fn clean_gpu_model(raw_model: &str) -> String {
     raw_model.to_string()
 }
 
+/// Collect all GPU vendors via lspci/sys, returning multiple vendors if present.
+fn detect_via_lspci_all() -> Vec<GpuVendor> {
+    let mut vendors = HashSet::new();
+
+    // Check /sys/class/drm/*/device/vendor for GPU vendor IDs
+    if let Ok(entries) = fs::read_dir("/sys/class/drm") {
+        for entry in entries.flatten() {
+            let vendor_path = entry.path().join("device/vendor");
+            if let Ok(vendor_str) = fs::read_to_string(&vendor_path) {
+                if let Some(vendor) = detect_vendor_from_id(&vendor_str) {
+                    vendors.insert(vendor);
+                }
+            }
+        }
+    }
+
+    // Fallback: Check /sys/bus/pci/devices/*/vendor for any GPU devices
+    if let Ok(entries) = fs::read_dir("/sys/bus/pci/devices") {
+        for entry in entries.flatten() {
+            let device_path = entry.path();
+
+            // Check if this is a display controller device
+            if let Ok(class_str) = fs::read_to_string(device_path.join("class")) {
+                let class_lower = class_str.to_lowercase();
+                // 0x03* = Display controller class
+                if !class_lower.contains("0x03") {
+                    continue;
+                }
+            }
+
+            if let Ok(vendor_str) = fs::read_to_string(device_path.join("vendor")) {
+                if let Some(vendor) = detect_vendor_from_id(&vendor_str) {
+                    vendors.insert(vendor);
+                }
+            }
+        }
+    }
+
+    vendors.into_iter().collect()
+}
+
 /// Detect GPU vendor via /sys filesystem.
 fn detect_via_lspci() -> Option<GpuVendor> {
     // Check /sys/class/drm/*/device/vendor for GPU vendor IDs
@@ -224,6 +291,36 @@ fn is_intel_arc_device_id(device_id: &str) -> bool {
 
 /// Detect GPU vendor via /proc/modules.
 /// Prioritizes `xe` driver over `i915` for Intel GPUs.
+/// Collect all GPU vendors via /proc/modules, allowing multi-vendor detection.
+fn detect_via_proc_modules_all() -> Vec<GpuVendor> {
+    let mut vendors = HashSet::new();
+    
+    let Ok(content) = fs::read_to_string("/proc/modules") else {
+        return vendors.into_iter().collect();
+    };
+
+    let content_lower = content.to_lowercase();
+
+    if content_lower.contains("nvidia") || content_lower.contains("nouveau") {
+        vendors.insert(GpuVendor::Nvidia);
+    }
+
+    if content_lower.contains("amdgpu") || content_lower.contains("radeon") {
+        vendors.insert(GpuVendor::Amd);
+    }
+
+    // Prioritize `xe` (newer DG1, Arc) over `i915` (legacy integrated)
+    if content_lower.contains("xe") {
+        vendors.insert(GpuVendor::Intel);
+    }
+
+    if content_lower.contains("i915") {
+        vendors.insert(GpuVendor::Intel);
+    }
+
+    vendors.into_iter().collect()
+}
+
 fn detect_via_proc_modules() -> Option<GpuVendor> {
     let content = fs::read_to_string("/proc/modules").ok()?;
 

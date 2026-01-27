@@ -89,6 +89,36 @@ impl AsyncOrchestrator {
         std::fs::create_dir_all(&kernel_path)
             .map_err(|e| format!("Failed to create kernel directory: {}", e))?;
 
+        // =========================================================================
+        // INITIALIZE WORKSPACE ANCHOR - Centralized Path Registry
+        // =========================================================================
+        // Deploy .goatd_anchor file at workspace root to establish canonical path resolution.
+        // This eliminates reliance on fragile parent() calls and provides absolute verification.
+        let workspace_root = kernel_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("/"));
+
+        let anchor_path = workspace_root.join(".goatd_anchor");
+        
+        // Create or verify the anchor file
+        match std::fs::write(&anchor_path, "") {
+            Ok(_) => {
+                eprintln!(
+                    "[Build] [ANCHOR] ✓ Workspace anchor deployed at: {}",
+                    anchor_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[Build] [ANCHOR] ⚠ Warning: Could not deploy workspace anchor: {}",
+                    e
+                );
+                // Non-fatal: continue with build even if anchor creation fails
+                // The PathRegistry will verify existence later
+            }
+        }
+
         Ok(AsyncOrchestrator {
             state: Arc::new(RwLock::new(state)),
             checkpoint_dir,

@@ -18,6 +18,8 @@ use std::path::Path;
 use super::templates;
 use super::PatchResult;
 use crate::error::PatchError;
+use crate::models::HardwareContext;
+use crate::system::paths::PathRegistry;
 
 // Lazy-compiled regex patterns for surgical operations
 static FUNCTION_BODY_REGEX: Lazy<Regex> =
@@ -280,14 +282,14 @@ pub fn inject_polly_flags(
     }
 
     // Create the Polly injection block
+    // NOTE: Using KCFLAGS ensures Polly flags only affect kernel build,
+    // not host tools like bpftool. This prevents clang errors in host builds.
     let polly_block = format!(
         r#"
 # ===================================================================
-# POLLY LOOP OPTIMIZATION
+# POLLY LOOP OPTIMIZATION (Kernel-only via KCFLAGS)
 # ===================================================================
-export CFLAGS="${{CFLAGS}} {}"
-export CXXFLAGS="${{CXXFLAGS}} {}"
-export LDFLAGS="${{LDFLAGS}} {}"
+export KCFLAGS="${{KCFLAGS}} {} {} {}"
 "#,
         polly_cflags, polly_cxxflags, polly_ldflags
     );
@@ -1377,18 +1379,34 @@ impl super::KernelPatcher {
 
     /// Inject MPL sourcing for metadata persistence
     pub fn inject_mpl_sourcing(&self) -> PatchResult<()> {
-        // ROBUST APPROACH: Derive workspace root from src_dir parent
-        // This matches the logic in prepare_build_environment and ensures
-        // MPL sourcing uses the same workspace root as environment exports
-        let workspace_root = if let Some(parent) = self.src_dir().parent() {
-            parent.to_path_buf()
-        } else {
-            // Fallback: Try environment variable next
-            if let Ok(ws_root) = std::env::var("GOATD_WORKSPACE_ROOT") {
-                Path::new(&ws_root).to_path_buf()
-            } else {
-                // Final fallback to current directory
-                Path::new(".").to_path_buf()
+        // =========================================================================
+        // PATH REGISTRY: Use centralized workspace anchoring via .goatd_anchor
+        // =========================================================================
+        // Replace fragile parent() calls with PathRegistry for absolute path resolution
+        let workspace_root = match PathRegistry::new(self.src_dir().to_path_buf()) {
+            Ok(registry) => {
+                eprintln!(
+                    "[Patcher] [PKGBUILD] [MPL] Using PathRegistry for workspace root resolution"
+                );
+                registry.workspace_root().to_path_buf()
+            }
+            Err(_) => {
+                // Fallback: Try environment variable if PathRegistry fails
+                if let Ok(ws_root) = std::env::var("GOATD_WORKSPACE_ROOT") {
+                    eprintln!(
+                        "[Patcher] [PKGBUILD] [MPL] PathRegistry unavailable, using GOATD_WORKSPACE_ROOT env"
+                    );
+                    Path::new(&ws_root).to_path_buf()
+                } else {
+                    // Final fallback to parent directory (legacy behavior)
+                    eprintln!(
+                        "[Patcher] [PKGBUILD] [MPL] Using legacy parent() fallback"
+                    );
+                    self.src_dir()
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| Path::new(".").to_path_buf())
+                }
             }
         };
 
@@ -1408,29 +1426,53 @@ impl super::KernelPatcher {
 
     /// Inject environment variable preservation for fakeroot survival
     pub fn inject_variable_preservation(&self, kernel_release: Option<&str>) -> PatchResult<()> {
-        // Get workspace root - derive from src_dir parent
-        let workspace_root = if let Some(parent) = self.src_dir().parent() {
-            let parent_path = std::path::PathBuf::from(parent);
-
-            match parent_path.canonicalize() {
-                Ok(canonical) => canonical,
-                Err(_) => {
-                    let abs_path = if parent_path.is_absolute() {
-                        parent_path
+        // =========================================================================
+        // PATH REGISTRY: Use centralized workspace anchoring via .goatd_anchor
+        // =========================================================================
+        // Replace fragile canonicalize/parent chain with PathRegistry
+        let workspace_root = match PathRegistry::new(self.src_dir().to_path_buf()) {
+            Ok(registry) => {
+                eprintln!(
+                    "[Patcher] [PKGBUILD] [VARPRESERVE] Using PathRegistry for workspace root"
+                );
+                registry.workspace_root().to_path_buf()
+            }
+            Err(_) => {
+                // Fallback: Try environment variable if PathRegistry fails
+                if let Ok(ws_root) = std::env::var("GOATD_WORKSPACE_ROOT") {
+                    eprintln!(
+                        "[Patcher] [PKGBUILD] [VARPRESERVE] PathRegistry unavailable, using GOATD_WORKSPACE_ROOT"
+                    );
+                    Path::new(&ws_root).to_path_buf()
+                } else {
+                    // Final fallback to legacy canonicalization approach
+                    eprintln!(
+                        "[Patcher] [PKGBUILD] [VARPRESERVE] PathRegistry unavailable, using legacy canonicalization"
+                    );
+                    if let Some(parent) = self.src_dir().parent() {
+                        let parent_path = std::path::PathBuf::from(parent);
+                        match parent_path.canonicalize() {
+                            Ok(canonical) => canonical,
+                            Err(_) => {
+                                let abs_path = if parent_path.is_absolute() {
+                                    parent_path
+                                } else {
+                                    std::env::current_dir()
+                                        .map(|cwd| cwd.join(&parent_path))
+                                        .unwrap_or(parent_path)
+                                };
+                                abs_path
+                            }
+                        }
+                    } else if let Ok(cwd) = std::env::current_dir() {
+                        cwd
                     } else {
-                        std::env::current_dir()
-                            .map(|cwd| cwd.join(&parent_path))
-                            .unwrap_or(parent_path)
-                    };
-                    abs_path
+                        return Err(PatchError::PatchFailed(
+                            "Could not determine workspace root".to_string(),
+                        ));
+                    }
                 }
             }
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd
-        } else {
-            return Err(PatchError::PatchFailed(
-                "Could not determine workspace root".to_string(),
-            ));
         };
 
         inject_variable_preservation(self.src_dir(), &workspace_root, kernel_release)?;
@@ -2079,7 +2121,7 @@ impl super::KernelPatcher {
     ///
     /// # Returns
     /// `Ok(count)` where count is the number of package functions modified (0 or more)
-    pub fn inject_nvidia_dkms_shim_into_headers_package(&self) -> PatchResult<u32> {
+    pub fn inject_nvidia_dkms_shim_into_headers_package(&self, hardware_context: &HardwareContext) -> PatchResult<u32> {
         let (path, mut content) = read_pkgbuild(self.src_dir())?;
 
         // PHASE 18: IDEMPOTENCY GUARD - Check if NVIDIA DKMS shim already exists
@@ -2096,6 +2138,14 @@ impl super::KernelPatcher {
             eprintln!("[Patcher] [NVIDIA-DKMS] Header package shim already present (idempotent)");
             return Ok(0);
         }
+
+        // CONDITIONAL GATE: Only inject shim if NVIDIA GPU is present
+        use crate::models::GpuVendor;
+        if !hardware_context.gpu_vendors.contains(&GpuVendor::Nvidia) {
+            eprintln!("[Patcher] [NVIDIA-DKMS] NVIDIA GPU not detected in hardware context - skipping shim injection");
+            return Ok(0);
+        }
+        eprintln!("[Patcher] [NVIDIA-DKMS] NVIDIA GPU detected - proceeding with shim injection");
 
         // Broad-spectrum regex to match all headers function patterns
         // Matches: _package-headers, package-headers, package_*-headers, with optional -linux- infix

@@ -13,7 +13,7 @@
 //!
 //! - **HID**: evdev, hid, hid-generic, usbhid
 //! - **Storage**: nvme, ahci, libata, scsi
-//! - **Filesystems**: ext4, btrfs, vfat, exfat, nls_cp437, nls_iso8859_1
+//! - **Filesystems**: ext4, btrfs, vfat, exfat, nls_cp437, nls_iso8859_1, nls_utf8
 //! - **USB**: usb_core, usb_storage, usb-common, xhci_hcd, ehci_hcd, ohci_hcd
 //!
 //! # CRITICAL DEPENDENCY: Auto-Discovery Integration
@@ -71,6 +71,10 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     // These drivers are the MINIMAL set required for basic desktop
     // functionality. They are ONLY applied when use_modprobed is true.
     // All other device drivers are discovered dynamically via modprobed-db.
+    //
+    // SYNCHRONIZATION: When adding drivers to this list, also update
+    // src/kernel/patcher/templates.rs WHITELIST_INJECTION constant with
+    // corresponding CONFIG_* entries to ensure patcher templates match.
 
     // Storage Controllers (CRITICAL for boot detection)
     "nvme",   // NVMe SSD support (modern standard)
@@ -84,6 +88,7 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     "exfat",         // ExFAT filesystem (modern FAT extension, USB compatibility)
     "nls_cp437",     // DOS/Windows codepage for VFAT/ExFAT (US/English)
     "nls_iso8859_1", // ISO-8859-1 codepage for VFAT/ExFAT (Western European)
+    "nls_utf8",      // UTF-8 codepage for ExFAT support (modern filesystems)
     // Input Devices (CRITICAL: keyboard/mouse functionality)
     "evdev",       // Input event device handler (base for all input)
     "hid",         // Human Interface Device base (required before hid-generic)

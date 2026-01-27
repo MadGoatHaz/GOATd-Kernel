@@ -4,7 +4,7 @@
 //! options through both native KConfig injection and direct .config manipulation.
 
 use crate::error::PatchError;
-use crate::models::{HardeningLevel, LtoType};
+use crate::models::{HardeningLevel, LtoType, HardwareContext};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
@@ -298,6 +298,7 @@ impl crate::kernel::patcher::KernelPatcher {
         &self,
         options: HashMap<String, String>,
         lto_type: LtoType,
+        hardware_context: HardwareContext,
     ) -> PatchResult<()> {
         // Inject Polly flags if present in options
         super::pkgbuild::inject_polly_flags(self.src_dir(), &options)?;
@@ -705,6 +706,19 @@ impl crate::kernel::patcher::KernelPatcher {
         eprintln!("[Patcher] [PHASE-5-HARD-ENFORCER] ATOMIC INJECTION: Set CONFIG_LTO_CLANG=y, {}, CONFIG_HAS_LTO_CLANG=y", lto_config_msg);
         eprintln!("[Patcher] [PHASE-5-HARD-ENFORCER] CRITICAL: CONFIG_LTO_NONE is SURGICALLY REMOVED and NEVER exists");
 
+        // Apply vendor-specific safety cluster configurations
+        eprintln!("[Patcher] [SAFETY-CLUSTER] Detecting CPU vendor: {}", hardware_context.cpu_vendor);
+        
+        if hardware_context.cpu_vendor.contains("GenuineIntel") {
+            eprintln!("[Patcher] [SAFETY-CLUSTER] INTEL CPU detected - applying Intel safety cluster");
+            Self::apply_intel_safety_cluster(&mut content)?;
+        } else if hardware_context.cpu_vendor.contains("AuthenticAMD") {
+            eprintln!("[Patcher] [SAFETY-CLUSTER] AMD CPU detected - applying AMD safety cluster");
+            Self::apply_amd_safety_cluster(&mut content)?;
+        } else {
+            eprintln!("[Patcher] [SAFETY-CLUSTER] Unknown CPU vendor - skipping vendor-specific safety cluster");
+        }
+
         // Write updated .config with Clang hardcoded and LTO protected
         fs::write(&config_path, &content)
             .map_err(|e| PatchError::PatchFailed(format!("Failed to write .config: {}", e)))?;
@@ -809,6 +823,104 @@ impl crate::kernel::patcher::KernelPatcher {
             localversion
         );
 
+        Ok(())
+    }
+
+    /// Apply Intel safety cluster configuration
+    ///
+    /// Enforces GPU virtualization, IOMMU, and Arc GPU support for Intel platforms.
+    /// Applied when HardwareContext indicates Intel CPU vendor.
+    ///
+    /// Enforced configs:
+    /// - CONFIG_DRM_I915_GVT=y (Intel GPU virtualization)
+    /// - CONFIG_INTEL_IOMMU=y (Intel IOMMU support)
+    /// - CONFIG_INTEL_MEI_PXP=y (Management Engine Interface)
+    /// - CONFIG_DRM_XE=y (Intel Arc GPU support)
+    fn apply_intel_safety_cluster(content: &mut String) -> PatchResult<()> {
+        let intel_configs = vec![
+            ("CONFIG_DRM_I915_GVT", "y"),
+            ("CONFIG_INTEL_IOMMU", "y"),
+            ("CONFIG_INTEL_MEI_PXP", "y"),
+            ("CONFIG_DRM_XE", "y"),
+        ];
+
+        for (key, value) in intel_configs {
+            // Remove existing line if present to prevent conflicts
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{}=", key)))
+                .collect();
+
+            if lines.len() != content.lines().count() {
+                *content = lines.join("\n");
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+            }
+
+            // Add Intel safety cluster config
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&format!("{}={}", key, value));
+            content.push('\n');
+
+            eprintln!(
+                "[Patcher] [INTEL-SAFETY-CLUSTER] Injected {}={}",
+                key, value
+            );
+        }
+
+        eprintln!("[Patcher] [INTEL-SAFETY-CLUSTER] SUCCESS: All Intel safety cluster configs applied");
+        Ok(())
+    }
+
+    /// Apply AMD safety cluster configuration
+    ///
+    /// Enforces GPU support (legacy + modern) and IOMMU for AMD platforms.
+    /// Applied when HardwareContext indicates AMD CPU vendor.
+    ///
+    /// Enforced configs:
+    /// - CONFIG_DRM_AMDGPU_SI=y (Southern Islands GPU support)
+    /// - CONFIG_DRM_AMDGPU_CIK=y (Compute Island Kernel GPU support)
+    /// - CONFIG_AMD_IOMMU=y (AMD IOMMU support)
+    /// - CONFIG_X86_AMD_PSTATE=y (AMD performance scaling)
+    fn apply_amd_safety_cluster(content: &mut String) -> PatchResult<()> {
+        let amd_configs = vec![
+            ("CONFIG_DRM_AMDGPU_SI", "y"),
+            ("CONFIG_DRM_AMDGPU_CIK", "y"),
+            ("CONFIG_AMD_IOMMU", "y"),
+            ("CONFIG_X86_AMD_PSTATE", "y"),
+        ];
+
+        for (key, value) in amd_configs {
+            // Remove existing line if present to prevent conflicts
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{}=", key)))
+                .collect();
+
+            if lines.len() != content.lines().count() {
+                *content = lines.join("\n");
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+            }
+
+            // Add AMD safety cluster config
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&format!("{}={}", key, value));
+            content.push('\n');
+
+            eprintln!(
+                "[Patcher] [AMD-SAFETY-CLUSTER] Injected {}={}",
+                key, value
+            );
+        }
+
+        eprintln!("[Patcher] [AMD-SAFETY-CLUSTER] SUCCESS: All AMD safety cluster configs applied");
         Ok(())
     }
 }

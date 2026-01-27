@@ -1053,3 +1053,45 @@ package_linux-zen-headers() {
         "[TEST] multi_profile_coexistence: ✓ PASSED - Multiple profiles coexist without collision"
     );
 }
+
+/// Test 11: Polly optimization flag injection
+/// 
+/// Verifies that Polly flags are correctly injected into the PKGBUILD build() function.
+#[test]
+fn test_polly_injection() {
+    use crate::kernel::patcher::pkgbuild::inject_polly_flags;
+    use std::collections::HashMap;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let pkgbuild_path = src_dir.join("PKGBUILD");
+
+    let original_pkgbuild = r#"pkgbase=linux
+build() {
+  cd "$srcdir/$_srcname"
+  make all
+}
+"#;
+    fs::write(&pkgbuild_path, original_pkgbuild).expect("Failed to write PKGBUILD");
+
+    let mut options = HashMap::new();
+    options.insert("_POLLY_CFLAGS".to_string(), "-mllvm -polly".to_string());
+    options.insert("_POLLY_LDFLAGS".to_string(), "-lpolly".to_string());
+
+    inject_polly_flags(src_dir, &options).expect("Polly injection failed");
+
+    let patched_content = fs::read_to_string(&pkgbuild_path).expect("Failed to read patched PKGBUILD");
+    
+    assert!(patched_content.contains("POLLY LOOP OPTIMIZATION"), "Missing Polly header");
+    assert!(patched_content.contains("-mllvm -polly"), "Missing Polly CFLAGS");
+    assert!(patched_content.contains("-lpolly"), "Missing Polly LDFLAGS");
+    
+    // Verify idempotency
+    inject_polly_flags(src_dir, &options).expect("Second Polly injection failed");
+    let double_patched = fs::read_to_string(&pkgbuild_path).expect("Failed to read double-patched PKGBUILD");
+    let match_count = double_patched.matches("POLLY LOOP OPTIMIZATION").count();
+    assert_eq!(match_count, 1, "Polly injection is not idempotent (found {} matches)", match_count);
+
+    eprintln!("[TEST] polly_injection: ✓ PASSED - Polly flags injected and idempotent");
+}
