@@ -97,6 +97,41 @@ pub const RUST_RMETA_FIX: &str = r#"   echo "Installing Rust files..."
    find rust -maxdepth 1 -type f -name '*.rmeta' -exec install -Dt "$builddir/rust" -m644 {} +
    find rust -maxdepth 1 -type f -name '*.so' -exec install -Dt "$builddir/rust" {} +"#;
 
+/// Global Enforcement: SAFE LIST RESTORATION HELPER
+///
+/// This Bash function restores whitelisted modules to .config after olddefconfig
+/// potentially strips them. It is defined once in global scope and called from multiple
+/// phases (prepare and build).
+pub const RESTORE_GOATD_WHITELIST_FUNCTION: &str = r#"
+# =====================================================================
+# ATOMIC SYNCHRONIZATION: Safe List Restoration Helper
+# =====================================================================
+# Call this after olddefconfig to re-inject whitelisted modules
+restore_goatd_whitelist() {
+    local config_file=".config"
+    [ ! -f "$config_file" ] && return 1
+    
+    printf "[GLOBAL-ENFORCER] Synchronizing Safe List: %s\n" "$ENFORCER_SAFE_LIST" >&2
+    
+    # 1. Create Safe Pattern Regex
+    local safe_pattern="^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))(=[ym]$)"
+    
+    # 2. Extract whitelisted entries from backup if available, else re-force
+    # Note: prepare() already has .config.pre_g2, build() may need to re-verify
+    for module in $ENFORCER_SAFE_LIST; do
+        local config_name="CONFIG_$(echo $module | tr '[:lower:]' '[:upper:]')"
+        if ! grep -q "^${config_name}=" "$config_file"; then
+             printf "[GLOBAL-ENFORCER] Re-injecting whitelisted module: %s\n" "$module" >&2
+             echo "${config_name}=m" >> "$config_file"
+        fi
+    done
+    
+    # 3. Final Verification
+    local verify_count=$(grep -E "^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))=" "$config_file" | wc -l)
+    printf "[GLOBAL-ENFORCER] Verification: %d/%d modules secured.\n" "$verify_count" "$(echo $ENFORCER_SAFE_LIST | wc -w)" >&2
+}
+"#;
+
 /// Generate prebuild LTO enforcer based on LTO type
 ///
 /// Returns the appropriate PHASE G1 PREBUILD enforcement snippet
@@ -219,6 +254,12 @@ EOF
             printf "[PREBUILD] OLDDEFCONFIG: Running 'make olddefconfig' to finalize config...\n" >&2
             if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
                 printf "[PREBUILD] OLDDEFCONFIG: SUCCESS - Configuration finalized without interactive prompts\n" >&2
+                
+                # CRITICAL: GLOBAL ENFORCEMENT SYNC
+                # Restore the whitelist that olddefconfig just wiped
+                if declare -f restore_goatd_whitelist > /dev/null; then
+                    restore_goatd_whitelist
+                fi
             else
                 printf "[PREBUILD] WARNING: 'make olddefconfig' failed or unavailable, continuing anyway...\n" >&2
             fi
@@ -346,6 +387,12 @@ EOF
             printf "[PREBUILD] OLDDEFCONFIG: Running 'make olddefconfig' to finalize config...\n" >&2
             if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
                 printf "[PREBUILD] OLDDEFCONFIG: SUCCESS - Configuration finalized without interactive prompts\n" >&2
+                
+                # CRITICAL: GLOBAL ENFORCEMENT SYNC
+                # Restore the whitelist that olddefconfig just wiped
+                if declare -f restore_goatd_whitelist > /dev/null; then
+                    restore_goatd_whitelist
+                fi
             else
                 printf "[PREBUILD] WARNING: 'make olddefconfig' failed or unavailable, continuing anyway...\n" >&2
             fi

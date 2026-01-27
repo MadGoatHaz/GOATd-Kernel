@@ -1912,6 +1912,11 @@ export READELF=llvm-readelf
             }
         }
 
+        // PHASE GLOBAL: Inject global enforcement scope (ENFORCER_SAFE_LIST + restore helper)
+        // Must run BEFORE post-modprobed enforcer to make safe list available globally
+        eprintln!("[Patcher] [ORCHESTRATION] PHASE GLOBAL: Injecting global enforcement scope (safe list + restoration helper)");
+        self.inject_global_enforcement_scope()?;
+
         // PHASE G2: Post-modprobed hard enforcer into prepare()
         eprintln!("[Patcher] [ORCHESTRATION] PHASE G2: Injecting post-modprobed hard enforcer (enabled={})", use_modprobed);
         self.inject_post_modprobed_hard_enforcer(use_modprobed)?;

@@ -1174,6 +1174,43 @@ fn get_enforcer_safe_list() -> String {
     safe_list.join(" ")
 }
 
+/// Inject global enforcement components (safe list and restoration helper)
+/// This runs at the PKGBUILD global scope before prepare() function
+fn inject_global_enforcement_scope(src_dir: &Path) -> PatchResult<()> {
+    let (path, mut content) = read_pkgbuild(src_dir)?;
+
+    // Generate the enforcer safe list from ESSENTIAL_DRIVERS
+    let safe_list = get_enforcer_safe_list();
+    
+    // Check if global enforcement already exists (idempotent)
+    if !content.contains("GLOBAL ENFORCEMENT: SAFE LIST") {
+        // Find the prepare() function - we inject BEFORE it
+        if let Some(prepare_pos) = find_function_body_start(&content, "prepare") {
+            let prepare_line_start = content[..prepare_pos].rfind('\n').unwrap_or(0);
+            
+            // Build global scope injection block with both safe list export and helper function
+            let global_block = format!(
+                "\n# =====================================================================\n\
+                 # GLOBAL ENFORCEMENT: SAFE LIST (Rust-Injected)\n\
+                 # =====================================================================\n\
+                 # This list is exported globally so both prepare() and build() can access it.\n\
+                 export ENFORCER_SAFE_LIST=\"{}\"\n\n\
+                 {}\n",
+                safe_list,
+                templates::RESTORE_GOATD_WHITELIST_FUNCTION
+            );
+            
+            // Inject at the beginning of prepare() line
+            content.insert_str(prepare_line_start, &global_block);
+            fs::write(path, content).map_err(|e| PatchError::PatchFailed(e.to_string()))?;
+            eprintln!("[Patcher] [GLOBAL-SCOPE] Injected ENFORCER_SAFE_LIST export and restore_goatd_whitelist helper");
+            eprintln!("[Patcher] [GLOBAL-SCOPE] Safe list: {}", safe_list);
+        }
+    }
+
+    Ok(())
+}
+
 /// Inject post-modprobed hard enforcer into prepare() function
 /// Protects filtered modules from re-expansion by olddefconfig
 fn inject_post_modprobed_hard_enforcer(src_dir: &Path, use_modprobed: bool) -> PatchResult<()> {
@@ -1224,21 +1261,16 @@ fn inject_post_modprobed_hard_enforcer(src_dir: &Path, use_modprobed: bool) -> P
 
         // Check if PHASE G2 enforcer already exists (idempotent)
         if !content.contains("PHASE G2 POST-MODPROBED: Hard enforcer") {
-            // First inject ENFORCER_SAFE_LIST export at the beginning of prepare()
-            let safe_list_export = format!(
-                "\n    # BEGIN ENFORCER SAFE LIST EXPORT (PHASE-G2 WHITELIST PROTECTION)\n    export ENFORCER_SAFE_LIST=\"{}\"\n    # END ENFORCER SAFE LIST EXPORT\n",
-                safe_list
-            );
-            content.insert_str(prepare_start, &safe_list_export);
-
-            // Now inject the PHASE_G2_ENFORCER template at the adjusted injection point
-            let adjusted_injection_point = injection_point + safe_list_export.len();
+            // NOTE: ENFORCER_SAFE_LIST is now injected at global scope (before prepare())
+            // by inject_global_enforcement_scope(). This function only injects the PHASE_G2 enforcer.
+            
+            // Inject the PHASE_G2_ENFORCER template at the injection point
             let snippet = templates::PHASE_G2_ENFORCER;
-            content.insert_str(adjusted_injection_point, &format!("\n{}\n", snippet));
+            content.insert_str(injection_point, &format!("\n{}\n", snippet));
             
             fs::write(path, content).map_err(|e| PatchError::PatchFailed(e.to_string()))?;
-            eprintln!("[Patcher] [PKGBUILD] [PHASE-G2] Exported ENFORCER_SAFE_LIST and injected post-modprobed hard enforcer into prepare()");
-            eprintln!("[Patcher] [PHASE-G2] Safe list details: {}", safe_list);
+            eprintln!("[Patcher] [PKGBUILD] [PHASE-G2] Injected post-modprobed hard enforcer into prepare()");
+            eprintln!("[Patcher] [PHASE-G2] ENFORCER_SAFE_LIST is now globally available (exported before prepare())");
         }
     }
 
@@ -1921,6 +1953,12 @@ impl super::KernelPatcher {
         lto_type: crate::models::LtoType,
     ) -> PatchResult<()> {
         inject_prebuild_lto_hard_enforcer(self.src_dir(), lto_type)
+    }
+
+    /// Inject global enforcement scope (ENFORCER_SAFE_LIST export and restore helper)
+    /// MUST be called before inject_post_modprobed_hard_enforcer
+    pub fn inject_global_enforcement_scope(&self) -> PatchResult<()> {
+        inject_global_enforcement_scope(self.src_dir())
     }
 
     /// Inject post-modprobed hard enforcer to protect filtered modules
