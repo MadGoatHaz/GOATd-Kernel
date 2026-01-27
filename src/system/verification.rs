@@ -243,7 +243,7 @@ impl std::error::Error for KernelInstallationError {}
 ///
 /// # Returns
 /// `Option<PathBuf>` pointing to the discovered headers directory, or `None` if not found
-pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
+pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Path>) -> Option<PathBuf> {
     eprintln!(
         "[DISCOVER_HEADERS] [UNIFIED-NAMING] Searching for headers for kernel version: {}",
         kernel_version
@@ -324,6 +324,51 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
         "[DISCOVER_HEADERS] [UNIFIED-NAMING] Base version extracted: {}",
         base_version
     );
+
+    // STRATEGY 0 (Highest Priority): Search workspace_path for headers
+    if let Some(workspace) = workspace_path {
+        eprintln!(
+            "[DISCOVER_HEADERS] [STRATEGY-0] Searching workspace for headers at: {}",
+            workspace.display()
+        );
+        
+        if let Ok(entries) = fs::read_dir(workspace) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_dir() {
+                        let candidate = entry.path();
+                        let filename = candidate
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        
+                        // Look for directories with "-headers-" in name
+                        if filename.contains("-headers-") && candidate.join("include/linux/kernel.h").exists() {
+                            eprintln!(
+                                "[DISCOVER_HEADERS] [STRATEGY-0] Found candidate: {}",
+                                candidate.display()
+                            );
+                            
+                            // Verify .kernelrelease matches
+                            let kernelrelease_path = candidate.join(".kernelrelease");
+                            if kernelrelease_path.exists() {
+                                if let Ok(stored_version) = fs::read_to_string(&kernelrelease_path) {
+                                    if stored_version.trim() == kernel_version {
+                                        eprintln!(
+                                            "[DISCOVER_HEADERS] [STRATEGY-0] ✓ VERIFIED headers in workspace: {}",
+                                            candidate.display()
+                                        );
+                                        return Some(candidate);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] No verified headers found in workspace, falling back to OS paths");
+    }
 
     // STRATEGY 1: Try exact match with full kernel version (unified naming)
     // This matches files installed using the exact .kernelrelease string
@@ -666,7 +711,7 @@ pub fn verify_kernel_headers_installed(
     );
 
     // Use robust discovery function to locate headers
-    match discover_kernel_headers(kernel_version) {
+    match discover_kernel_headers(kernel_version, None) {
         Some(headers_dir) => {
             // Validate the discovered path
             if headers_dir.join("include/linux/kernel.h").exists() {
@@ -739,7 +784,7 @@ pub fn create_kernel_symlinks_fallback(
     );
 
     // Use robust discovery to find actual headers location
-    let headers_dir = match discover_kernel_headers(kernel_version) {
+    let headers_dir = match discover_kernel_headers(kernel_version, None) {
         Some(path) => {
             eprintln!("[VERIFY] Discovered kernel headers at: {}", path.display());
             path

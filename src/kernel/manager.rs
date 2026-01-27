@@ -80,6 +80,7 @@ impl KernelArtifactRegistry {
         kernel_path: PathBuf,
         kernel_variant: String,
         kernel_release: String,
+        workspace_path: Option<&std::path::Path>,
     ) -> Result<Self, String> {
         if !kernel_path.exists() {
             return Err(format!(
@@ -118,21 +119,68 @@ impl KernelArtifactRegistry {
         };
         let version_core = Self::extract_version_core(&kernel_release);
 
-        // Find headers and docs in the same directory using hyper-heuristic matching
-        let headers_path = Self::find_related_artifact(
-            parent_dir,
-            &kernel_variant,
-            &kernel_release,
-            filename_version.as_deref(),
-            "-headers",
-        )?;
-        let docs_path = Self::find_related_artifact(
-            parent_dir,
-            &kernel_variant,
-            &kernel_release,
-            filename_version.as_deref(),
-            "-docs",
-        )?;
+        // STRATEGY 0 (Highest Priority): Search workspace_path if provided
+        let mut headers_path = None;
+        let mut docs_path = None;
+
+        if let Some(workspace_root) = workspace_path {
+            log_info!("[KernelArtifactRegistry] [STRATEGY-0] Searching workspace: {}", workspace_root.display());
+            
+            // Search for headers and docs in workspace variant subdirectories
+            if let Ok(entries) = std::fs::read_dir(workspace_root) {
+                for entry in entries.flatten() {
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_dir() {
+                            let entry_path = entry.path();
+                            let entry_name = entry_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("");
+                            
+                            // Look for headers and docs in variant subdirectories
+                            if entry_name.contains("-headers-") {
+                                log_info!("[KernelArtifactRegistry] [STRATEGY-0] Found candidate headers at: {}", entry_path.display());
+                                // Validate this is a kernel headers package
+                                if entry_path.join("include/linux").exists() {
+                                    headers_path = Some(entry_path.clone());
+                                    log_info!("[KernelArtifactRegistry] [STRATEGY-0] ✓ Verified headers with include/linux: {}", entry_path.display());
+                                }
+                            } else if entry_name.contains("-docs-") {
+                                log_info!("[KernelArtifactRegistry] [STRATEGY-0] Found candidate docs at: {}", entry_path.display());
+                                if entry_path.join("usr/share/doc").exists() {
+                                    docs_path = Some(entry_path.clone());
+                                    log_info!("[KernelArtifactRegistry] [STRATEGY-0] ✓ Verified docs with usr/share/doc: {}", entry_path.display());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // STRATEGY 1: Fall back to proximity-based search in the same directory
+        if headers_path.is_none() {
+            log_info!("[KernelArtifactRegistry] [STRATEGY-1] Proximity search in: {}", parent_dir.display());
+            headers_path = Self::find_related_artifact(
+                parent_dir,
+                &kernel_variant,
+                &kernel_release,
+                filename_version.as_deref(),
+                "-headers",
+            )?;
+        }
+
+        // STRATEGY 1: Fall back to proximity-based search for docs
+        if docs_path.is_none() {
+            log_info!("[KernelArtifactRegistry] [STRATEGY-1] Proximity search for docs in: {}", parent_dir.display());
+            docs_path = Self::find_related_artifact(
+                parent_dir,
+                &kernel_variant,
+                &kernel_release,
+                filename_version.as_deref(),
+                "-docs",
+            )?;
+        }
 
         // Mandatory Guard (Chunk 4): Enhanced diagnostic logging with attempted permutations
         if headers_path.is_none() {

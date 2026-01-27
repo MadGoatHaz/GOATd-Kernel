@@ -1239,6 +1239,7 @@ impl AppController {
                 path.clone(),
                 kernel_variant.clone(),
                 resolved_kernel_version.clone(),
+                Some(&workspace_path),
             ) {
                 Ok(reg) => {
                     eprintln!(
