@@ -246,6 +246,59 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
         kernel_version
     );
 
+    // STRICT PROTOCOL HELPER: Validate .kernelrelease inside directory
+    // Returns true ONLY if the candidate's .kernelrelease matches the target version
+    let validate_kernelrelease = |candidate_dir: &Path, target_ver: &str| -> bool {
+        let kernelrelease_path = candidate_dir.join(".kernelrelease");
+        if kernelrelease_path.exists() {
+            match fs::read_to_string(&kernelrelease_path) {
+                Ok(content) => {
+                    let stored_version = content.trim();
+                    let matches = stored_version == target_ver;
+                    if !matches {
+                        eprintln!(
+                            "[DISCOVER_HEADERS] [STRICT-VALIDATE] .kernelrelease mismatch in {}: expected '{}', got '{}'",
+                            candidate_dir.display(),
+                            target_ver,
+                            stored_version
+                        );
+                    }
+                    matches
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[DISCOVER_HEADERS] [STRICT-VALIDATE] Failed to read .kernelrelease: {}",
+                        e
+                    );
+                    false
+                }
+            }
+        } else {
+            eprintln!(
+                "[DISCOVER_HEADERS] [STRICT-VALIDATE] .kernelrelease not found in {}",
+                candidate_dir.display()
+            );
+            // Fallback: if no .kernelrelease file, check for include/config/kernel.release
+            let kernel_release_path = candidate_dir.join("include/config/kernel.release");
+            if kernel_release_path.exists() {
+                match fs::read_to_string(&kernel_release_path) {
+                    Ok(content) => {
+                        let stored_version = content.trim();
+                        let matches = stored_version == target_ver;
+                        eprintln!(
+                            "[DISCOVER_HEADERS] [STRICT-VALIDATE] Using fallback include/config/kernel.release: {}",
+                            if matches { "MATCH" } else { "NO MATCH" }
+                        );
+                        matches
+                    }
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        }
+    };
+
     // Extract base version (remove profile suffix if present)
     // E.g., "6.18.3-arch1-2-goatd-gaming" -> "6.18.3-arch1-2"
     let base_version = if let Some(dash_pos) = kernel_version.rfind('-') {
@@ -271,22 +324,31 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
 
     // STRATEGY 0 (PRIORITY): Try GOATd-branded path directly if kernel_version contains "-goatd-"
     // This prioritizes GOATd-branded headers installation paths
+    // STRICT: Validate .kernelrelease inside
     if kernel_version.contains("-goatd-") {
         eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] PRIORITY: Detected GOATd-branded version, trying exact match first: /usr/src/linux-{}", kernel_version);
         let goatd_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
         if goatd_path.exists() && goatd_path.is_dir() {
             if goatd_path.join("include/linux/kernel.h").exists() {
-                eprintln!(
-                    "[DISCOVER_HEADERS] [STRATEGY-0] ✓ Found GOATd-branded headers at: {}",
-                    goatd_path.display()
-                );
-                return Some(goatd_path);
+                // STRICT VALIDATION: Read and verify .kernelrelease
+                if validate_kernelrelease(&goatd_path, kernel_version) {
+                    eprintln!(
+                        "[DISCOVER_HEADERS] [STRATEGY-0] ✓ Found VERIFIED GOATd-branded headers at: {}",
+                        goatd_path.display()
+                    );
+                    return Some(goatd_path);
+                } else {
+                    eprintln!(
+                        "[DISCOVER_HEADERS] [STRATEGY-0] ✗ GOATd-branded headers found but .kernelrelease validation failed"
+                    );
+                }
             }
         }
     }
 
     // STRATEGY 1: Try exact match with full kernel version (unified naming)
     // This matches files installed using the exact .kernelrelease string
+    // STRICT: Validate .kernelrelease inside
     eprintln!(
         "[DISCOVER_HEADERS] [STRATEGY-1] Trying exact match: /usr/src/linux-{}",
         kernel_version
@@ -294,13 +356,19 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
     let exact_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
     if exact_path.exists() && exact_path.is_dir() {
         if exact_path.join("include/linux/kernel.h").exists() {
-            eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✓ Found headers at (unified naming - exact match): {}", exact_path.display());
-            return Some(exact_path);
+            // STRICT VALIDATION: Read and verify .kernelrelease
+            if validate_kernelrelease(&exact_path, kernel_version) {
+                eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✓ Found VERIFIED headers at (unified naming - exact match): {}", exact_path.display());
+                return Some(exact_path);
+            } else {
+                eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✗ Headers found but .kernelrelease validation failed");
+            }
         }
     }
 
     // STRATEGY 2: Try base version (without profile suffix)
     // This handles rebranded kernels where headers use the base version
+    // STRICT: Only accept if .kernelrelease matches full running version
     if kernel_version != base_version {
         eprintln!(
             "[DISCOVER_HEADERS] [STRATEGY-2] Trying base version: /usr/src/linux-{}",
@@ -309,15 +377,22 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
         let base_path = Path::new("/usr/src").join(format!("linux-{}", base_version));
         if base_path.exists() && base_path.is_dir() {
             if base_path.join("include/linux/kernel.h").exists() {
-                eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✓ Found headers at (base version fallback): {}", base_path.display());
-                return Some(base_path);
+                // STRICT VALIDATION: Must match FULL kernel_version, not just base
+                if validate_kernelrelease(&base_path, kernel_version) {
+                    eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✓ Found VERIFIED headers at (base version with full version match): {}", base_path.display());
+                    return Some(base_path);
+                } else {
+                    eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✗ Base path found but .kernelrelease does not match full kernel_version");
+                }
             }
         }
     }
 
-    // STRATEGY 3: Scan /usr/src for linux-* directories with validation
+    // STRATEGY 3: Scan /usr/src for linux-* directories with STRICT validation
+    // STRICT PROTOCOL: Only accept if .kernelrelease exists AND matches kernel_version exactly
     // HARDENED: Prioritize GOATd-branded directories first in scan
-    eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] Scanning /usr/src for linux-* directories (prioritize GOATd-branded paths)");
+    // NOTE: Per blueprint section 2.2, we REJECT loose matches (no fallback for mismatched versions)
+    eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] Scanning /usr/src for linux-* directories with STRICT .kernelrelease validation");
     if let Ok(entries) = fs::read_dir("/usr/src") {
         let mut candidates = Vec::new();
         let mut goatd_candidates = Vec::new();
@@ -333,28 +408,40 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
                             if candidate.join("include/linux/kernel.h").exists()
                                 && candidate.join("Makefile").exists()
                             {
+                                // STRICT VALIDATION: .kernelrelease MUST exist and match exactly
                                 let kernelrelease_path = candidate.join(".kernelrelease");
                                 if kernelrelease_path.exists() {
                                     if let Ok(content) = fs::read_to_string(&kernelrelease_path) {
                                         let stored_version = content.trim();
-                                        if stored_version == kernel_version
-                                            || stored_version == base_version
-                                        {
+                                        // STRICT: Must match FULL kernel_version, not base_version
+                                        // This prevents accepting 6.18.7 headers when running 6.19.0
+                                        if stored_version == kernel_version {
+                                            eprintln!(
+                                                "[DISCOVER_HEADERS] [STRATEGY-3] [STRICT-MATCH] Exact .kernelrelease match found: {} = {}",
+                                                stored_version,
+                                                kernel_version
+                                            );
                                             // Prioritize GOATd-branded paths
                                             if name.contains("-goatd-") {
                                                 goatd_candidates.push(candidate);
                                             } else {
                                                 candidates.push(candidate);
                                             }
+                                        } else {
+                                            eprintln!(
+                                                "[DISCOVER_HEADERS] [STRATEGY-3] [STRICT-REJECT] .kernelrelease mismatch: {} != {}",
+                                                stored_version,
+                                                kernel_version
+                                            );
                                         }
                                     }
                                 } else {
-                                    // Fallback: if no .kernelrelease file, accept directory if headers are valid
-                                    if name.contains("-goatd-") {
-                                        goatd_candidates.push(candidate);
-                                    } else {
-                                        candidates.push(candidate);
-                                    }
+                                    // STRICT PROTOCOL VIOLATION: No .kernelrelease file means rejection
+                                    // Per blueprint section 2.1: "The candidate is ONLY valid if the content of .kernelrelease matches exactly"
+                                    eprintln!(
+                                        "[DISCOVER_HEADERS] [STRATEGY-3] [STRICT-REJECT] .kernelrelease MISSING in {}, skipping",
+                                        candidate.display()
+                                    );
                                 }
                             }
                         }
@@ -366,7 +453,7 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
         // Return GOATd-branded candidate first (priority)
         if !goatd_candidates.is_empty() {
             eprintln!(
-                "[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found GOATd-branded headers directory: {}",
+                "[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found STRICT-verified GOATd-branded headers directory: {}",
                 goatd_candidates[0].display()
             );
             return Some(goatd_candidates[0].clone());

@@ -187,35 +187,50 @@ fn detect_kernel_variant(content: &str) -> PatchResult<String> {
             .map(|m| m.as_str().trim())
             .unwrap_or("");
         if variant.starts_with("linux") {
+            // IDEMPOTENCY CHECK: If variant contains "-goatd-" already, treat it as immutable
+            // Extract the base name before the first "-goatd-" occurrence
+            let normalized_variant = if variant.contains("-goatd-") {
+                variant.split("-goatd-").next().unwrap_or("linux").to_string()
+            } else {
+                variant.to_string()
+            };
+            
+            eprintln!(
+                "[Patcher] [VARIANT] Original variant: '{}', normalized: '{}' (idempotency: pre-existing -goatd- detected: {})",
+                variant,
+                normalized_variant,
+                variant.contains("-goatd-")
+            );
+            
             // HARDENING: Aggressive sanity checks to prevent false positives
             // 1. Length check: variant must be at least 5 chars (e.g., "linux")
             // 2. Numeric-only check: reject if variant contains ONLY digits
             // 3. Contains hyphen: if variant has hyphens, ensure they're followed by non-numeric
-            if variant.len() < 5 {
-                eprintln!("[Patcher] [VARIANT] Sanity check FAILED: variant '{}' rejected (too short, len={})", variant, variant.len());
+            if normalized_variant.len() < 5 {
+                eprintln!("[Patcher] [VARIANT] Sanity check FAILED: variant '{}' rejected (too short, len={})", normalized_variant, normalized_variant.len());
                 return Ok("linux".to_string());
             }
 
-            if variant.chars().all(|c| c.is_numeric() || c == '-') {
-                eprintln!("[Patcher] [VARIANT] Sanity check FAILED: variant '{}' rejected (numeric-only or dash-only)", variant);
+            if normalized_variant.chars().all(|c| c.is_numeric() || c == '-') {
+                eprintln!("[Patcher] [VARIANT] Sanity check FAILED: variant '{}' rejected (numeric-only or dash-only)", normalized_variant);
                 return Ok("linux".to_string());
             }
 
             // Additional check: if variant matches pattern like "linux-1" or "linux-123", reject
             // Pattern: "linux" followed by hyphen and only digits
             if let Ok(numeric_suffix_regex) = Regex::new(r"^linux(-\d+)+$") {
-                if numeric_suffix_regex.is_match(variant) {
-                    eprintln!("[Patcher] [VARIANT] Sanity check FAILED: variant '{}' rejected (matches numeric-only suffix pattern)", variant);
+                if numeric_suffix_regex.is_match(&normalized_variant) {
+                    eprintln!("[Patcher] [VARIANT] Sanity check FAILED: variant '{}' rejected (matches numeric-only suffix pattern)", normalized_variant);
                     return Ok("linux".to_string());
                 }
             }
 
             eprintln!(
                 "[Patcher] [VARIANT] Detected variant: '{}' (len={}, sanity checks passed)",
-                variant,
-                variant.len()
+                normalized_variant,
+                normalized_variant.len()
             );
-            return Ok(variant.to_string());
+            return Ok(normalized_variant);
         }
     }
     // Fallback to standard "linux" if no match found or doesn't start with "linux"
@@ -803,6 +818,19 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
         format!("{}-goatd-{}", variant, profile_lower)
     };
 
+    // BRANDING LOCK: Atomic Search/Replace to prevent double-branding
+    // Check if the file already contains -goatd- in pkgname or package_ functions
+    // This is stricter than checking just pkgbase - it validates array elements too
+    let branding_lock_pattern =
+        Regex::new(r#"[^\n'"]+-goatd-[^\n'"]+"#).expect("Branding lock regex failed");
+    let has_existing_branding = branding_lock_pattern.is_match(&content);
+
+    if has_existing_branding {
+        eprintln!(
+            "[Patcher] [REBRANDING] [BRANDING-LOCK] Detected pre-existing -goatd- in file (likely already branded)"
+        );
+    }
+
     // IDEMPOTENCY CHECK: If pkgbase already matches master_identity, skip rebranding
     // This prevents double-branding if the patcher is run on an already-patched PKGBUILD
     // PHASE 20: We check the RAW pkgbase value from the file, not the stripped variant
@@ -814,6 +842,20 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
                 if current_pkgbase == master_identity {
                     eprintln!("[Patcher] [REBRANDING] Idempotency check: pkgbase already matches '{}' (skipping rebranding)", master_identity);
                     return Ok(());
+                }
+                // If pkgbase contains -goatd- but doesn't match master_identity exactly,
+                // it means variant has changed or profile changed - re-base the logic
+                if current_pkgbase.contains("-goatd-") && current_pkgbase != master_identity {
+                    eprintln!(
+                        "[Patcher] [REBRANDING] pkgbase contains -goatd- but differs from expected master_identity"
+                    );
+                    eprintln!(
+                        "[Patcher] [REBRANDING] Current: '{}', Expected: '{}'",
+                        current_pkgbase, master_identity
+                    );
+                    eprintln!(
+                        "[Patcher] [REBRANDING] Proceeding with rebranding to normalize"
+                    );
                 }
             }
         }

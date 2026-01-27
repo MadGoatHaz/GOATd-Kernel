@@ -2158,42 +2158,50 @@ repair_module_symlinks() {
     # Silent discovery - only log to JSON, not to stderr
     echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery Phase: Detected kernel release\",\"metadata\":{\"release\":\"${KERNEL_RELEASE}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
 
-    # STEP 2: Resolve the correct source directory (QUIET VALIDATION PHASE)
-    # AGGRESSIVE FIX: Use multiple strategies with absolute path resolution
-    # Try to find headers in order of preference
+    # STEP 2: Resolve the correct source directory (STRICT PROTOCOL PHASE)
+    # Per Unified Naming Blueprint Section 3.2: Strict .kernelrelease Validation
+    # MANDATORY: Only accept directories where .kernelrelease matches CURRENT_VER exactly
     SOURCE_DIR=""
     _discovery_method=""
 
-    # Strategy 1: Use dynamic pkgbase pattern first (matches our new naming scheme)
-    # Try common prefixes for pkgbase-based naming: linux-*, linux-zen-*, etc.
-    for candidate in /usr/src/linux-*-${KERNEL_RELEASE} /usr/src/linux-*-*-${KERNEL_RELEASE}; do
-        if [ -d "$candidate" ] 2>/dev/null; then
-            SOURCE_DIR="$candidate"
-            _discovery_method="dynamic-pkgbase"
-            break
+    # STRICT PROTOCOL: Iterate through /usr/src/linux-* and validate .kernelrelease
+    # This ensures the "Verified Source" approach - directory name doesn't matter,
+    # only the internal .kernelrelease metadata
+    for candidate in /usr/src/linux-*; do
+        if [ -d "$candidate" ]; then
+            kernelrelease_file="${candidate}/.kernelrelease"
+            if [ -f "$kernelrelease_file" ]; then
+                stored_version=$(cat "$kernelrelease_file" 2>/dev/null)
+                if [ "$stored_version" = "$KERNEL_RELEASE" ]; then
+                    # STRICT MATCH: .kernelrelease matches our running kernel exactly
+                    SOURCE_DIR="$candidate"
+                    _discovery_method="strict-kernelrelease-validation"
+                    echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"STRICT PROTOCOL: Found .kernelrelease match\",\"metadata\":{\"candidate\":\"${candidate}\",\"version\":\"${stored_version}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
+                    break
+                fi
+            fi
         fi
     done
 
-    # Strategy 2: Check standard '/usr/src/linux-{version}' location
+    # Fallback: If strict protocol didn't find a match, use standard location as last resort
     if [ -z "$SOURCE_DIR" ] && [ -d "/usr/src/linux-${KERNEL_RELEASE}" ]; then
         SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
-        _discovery_method="standard-location"
+        _discovery_method="fallback-standard-location"
+        log_json "WARNING" "MODULE-REPAIR" "Strict protocol found no match, using standard fallback location"
+    fi
 
-    # Strategy 3: Try '/usr/src/linux' symlink (common fallback)
-    elif [ -z "$SOURCE_DIR" ] && [ -d "/usr/src/linux" ]; then
+    # Ultimate fallback: /usr/src/linux symlink (only if both above fail)
+    if [ -z "$SOURCE_DIR" ] && [ -d "/usr/src/linux" ]; then
         SOURCE_DIR="/usr/src/linux"
-        _discovery_method="fallback-symlink"
+        _discovery_method="fallback-generic-symlink"
+        log_json "WARNING" "MODULE-REPAIR" "Standard location unavailable, falling back to /usr/src/linux"
+    fi
 
-    # Strategy 4: Search for any matching linux-* directory (ultimate fallback)
-    elif [ -z "$SOURCE_DIR" ]; then
-        SOURCE_DIR=$(find /usr/src -maxdepth 1 -type d -name "linux*" 2>/dev/null | head -n 1)
-        if [ -n "$SOURCE_DIR" ]; then
-            _discovery_method="dynamic-search"
-        else
-            log_json "WARNING" "MODULE-REPAIR" "Could not locate kernel source directory - attempting with standard path"
-            SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
-            _discovery_method="fallback-standard"
-        fi
+    # If still not found, provide diagnostic error
+    if [ -z "$SOURCE_DIR" ]; then
+        log_json "ERROR" "MODULE-REPAIR" "STRICT PROTOCOL FAILED: No kernel source found with matching .kernelrelease"
+        SOURCE_DIR="/usr/src/linux-${KERNEL_RELEASE}"
+        _discovery_method="fallback-diagnostic"
     fi
 
     # Resolve to absolute path
