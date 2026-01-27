@@ -107,6 +107,7 @@ pub const RESTORE_GOATD_WHITELIST_FUNCTION: &str = r#"
 # ATOMIC SYNCHRONIZATION: Safe List Restoration Helper
 # =====================================================================
 # Call this after olddefconfig to re-inject whitelisted modules
+# CRITICAL: Filesystem drivers and NLS codepages are FORCE-BUILT-IN (=y)
 restore_goatd_whitelist() {
     local config_file=".config"
     [ ! -f "$config_file" ] && return 1
@@ -116,17 +117,30 @@ restore_goatd_whitelist() {
     # 1. Create Safe Pattern Regex
     local safe_pattern="^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))(=[ym]$)"
     
-    # 2. Extract whitelisted entries from backup if available, else re-force
+    # 2. Define FORCE-BUILTIN list (filesystem drivers and NLS codepages)
+    local force_y_list="FAT_FS VFAT_FS EXFAT_FS NLS_UTF8 NLS_ISO8859_1 NLS_CP437 NLS_ASCII"
+    
+    # 3. Extract whitelisted entries from backup if available, else re-force
     # Note: prepare() already has .config.pre_g2, build() may need to re-verify
     for module in $ENFORCER_SAFE_LIST; do
         local config_name="CONFIG_$(echo $module | tr '[:lower:]' '[:upper:]')"
+        local config_value="=m"  # Default to module
+        
+        # Check if this module should be FORCE-BUILTIN
+        for force_y_item in $force_y_list; do
+            if [[ "$config_name" == "CONFIG_$force_y_item" ]]; then
+                config_value="=y"  # Force built-in for critical filesystem drivers
+                break
+            fi
+        done
+        
         if ! grep -q "^${config_name}=" "$config_file"; then
-             printf "[GLOBAL-ENFORCER] Re-injecting whitelisted module: %s\n" "$module" >&2
-             echo "${config_name}=m" >> "$config_file"
+             printf "[GLOBAL-ENFORCER] Re-injecting whitelisted module: %s (value: %s)\n" "$module" "$config_value" >&2
+             echo "${config_name}${config_value}" >> "$config_file"
         fi
     done
     
-    # 3. Final Verification
+    # 4. Final Verification
     local verify_count=$(grep -E "^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))=" "$config_file" | wc -l)
     printf "[GLOBAL-ENFORCER] Verification: %d/%d modules secured.\n" "$verify_count" "$(echo $ENFORCER_SAFE_LIST | wc -w)" >&2
 }
@@ -980,20 +994,20 @@ CONFIG_LSM="selinux,apparmor"
 CONFIG_EXT4_FS=y
 CONFIG_BTRFS_FS=y
 
-# Additional filesystems for bootability and compatibility (CRITICAL)
-CONFIG_FAT_FS=m
-CONFIG_VFAT_FS=m
-CONFIG_EXFAT_FS=m
+# Additional filesystems for bootability and compatibility (CRITICAL - FORCED BUILT-IN)
+CONFIG_FAT_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_EXFAT_FS=y
 CONFIG_EXFAT_DEFAULT_IOCHARSET="utf8"
 CONFIG_ISO9660=m
 CONFIG_CIFS=m
 
-# NLS (National Language Support) for EFI partition mounting (CRITICAL)
+# NLS (National Language Support) for EFI partition mounting (CRITICAL - FORCED BUILT-IN)
 # Cross-reference: src/config/whitelist.rs ESSENTIAL_DRIVERS array
-CONFIG_NLS_ASCII=m
-CONFIG_NLS_CP437=m
-CONFIG_NLS_UTF8=m
-CONFIG_NLS_ISO8859_1=m
+CONFIG_NLS_ASCII=y
+CONFIG_NLS_CP437=y
+CONFIG_NLS_UTF8=y
+CONFIG_NLS_ISO8859_1=y
 
 # Loopback device mounting (CRITICAL)
 CONFIG_BLK_DEV_LOOP=m

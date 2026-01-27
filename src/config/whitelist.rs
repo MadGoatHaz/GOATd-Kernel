@@ -72,23 +72,31 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     // functionality. They are ONLY applied when use_modprobed is true.
     // All other device drivers are discovered dynamically via modprobed-db.
     //
+    // FORCE-BUILTIN TRANSITION:
+    // - Filesystem drivers (ext4, btrfs, vfat, fat, exfat) are TRANSITIONED to =y
+    // - NLS codepages (nls_ascii, nls_cp437, nls_utf8, nls_iso8859_1) are TRANSITIONED to =y
+    // - This ensures these drivers are built into vmlinux and immune to modprobed-db filtering
+    // - See FORCE_Y_WHITELIST_BLUEPRINT.md for architecture details
+    //
     // SYNCHRONIZATION: When adding drivers to this list, also update
     // src/kernel/patcher/templates.rs WHITELIST_INJECTION constant with
     // corresponding CONFIG_* entries to ensure patcher templates match.
+    // Also update src/kernel/patcher/pkgbuild.rs get_force_builtin_config_map() function.
 
     // Storage Controllers (CRITICAL for boot detection)
     "nvme",   // NVMe SSD support (modern standard)
     "ahci",   // SATA controller (fallback to SATA if NVMe fails)
     "libata", // LibATA framework (supports SATA)
     "scsi",   // SCSI subsystem (for block devices)
-    // Filesystems (CRITICAL: boot and base USB/SD access)
+    // Filesystems (CRITICAL: boot and base USB/SD access - ALL FORCED TO =y)
     "ext4",          // Common Linux filesystem
     "btrfs",         // Btrfs filesystem (modern copy-on-write filesystem)
-    "vfat",          // FAT filesystem (boot partitions, USB compatibility)
-    "exfat",         // ExFAT filesystem (modern FAT extension, USB compatibility)
-    "nls_cp437",     // DOS/Windows codepage for VFAT/ExFAT (US/English)
-    "nls_iso8859_1", // ISO-8859-1 codepage for VFAT/ExFAT (Western European)
-    "nls_utf8",      // UTF-8 codepage for ExFAT support (modern filesystems)
+    "vfat",          // FAT filesystem (boot partitions, USB compatibility) [FORCE-Y]
+    "exfat",         // ExFAT filesystem (modern FAT extension, USB compatibility) [FORCE-Y]
+    "nls_cp437",     // DOS/Windows codepage for VFAT/ExFAT (US/English) [FORCE-Y]
+    "nls_iso8859_1", // ISO-8859-1 codepage for VFAT/ExFAT (Western European) [FORCE-Y]
+    "nls_utf8",      // UTF-8 codepage for ExFAT support (modern filesystems) [FORCE-Y]
+    "nls_ascii",     // ASCII codepage for basic filesystem support [FORCE-Y]
     // Input Devices (CRITICAL: keyboard/mouse functionality)
     "evdev",       // Input event device handler (base for all input)
     "hid",         // Human Interface Device base (required before hid-generic)

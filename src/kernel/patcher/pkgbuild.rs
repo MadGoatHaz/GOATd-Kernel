@@ -1162,16 +1162,44 @@ pub fn patch_pkgbuild_for_rebranding(src_dir: &Path, profile: &str) -> PatchResu
 fn get_enforcer_safe_list() -> String {
     let mut safe_list = crate::config::whitelist::get_essential_drivers();
     
-    // Ensure critical modules are ALWAYS included regardless of ESSENTIAL_DRIVERS state
-    let critical = vec!["exfat", "nls_cp437", "nls_iso8859_1", "nls_utf8", "fat", "vfat"];
-    for critical_module in critical {
-        if !safe_list.iter().any(|&m| m.eq_ignore_ascii_case(critical_module)) {
-            safe_list.push(critical_module);
+    // FORCE-BUILTIN list: Filesystem drivers and NLS codepages that MUST be =y
+    let force_builtin = vec!["exfat", "nls_cp437", "nls_iso8859_1", "nls_utf8", "fat", "vfat"];
+    for force_y_module in &force_builtin {
+        if !safe_list.iter().any(|&m| m.eq_ignore_ascii_case(force_y_module)) {
+            safe_list.push(force_y_module);
         }
     }
     
     // Return space-separated list of module names
+    // NOTE: Callers must consult FORCE_BUILTIN_CONFIG_MAP to determine =y vs =m
     safe_list.join(" ")
+}
+
+/// Map of module names to their CONFIG_* entries and force-builtin status
+/// Used to enforce =y for critical filesystem and NLS modules
+fn get_force_builtin_config_map() -> std::collections::HashMap<&'static str, (&'static str, bool)> {
+    let mut map = std::collections::HashMap::new();
+    
+    // FORCE-BUILTIN (=y) entries - critical filesystem drivers
+    map.insert("fat", ("CONFIG_FAT_FS", true));
+    map.insert("vfat", ("CONFIG_VFAT_FS", true));
+    map.insert("exfat", ("CONFIG_EXFAT_FS", true));
+    
+    // FORCE-BUILTIN (=y) entries - critical NLS codepages
+    map.insert("nls_ascii", ("CONFIG_NLS_ASCII", true));
+    map.insert("nls_cp437", ("CONFIG_NLS_CP437", true));
+    map.insert("nls_utf8", ("CONFIG_NLS_UTF8", true));
+    map.insert("nls_iso8859_1", ("CONFIG_NLS_ISO8859_1", true));
+    
+    // Optional modules (=m) - handled by modprobed discovery
+    map.insert("nvme", ("CONFIG_NVME", false));
+    map.insert("ahci", ("CONFIG_AHCI", false));
+    map.insert("ext4", ("CONFIG_EXT4_FS", false));
+    map.insert("btrfs", ("CONFIG_BTRFS_FS", false));
+    map.insert("usb", ("CONFIG_USB", false));
+    map.insert("usb_storage", ("CONFIG_USB_STORAGE", false));
+    
+    map
 }
 
 /// Inject global enforcement components (safe list and restoration helper)
