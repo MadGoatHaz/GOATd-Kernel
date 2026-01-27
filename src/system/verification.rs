@@ -201,6 +201,8 @@ pub enum KernelInstallationError {
     SymlinkCreationFailed(String),
     /// Could not determine kernel version from package
     UnknownKernelVersion,
+    /// Kernel version mismatch between expected and actual headers
+    VersionMismatch(String),
 }
 
 impl std::fmt::Display for KernelInstallationError {
@@ -212,6 +214,7 @@ impl std::fmt::Display for KernelInstallationError {
             Self::HeadersNotInstalled(msg) => write!(f, "Headers not installed: {}", msg),
             Self::SymlinkCreationFailed(msg) => write!(f, "Symlink creation failed: {}", msg),
             Self::UnknownKernelVersion => write!(f, "Could not determine kernel version"),
+            Self::VersionMismatch(msg) => write!(f, "Version mismatch: {}", msg),
         }
     }
 }
@@ -322,30 +325,6 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
         base_version
     );
 
-    // STRATEGY 0 (PRIORITY): Try GOATd-branded path directly if kernel_version contains "-goatd-"
-    // This prioritizes GOATd-branded headers installation paths
-    // STRICT: Validate .kernelrelease inside
-    if kernel_version.contains("-goatd-") {
-        eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] PRIORITY: Detected GOATd-branded version, trying exact match first: /usr/src/linux-{}", kernel_version);
-        let goatd_path = Path::new("/usr/src").join(format!("linux-{}", kernel_version));
-        if goatd_path.exists() && goatd_path.is_dir() {
-            if goatd_path.join("include/linux/kernel.h").exists() {
-                // STRICT VALIDATION: Read and verify .kernelrelease
-                if validate_kernelrelease(&goatd_path, kernel_version) {
-                    eprintln!(
-                        "[DISCOVER_HEADERS] [STRATEGY-0] ✓ Found VERIFIED GOATd-branded headers at: {}",
-                        goatd_path.display()
-                    );
-                    return Some(goatd_path);
-                } else {
-                    eprintln!(
-                        "[DISCOVER_HEADERS] [STRATEGY-0] ✗ GOATd-branded headers found but .kernelrelease validation failed"
-                    );
-                }
-            }
-        }
-    }
-
     // STRATEGY 1: Try exact match with full kernel version (unified naming)
     // This matches files installed using the exact .kernelrelease string
     // STRICT: Validate .kernelrelease inside
@@ -390,12 +369,11 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
 
     // STRATEGY 3: Scan /usr/src for linux-* directories with STRICT validation
     // STRICT PROTOCOL: Only accept if .kernelrelease exists AND matches kernel_version exactly
-    // HARDENED: Prioritize GOATd-branded directories first in scan
-    // NOTE: Per blueprint section 2.2, we REJECT loose matches (no fallback for mismatched versions)
+    // NOTE: Per blueprint section 2.1, we REJECT loose matches (no fallback for mismatched versions)
+    // Do NOT prioritize GOATd branding here - version match is the only criteria
     eprintln!("[DISCOVER_HEADERS] [STRATEGY-3] Scanning /usr/src for linux-* directories with STRICT .kernelrelease validation");
     if let Ok(entries) = fs::read_dir("/usr/src") {
         let mut candidates = Vec::new();
-        let mut goatd_candidates = Vec::new();
 
         for entry in entries.flatten() {
             if let Ok(metadata) = entry.metadata() {
@@ -421,12 +399,7 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
                                                 stored_version,
                                                 kernel_version
                                             );
-                                            // Prioritize GOATd-branded paths
-                                            if name.contains("-goatd-") {
-                                                goatd_candidates.push(candidate);
-                                            } else {
-                                                candidates.push(candidate);
-                                            }
+                                            candidates.push(candidate);
                                         } else {
                                             eprintln!(
                                                 "[DISCOVER_HEADERS] [STRATEGY-3] [STRICT-REJECT] .kernelrelease mismatch: {} != {}",
@@ -450,22 +423,49 @@ pub fn discover_kernel_headers(kernel_version: &str) -> Option<PathBuf> {
             }
         }
 
-        // Return GOATd-branded candidate first (priority)
-        if !goatd_candidates.is_empty() {
-            eprintln!(
-                "[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found STRICT-verified GOATd-branded headers directory: {}",
-                goatd_candidates[0].display()
-            );
-            return Some(goatd_candidates[0].clone());
-        }
-
-        // Then return regular candidate
+        // Return any valid candidate found
         if !candidates.is_empty() {
             eprintln!(
                 "[DISCOVER_HEADERS] [STRATEGY-3] ✓ Found valid headers directory: {}",
                 candidates[0].display()
             );
             return Some(candidates[0].clone());
+        }
+    }
+
+    // STRATEGY 4: Branding-only fallback (last resort)
+    // Only if all above strategies fail, check for GOATd-branded paths
+    // Still requiring strict .kernelrelease validation per blueprint section 2.4
+    eprintln!("[DISCOVER_HEADERS] [STRATEGY-4] [BRANDING-FALLBACK] Scanning for GOATd-branded directories (last resort)");
+    if let Ok(entries) = fs::read_dir("/usr/src") {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_dir() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if name.starts_with("linux-") && name.contains("-goatd-") {
+                            let candidate = Path::new("/usr/src").join(name);
+
+                            // Validate: must have key header files
+                            if candidate.join("include/linux/kernel.h").exists()
+                                && candidate.join("Makefile").exists()
+                            {
+                                // STRICT VALIDATION: Even in fallback, .kernelrelease MUST match
+                                if validate_kernelrelease(&candidate, kernel_version) {
+                                    eprintln!(
+                                        "[DISCOVER_HEADERS] [STRATEGY-4] ✓ Found VERIFIED GOATd-branded headers (fallback): {}",
+                                        candidate.display()
+                                    );
+                                    return Some(candidate);
+                                } else {
+                                    eprintln!(
+                                        "[DISCOVER_HEADERS] [STRATEGY-4] ✗ GOATd-branded path found but .kernelrelease validation failed"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -752,6 +752,62 @@ pub fn create_kernel_symlinks_fallback(
         }
     };
 
+    // HARDENING: Verify that the discovered headers directory has matching .kernelrelease
+    // Per blueprint section 2.2: Atomic Symlink Validation
+    let kernelrelease_file = headers_dir.join(".kernelrelease");
+    if kernelrelease_file.exists() {
+        match fs::read_to_string(&kernelrelease_file) {
+            Ok(content) => {
+                let stored_version = content.trim();
+                if stored_version != kernel_version {
+                    return Err(KernelInstallationError::VersionMismatch(format!(
+                        "Headers directory .kernelrelease mismatch: expected '{}', got '{}' at {}",
+                        kernel_version,
+                        stored_version,
+                        headers_dir.display()
+                    )));
+                }
+                eprintln!("[VERIFY] ✓ Headers directory .kernelrelease verified: {}", stored_version);
+            }
+            Err(e) => {
+                return Err(KernelInstallationError::HeadersNotInstalled(format!(
+                    "Could not read .kernelrelease from headers directory: {}",
+                    e
+                )));
+            }
+        }
+    } else {
+        // Fallback to include/config/kernel.release
+        let kernel_release_path = headers_dir.join("include/config/kernel.release");
+        if kernel_release_path.exists() {
+            match fs::read_to_string(&kernel_release_path) {
+                Ok(content) => {
+                    let stored_version = content.trim();
+                    if stored_version != kernel_version {
+                        return Err(KernelInstallationError::VersionMismatch(format!(
+                            "Headers directory kernel.release mismatch: expected '{}', got '{}' at {}",
+                            kernel_version,
+                            stored_version,
+                            headers_dir.display()
+                        )));
+                    }
+                    eprintln!("[VERIFY] ✓ Headers directory kernel.release verified: {}", stored_version);
+                }
+                Err(e) => {
+                    return Err(KernelInstallationError::HeadersNotInstalled(format!(
+                        "Could not read kernel.release from headers directory: {}",
+                        e
+                    )));
+                }
+            }
+        } else {
+            return Err(KernelInstallationError::HeadersNotInstalled(format!(
+                "Headers directory missing .kernelrelease and include/config/kernel.release: {}",
+                headers_dir.display()
+            )));
+        }
+    }
+
     // Create build symlink
     let build_link = module_dir.join("build");
     if !build_link.exists() || build_link.is_symlink() {
@@ -826,7 +882,7 @@ pub fn create_kernel_symlinks_fallback(
         eprintln!("[VERIFY] ✓ Source symlink already valid");
     }
 
-    eprintln!("[VERIFY] Done: Fallback symlinks created/verified/repaired");
+    eprintln!("[VERIFY] Done: Fallback symlinks created/verified/repaired with strict version validation");
     Ok(())
 }
 

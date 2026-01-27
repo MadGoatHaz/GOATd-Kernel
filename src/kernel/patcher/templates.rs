@@ -2212,6 +2212,35 @@ repair_module_symlinks() {
     # Silent discovery logging - JSON only, no stderr noise
     echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"INFO\",\"phase\":\"MODULE-REPAIR\",\"message\":\"Silent Discovery: Resolved source directory\",\"metadata\":{\"method\":\"${_discovery_method}\",\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
 
+    # STEP 2.5: STRICT VERSION MISMATCH CHECK (Per blueprint section 2.3)
+    # MANDATORY: Before creating symlinks, verify that SOURCE_DIR actually contains
+    # a .kernelrelease that matches KERNEL_RELEASE exactly. If not, FAIL with error.
+    _kernel_release_file="${SOURCE_DIR}/.kernelrelease"
+    if [ -f "$_kernel_release_file" ]; then
+        _stored_version=$(cat "$_kernel_release_file" 2>/dev/null)
+        if [ "$_stored_version" != "$KERNEL_RELEASE" ]; then
+            log_json "ERROR" "MODULE-REPAIR" "VERSION MISMATCH: Headers .kernelrelease does not match running kernel"
+            echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"ERROR\",\"phase\":\"MODULE-REPAIR\",\"message\":\"STRICT PROTOCOL: Version mismatch detected - aborting symlink creation\",\"metadata\":{\"expected\":\"${KERNEL_RELEASE}\",\"actual\":\"${_stored_version}\",\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
+            return 1
+        fi
+    else
+        # Fallback to include/config/kernel.release
+        _kernel_release_fallback="${SOURCE_DIR}/include/config/kernel.release"
+        if [ -f "$_kernel_release_fallback" ]; then
+            _stored_version=$(cat "$_kernel_release_fallback" 2>/dev/null)
+            if [ "$_stored_version" != "$KERNEL_RELEASE" ]; then
+                log_json "ERROR" "MODULE-REPAIR" "VERSION MISMATCH: Headers kernel.release does not match running kernel"
+                echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"ERROR\",\"phase\":\"MODULE-REPAIR\",\"message\":\"STRICT PROTOCOL: Version mismatch in fallback - aborting symlink creation\",\"metadata\":{\"expected\":\"${KERNEL_RELEASE}\",\"actual\":\"${_stored_version}\",\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
+                return 1
+            fi
+        else
+            # Neither .kernelrelease nor include/config/kernel.release found
+            log_json "ERROR" "MODULE-REPAIR" "VERSION MISMATCH: No kernel version marker found in headers directory"
+            echo "{\"timestamp\":\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\",\"level\":\"ERROR\",\"phase\":\"MODULE-REPAIR\",\"message\":\"STRICT PROTOCOL: No .kernelrelease or kernel.release found - aborting symlink creation\",\"metadata\":{\"path\":\"${SOURCE_DIR}\"}}" >> /tmp/goatd_dkms.log 2>/dev/null
+            return 1
+        fi
+    fi
+
     # STEP 3: Verify source directory or use absolute path (QUIET VALIDATION)
     MODULE_DIR="/usr/lib/modules/${KERNEL_RELEASE}"
     
