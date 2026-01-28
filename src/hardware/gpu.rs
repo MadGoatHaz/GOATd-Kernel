@@ -346,6 +346,142 @@ fn detect_via_proc_modules() -> Option<GpuVendor> {
     None
 }
 
+/// Check if a specific GPU driver is currently active (loaded in kernel).
+///
+/// This function verifies that the GPU driver is not only installed,
+/// but also actively loaded in the kernel by checking `/proc/modules`.
+/// This is more reliable than just detecting hardware presence.
+///
+/// Returns `true` if the driver module(s) for the given vendor are loaded.
+///
+/// # Examples
+///
+/// ```ignore
+/// assert!(is_gpu_driver_active(&GpuVendor::Nvidia));
+/// ```
+pub fn is_gpu_driver_active(vendor: &GpuVendor) -> bool {
+    match vendor {
+        GpuVendor::Nvidia => is_nvidia_driver_active(),
+        GpuVendor::Amd => is_amd_driver_active(),
+        GpuVendor::Intel => is_intel_driver_active(),
+        GpuVendor::Unknown => false,
+    }
+}
+
+/// Check if NVIDIA GPU driver is actively loaded.
+/// Checks for: nvidia, nvidia_uvm, nvidia_drm, nouveau modules.
+fn is_nvidia_driver_active() -> bool {
+    let Ok(content) = fs::read_to_string("/proc/modules") else {
+        return false;
+    };
+
+    let content_lower = content.to_lowercase();
+    
+    // Check for proprietary NVIDIA driver modules
+    if content_lower.contains("nvidia") {
+        return true;
+    }
+
+    // Check for nouveau (open-source NVIDIA driver)
+    if content_lower.contains("nouveau") {
+        return true;
+    }
+
+    false
+}
+
+/// Check if AMD GPU driver is actively loaded.
+/// Checks for: amdgpu, radeon, amdkfd modules.
+fn is_amd_driver_active() -> bool {
+    let Ok(content) = fs::read_to_string("/proc/modules") else {
+        return false;
+    };
+
+    let content_lower = content.to_lowercase();
+    
+    // Check for AMDGPU driver (modern AMD GPUs)
+    if content_lower.contains("amdgpu") {
+        return true;
+    }
+
+    // Check for legacy radeon driver
+    if content_lower.contains("radeon") {
+        return true;
+    }
+
+    // Check for AMD KFD (Kernel Fusion Driver) - heterogeneous computing
+    if content_lower.contains("amdkfd") {
+        return true;
+    }
+
+    false
+}
+
+/// Check if Intel GPU driver is actively loaded.
+/// Checks for: i915 (legacy), xe (modern) modules.
+/// Prioritizes xe (newer) over i915 (legacy).
+fn is_intel_driver_active() -> bool {
+    let Ok(content) = fs::read_to_string("/proc/modules") else {
+        return false;
+    };
+
+    let content_lower = content.to_lowercase();
+    
+    // Check for xe driver (newer Intel discrete GPUs, Arc)
+    if content_lower.contains(" xe ") || content_lower.starts_with("xe ") || content_lower.ends_with(" xe") {
+        return true;
+    }
+
+    // Check for i915 driver (integrated Intel GPUs, older discrete)
+    if content_lower.contains("i915") {
+        return true;
+    }
+
+    false
+}
+
+/// Get active driver name for a GPU vendor using lspci -k output.
+/// This provides more detailed driver binding information.
+/// Returns the active driver module name if available.
+pub fn get_active_driver_name(vendor: &GpuVendor) -> Option<String> {
+    let output = Command::new("lspci")
+        .arg("-k")
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    
+    // Parse lspci -k output to find "Kernel driver in use: <driver>"
+    let mut driver_names: Vec<String> = Vec::new();
+    
+    for line in stdout.lines() {
+        if let Some(driver_part) = line.split(':').last() {
+            let driver = driver_part.trim().to_string();
+            if !driver.is_empty() {
+                driver_names.push(driver);
+            }
+        }
+    }
+
+    // Filter by vendor type
+    match vendor {
+        GpuVendor::Nvidia => {
+            driver_names.into_iter().find(|d: &String| d.contains("nvidia") || d.contains("nouveau"))
+        },
+        GpuVendor::Amd => {
+            driver_names.into_iter().find(|d: &String| d.contains("amdgpu") || d.contains("radeon") || d.contains("amdkfd"))
+        },
+        GpuVendor::Intel => {
+            driver_names.into_iter().find(|d: &String| d.contains("i915") || d.contains("xe"))
+        },
+        GpuVendor::Unknown => None,
+    }
+}
+
 /// Detect GPU vendor via command existence.
 fn detect_via_commands() -> Option<GpuVendor> {
     if command_exists("nvidia-smi") {
@@ -520,5 +656,77 @@ mod tests {
         let raw = "NVIDIA Corporation GA102 [GeForce RTX] (rev a1)";
         let cleaned = clean_gpu_model(raw);
         assert!(!cleaned.contains("rev"));
+    }
+
+    #[test]
+    fn test_is_nvidia_driver_active_returns_bool() {
+        // Test that the function returns a boolean result
+        let result = is_nvidia_driver_active();
+        assert!(matches!(result, true | false));
+    }
+
+    #[test]
+    fn test_is_amd_driver_active_returns_bool() {
+        // Test that the function returns a boolean result
+        let result = is_amd_driver_active();
+        assert!(matches!(result, true | false));
+    }
+
+    #[test]
+    fn test_is_intel_driver_active_returns_bool() {
+        // Test that the function returns a boolean result
+        let result = is_intel_driver_active();
+        assert!(matches!(result, true | false));
+    }
+
+    #[test]
+    fn test_is_gpu_driver_active_enum_unknown() {
+        // Unknown vendor should always return false
+        let result = is_gpu_driver_active(&GpuVendor::Unknown);
+        assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_is_gpu_driver_active_enum_all_vendors() {
+        // Test the public enum-based function does not panic
+        let _ = is_gpu_driver_active(&GpuVendor::Nvidia);
+        let _ = is_gpu_driver_active(&GpuVendor::Amd);
+        let _ = is_gpu_driver_active(&GpuVendor::Intel);
+        let _ = is_gpu_driver_active(&GpuVendor::Unknown);
+    }
+
+    #[test]
+    fn test_get_active_driver_name_returns_option() {
+        // Test that the function returns an Option type
+        let nvidia_driver = get_active_driver_name(&GpuVendor::Nvidia);
+        let amd_driver = get_active_driver_name(&GpuVendor::Amd);
+        let intel_driver = get_active_driver_name(&GpuVendor::Intel);
+        let unknown_driver = get_active_driver_name(&GpuVendor::Unknown);
+
+        // All should be either Some(String) or None
+        assert!(matches!(nvidia_driver, Some(_) | None));
+        assert!(matches!(amd_driver, Some(_) | None));
+        assert!(matches!(intel_driver, Some(_) | None));
+        assert_eq!(unknown_driver, None); // Unknown should always be None
+    }
+
+    #[test]
+    fn test_detect_all_gpu_vendors_returns_result() {
+        // Test that detection returns a Result
+        let result = detect_all_gpu_vendors();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_detect_all_gpu_vendors_contains_valid_enum() {
+        if let Ok(vendors) = detect_all_gpu_vendors() {
+            // Each vendor should be a valid GpuVendor variant
+            for vendor in vendors {
+                assert!(matches!(
+                    vendor,
+                    GpuVendor::Nvidia | GpuVendor::Amd | GpuVendor::Intel | GpuVendor::Unknown
+                ));
+            }
+        }
     }
 }

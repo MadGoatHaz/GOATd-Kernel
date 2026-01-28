@@ -1095,3 +1095,400 @@ build() {
 
     eprintln!("[TEST] polly_injection: ✓ PASSED - Polly flags injected and idempotent");
 }
+
+/// Test 12: Configuration Audit - Valid Configuration
+///
+/// Verifies that audit_configuration() correctly identifies a valid kernel config
+/// with all critical LTO and hardening flags present.
+#[test]
+fn test_audit_configuration_valid() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let config_path = src_dir.join(".config");
+
+    // Create a valid .config with all critical flags
+    let valid_config = r#"# Linux 6.18 kernel configuration
+CONFIG_LTO_CLANG=y
+CONFIG_LTO_CLANG_THIN=y
+CONFIG_HAS_LTO_CLANG=y
+CONFIG_CC_IS_CLANG=y
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_STACKPROTECTOR=y
+CONFIG_MODULE_COMPRESS_ZSTD=y
+# Other config options
+CONFIG_PREEMPT_VOLUNTARY=y
+CONFIG_HZ=300
+"#;
+
+    fs::write(&config_path, valid_config).expect("Failed to write .config");
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let (total_issues, critical_issues) = patcher.audit_configuration()
+        .expect("Audit failed");
+
+    assert_eq!(critical_issues, 0, "Expected 0 critical issues in valid config");
+    assert_eq!(total_issues, 0, "Expected 0 total issues in valid config");
+
+    eprintln!("[TEST] audit_valid: ✓ PASSED - Valid config has 0 issues");
+}
+
+/// Test 13: Configuration Audit - Missing LTO Flags (Critical)
+///
+/// Verifies that audit_configuration() correctly detects missing LTO flags
+/// as CRITICAL issues.
+#[test]
+fn test_audit_configuration_missing_lto() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let config_path = src_dir.join(".config");
+
+    // Create a config WITHOUT LTO flags (critical issue)
+    let invalid_config = r#"# Linux 6.18 kernel configuration (no LTO)
+# CONFIG_LTO_CLANG is not set
+CONFIG_CC_IS_CLANG=y
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_STACKPROTECTOR=y
+CONFIG_MODULE_COMPRESS_ZSTD=y
+"#;
+
+    fs::write(&config_path, invalid_config).expect("Failed to write .config");
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let (_total_issues, critical_issues) = patcher.audit_configuration()
+        .expect("Audit failed");
+
+    assert!(critical_issues > 0, "Expected critical issues for missing LTO_CLANG");
+    eprintln!("[TEST] audit_missing_lto: ✓ PASSED - Missing LTO detected as {} critical issue(s)", critical_issues);
+}
+
+/// Test 14: Configuration Audit - LTO_NONE Override (Critical)
+///
+/// Verifies that audit_configuration() detects CONFIG_LTO_NONE=y as a CRITICAL
+/// issue (LTO was overridden/disabled).
+#[test]
+fn test_audit_configuration_lto_none_override() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let config_path = src_dir.join(".config");
+
+    // Create a config with CONFIG_LTO_NONE=y (LTO disabled - critical override)
+    let invalid_config = r#"# Linux 6.18 kernel configuration (LTO overridden)
+CONFIG_LTO_NONE=y
+CONFIG_CC_IS_CLANG=y
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_STACKPROTECTOR=y
+"#;
+
+    fs::write(&config_path, invalid_config).expect("Failed to write .config");
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let (_total_issues, critical_issues) = patcher.audit_configuration()
+        .expect("Audit failed");
+
+    assert!(critical_issues > 0, "Expected critical issues for CONFIG_LTO_NONE=y");
+    eprintln!("[TEST] audit_lto_none: ✓ PASSED - CONFIG_LTO_NONE=y detected as {} critical issue(s)", critical_issues);
+}
+
+/// Test 15: Configuration Audit - Missing Clang Compiler (Critical)
+///
+/// Verifies that audit_configuration() detects missing CONFIG_CC_IS_CLANG=y
+/// as a CRITICAL issue.
+#[test]
+fn test_audit_configuration_gcc_enabled() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let config_path = src_dir.join(".config");
+
+    // Create a config with GCC instead of Clang (critical issue)
+    let invalid_config = r#"# Linux 6.18 kernel configuration (GCC instead of Clang)
+CONFIG_LTO_CLANG_THIN=y
+CONFIG_CC_IS_GCC=y
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_STACKPROTECTOR=y
+"#;
+
+    fs::write(&config_path, invalid_config).expect("Failed to write .config");
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let (_total_issues, critical_issues) = patcher.audit_configuration()
+        .expect("Audit failed");
+
+    assert!(critical_issues > 0, "Expected critical issues for GCC being enabled");
+    eprintln!("[TEST] audit_gcc_enabled: ✓ PASSED - GCC enabled detected as {} critical issue(s)", critical_issues);
+}
+
+/// Test 16: Configuration Audit - Missing Optional Hardening (Warnings Only)
+///
+/// Verifies that audit_configuration() treats missing optional hardening flags
+/// as WARNINGS (not critical).
+#[test]
+fn test_audit_configuration_missing_hardening() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let config_path = src_dir.join(".config");
+
+    // Create a config missing optional hardening (warnings, not critical)
+    let warning_config = r#"# Linux 6.18 kernel configuration (no hardening)
+CONFIG_LTO_CLANG=y
+CONFIG_LTO_CLANG_THIN=y
+CONFIG_HAS_LTO_CLANG=y
+CONFIG_CC_IS_CLANG=y
+# CONFIG_FORTIFY_SOURCE is not set
+# CONFIG_STACKPROTECTOR is not set
+# CONFIG_MODULE_COMPRESS_ZSTD is not set
+"#;
+
+    fs::write(&config_path, warning_config).expect("Failed to write .config");
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let (total_issues, critical_issues) = patcher.audit_configuration()
+        .expect("Audit failed");
+
+    // Should have warnings (total_issues > 0) but NO critical issues
+    assert_eq!(critical_issues, 0, "Expected 0 critical issues for missing optional hardening");
+    assert!(total_issues > 0, "Expected warnings for missing hardening flags");
+
+    eprintln!("[TEST] audit_missing_hardening: ✓ PASSED - Missing hardening detected as {} warning(s), 0 critical", total_issues);
+}
+
+/// Test 17: Configuration Audit - Non-existent .config (Non-fatal)
+///
+/// Verifies that audit_configuration() gracefully handles missing .config file
+/// without failing the validation.
+#[test]
+fn test_audit_configuration_missing_file() {
+    use crate::kernel::patcher::KernelPatcher;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    // Note: .config is NOT created
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let result = patcher.audit_configuration();
+
+    // Should return Ok (non-fatal) with 0 issues
+    assert!(result.is_ok(), "Audit should not fail on missing .config");
+    let (total_issues, critical_issues) = result.unwrap();
+    assert_eq!(total_issues, 0, "Missing .config should return 0 issues (non-fatal)");
+    assert_eq!(critical_issues, 0, "Missing .config should return 0 critical issues");
+
+    eprintln!("[TEST] audit_missing_file: ✓ PASSED - Missing .config handled gracefully");
+}
+
+/// Test 18: Configuration Audit - Comprehensive Multi-Issue Detection
+///
+/// Verifies audit_configuration() correctly counts multiple issues:
+/// - Critical LTO issues
+/// - Critical Clang issues
+/// - Warning-level hardening issues
+#[test]
+fn test_audit_configuration_multiple_issues() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    let config_path = src_dir.join(".config");
+
+    // Create a config with multiple issues
+    let broken_config = r#"# Linux 6.18 kernel configuration (heavily broken)
+# Missing LTO entirely
+# Missing Clang
+CONFIG_CC_IS_GCC=y
+# Missing hardening
+# CONFIG_FORTIFY_SOURCE is not set
+# CONFIG_STACKPROTECTOR is not set
+# CONFIG_MODULE_COMPRESS_ZSTD is not set
+"#;
+
+    fs::write(&config_path, broken_config).expect("Failed to write .config");
+
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    let (total_issues, critical_issues) = patcher.audit_configuration()
+        .expect("Audit failed");
+
+    // Should have BOTH critical and warning issues
+    assert!(critical_issues >= 3, "Expected at least 3 critical issues (missing LTO, missing Clang variant, GCC enabled)");
+    assert!(total_issues >= critical_issues, "Total issues should be >= critical issues");
+
+    eprintln!("[TEST] audit_multiple_issues: ✓ PASSED - {} total issues, {} critical detected", total_issues, critical_issues);
+}
+
+/// Test 19: ENFORCER_SAFE_LIST Bash Array Injection (Global Scope)
+///
+/// Verifies that enforce global scope injects a bash array declaration
+/// (not just an export) so that functions can reference ENFORCER_SAFE_LIST[@]
+#[test]
+fn test_enforcer_safe_list_bash_array_injection() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    
+    // Create a minimal PKGBUILD template
+    let pkgbuild_template = r#"# Arch Linux kernel PKGBUILD template
+pkgname=linux-goatd
+pkgver=6.8
+pkgrel=1
+pkgdesc="Linux kernel optimized by GOATd"
+
+prepare() {
+    cd "${srcdir}/linux-${pkgver}"
+    make olddefconfig
+}
+
+build() {
+    cd "${srcdir}/linux-${pkgver}"
+    make -j$(nproc) bzImage
+}
+"#;
+    
+    let pkgbuild_path = src_dir.join("PKGBUILD");
+    fs::write(&pkgbuild_path, pkgbuild_template).expect("Failed to write PKGBUILD");
+    
+    // Create KernelPatcher and inject global enforcement scope
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    patcher.inject_global_enforcement_scope()
+        .expect("Failed to inject global enforcement scope");
+    
+    // Verify PKGBUILD contains bash array declaration
+    let updated_pkgbuild = fs::read_to_string(&pkgbuild_path)
+        .expect("Failed to read PKGBUILD");
+    
+    // CRITICAL: Must have "declare -a ENFORCER_SAFE_LIST" for bash array syntax
+    assert!(
+        updated_pkgbuild.contains("declare -a ENFORCER_SAFE_LIST"),
+        "PKGBUILD must contain 'declare -a ENFORCER_SAFE_LIST' for bash array syntax"
+    );
+    
+    // Must have array elements in parentheses
+    assert!(
+        updated_pkgbuild.contains("(") && updated_pkgbuild.contains(")"),
+        "PKGBUILD must contain array elements within parentheses"
+    );
+    
+    // Must export the array
+    assert!(
+        updated_pkgbuild.contains("export ENFORCER_SAFE_LIST"),
+        "PKGBUILD must export ENFORCER_SAFE_LIST"
+    );
+    
+    eprintln!("[TEST] enforcer_safe_list_bash_array: ✓ PASSED - Array declaration injected correctly");
+}
+
+/// Test 20: restore_goatd_whitelist() Function Injection
+///
+/// Verifies that the restore_goatd_whitelist() bash function is injected
+/// into the global scope alongside ENFORCER_SAFE_LIST
+#[test]
+fn test_restore_goatd_whitelist_function_injection() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    
+    // Create a minimal PKGBUILD template
+    let pkgbuild_template = r#"pkgname=linux-goatd
+pkgver=6.8
+pkgrel=1
+
+prepare() {
+    cd "${srcdir}/linux-${pkgver}"
+    make olddefconfig
+}
+"#;
+    
+    let pkgbuild_path = src_dir.join("PKGBUILD");
+    fs::write(&pkgbuild_path, pkgbuild_template).expect("Failed to write PKGBUILD");
+    
+    // Create KernelPatcher and inject global enforcement scope
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    patcher.inject_global_enforcement_scope()
+        .expect("Failed to inject global enforcement scope");
+    
+    // Verify PKGBUILD contains restore function
+    let updated_pkgbuild = fs::read_to_string(&pkgbuild_path)
+        .expect("Failed to read PKGBUILD");
+    
+    // Must contain the function declaration
+    assert!(
+        updated_pkgbuild.contains("restore_goatd_whitelist"),
+        "PKGBUILD must contain 'restore_goatd_whitelist' function"
+    );
+    
+    // Must be a bash function definition
+    assert!(
+        updated_pkgbuild.contains("restore_goatd_whitelist()"),
+        "PKGBUILD must contain bash function syntax: restore_goatd_whitelist()"
+    );
+    
+    eprintln!("[TEST] restore_goatd_whitelist_injection: ✓ PASSED - Function injected correctly");
+}
+
+/// Test 21: Global Enforcement Scope Idempotency
+///
+/// Verifies that calling inject_global_enforcement_scope() multiple times
+/// doesn't duplicate the ENFORCER_SAFE_LIST (idempotent operation)
+#[test]
+fn test_global_enforcement_scope_idempotency() {
+    use crate::kernel::patcher::KernelPatcher;
+    use std::fs;
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path();
+    
+    let pkgbuild_template = r#"pkgname=linux-goatd
+pkgver=6.8
+pkgrel=1
+
+prepare() {
+    cd "${srcdir}"
+    make olddefconfig
+}
+"#;
+    
+    let pkgbuild_path = src_dir.join("PKGBUILD");
+    fs::write(&pkgbuild_path, pkgbuild_template).expect("Failed to write PKGBUILD");
+    
+    // Create patcher and do first injection
+    let patcher = KernelPatcher::new(src_dir.to_path_buf());
+    patcher.inject_global_enforcement_scope()
+        .expect("First injection failed");
+    
+    let after_first = fs::read_to_string(&pkgbuild_path)
+        .expect("Failed to read after first injection");
+    
+    // Count occurrences of declare statement
+    let count_first = after_first.matches("declare -a ENFORCER_SAFE_LIST").count();
+    assert_eq!(count_first, 1, "Should have exactly 1 ENFORCER_SAFE_LIST declaration after first injection");
+    
+    // Second injection (should be idempotent)
+    patcher.inject_global_enforcement_scope()
+        .expect("Second injection failed");
+    
+    let after_second = fs::read_to_string(&pkgbuild_path)
+        .expect("Failed to read after second injection");
+    
+    // Count occurrences again
+    let count_second = after_second.matches("declare -a ENFORCER_SAFE_LIST").count();
+    assert_eq!(count_second, 1, "Should still have exactly 1 ENFORCER_SAFE_LIST declaration after second injection (idempotent)");
+    
+    eprintln!("[TEST] global_enforcement_idempotency: ✓ PASSED - Injection is idempotent");
+}

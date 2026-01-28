@@ -14,7 +14,7 @@ pub mod storage;
 // Re-export detection functions for convenient access
 pub use boot::{detect_boot_manager, detect_boot_type};
 pub use cpu::{detect_cpu_cores, detect_cpu_model, detect_cpu_threads, detect_cpu_vendor};
-pub use gpu::{detect_gpu_model, detect_gpu_vendor};
+pub use gpu::{detect_gpu_model, detect_gpu_vendor, is_gpu_driver_active};
 pub use init::detect_init_system;
 pub use ram::detect_ram_gb;
 pub use storage::{
@@ -137,6 +137,9 @@ impl HardwareDetector {
         // Detect GPU vendor with graceful fallback
         let gpu_vendor = detect_gpu_vendor().unwrap_or(GpuVendor::Unknown);
 
+        // Detect if GPU driver is actively loaded
+        let gpu_active_driver = is_gpu_driver_active(&gpu_vendor);
+
         // Detect GPU model with caching
         let gpu_model = if let Some(cached) = &self.cached_gpu_model {
             cached.clone()
@@ -183,6 +186,7 @@ impl HardwareDetector {
             disk_free_gb,
             gpu_vendor,
             gpu_model,
+            gpu_active_driver,
             storage_type,
             storage_model,
             boot_type,

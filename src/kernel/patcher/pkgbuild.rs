@@ -1184,12 +1184,21 @@ fn get_force_builtin_config_map() -> std::collections::HashMap<&'static str, (&'
     map.insert("fat", ("CONFIG_FAT_FS", true));
     map.insert("vfat", ("CONFIG_VFAT_FS", true));
     map.insert("exfat", ("CONFIG_EXFAT_FS", true));
+    map.insert("iso9660", ("CONFIG_ISO9660", true));
+    map.insert("cifs", ("CONFIG_CIFS", true));
+    map.insert("udf", ("CONFIG_UDF_FS", true));
+    map.insert("ntfs3", ("CONFIG_NTFS3_FS", true));
     
     // FORCE-BUILTIN (=y) entries - critical NLS codepages
     map.insert("nls_ascii", ("CONFIG_NLS_ASCII", true));
     map.insert("nls_cp437", ("CONFIG_NLS_CP437", true));
     map.insert("nls_utf8", ("CONFIG_NLS_UTF8", true));
     map.insert("nls_iso8859_1", ("CONFIG_NLS_ISO8859_1", true));
+    
+    // FORCE-BUILTIN (=y) entries - loop, UEFI, SCSI generics
+    map.insert("loop", ("CONFIG_BLK_DEV_LOOP", true));
+    map.insert("efivarfs", ("CONFIG_EFIVAR_FS", true));
+    map.insert("sg", ("CONFIG_CHR_DEV_SG", true));
     
     // Optional modules (=m) - handled by modprobed discovery
     map.insert("nvme", ("CONFIG_NVME", false));
@@ -1198,6 +1207,14 @@ fn get_force_builtin_config_map() -> std::collections::HashMap<&'static str, (&'
     map.insert("btrfs", ("CONFIG_BTRFS_FS", false));
     map.insert("usb", ("CONFIG_USB", false));
     map.insert("usb_storage", ("CONFIG_USB_STORAGE", false));
+    map.insert("virtio_net", ("CONFIG_VIRTIO_NET", false));
+    map.insert("e1000e", ("CONFIG_E1000E", false));
+    map.insert("r8169", ("CONFIG_R8169", false));
+    map.insert("tun", ("CONFIG_TUN", false));
+    map.insert("hid-apple", ("CONFIG_HID_APPLE", false));
+    map.insert("hid-logitech-hidpp", ("CONFIG_HID_LOGITECH_HIDPP", false));
+    map.insert("uinput", ("CONFIG_INPUT_UINPUT", false));
+    map.insert("joydev", ("CONFIG_INPUT_JOYDEV", false));
     
     map
 }
@@ -1212,28 +1229,52 @@ fn inject_global_enforcement_scope(src_dir: &Path) -> PatchResult<()> {
     
     // Check if global enforcement already exists (idempotent)
     if !content.contains("GLOBAL ENFORCEMENT: SAFE LIST") {
-        // Find the prepare() function - we inject BEFORE it
-        if let Some(prepare_pos) = find_function_body_start(&content, "prepare") {
-            let prepare_line_start = content[..prepare_pos].rfind('\n').unwrap_or(0);
-            
-            // Build global scope injection block with both safe list export and helper function
-            let global_block = format!(
-                "\n# =====================================================================\n\
-                 # GLOBAL ENFORCEMENT: SAFE LIST (Rust-Injected)\n\
-                 # =====================================================================\n\
-                 # This list is exported globally so both prepare() and build() can access it.\n\
-                 export ENFORCER_SAFE_LIST=\"{}\"\n\n\
-                 {}\n",
-                safe_list,
-                templates::RESTORE_GOATD_WHITELIST_FUNCTION
-            );
-            
-            // Inject at the beginning of prepare() line
-            content.insert_str(prepare_line_start, &global_block);
-            fs::write(path, content).map_err(|e| PatchError::PatchFailed(e.to_string()))?;
-            eprintln!("[Patcher] [GLOBAL-SCOPE] Injected ENFORCER_SAFE_LIST export and restore_goatd_whitelist helper");
-            eprintln!("[Patcher] [GLOBAL-SCOPE] Safe list: {}", safe_list);
-        }
+        // CRITICAL: Inject into global scope BEFORE any functions
+        // Bash arrays must be declared in global scope for functions to access them
+        let safe_list_modules: Vec<&str> = safe_list.split_whitespace().collect();
+        let array_content = safe_list_modules.iter()
+            .map(|m| format!("    \"{}\"", m))
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        // Build global scope injection block with BASH ARRAY declaration
+        let global_block = format!(
+            "\n# =====================================================================\n\
+             # GLOBAL ENFORCEMENT: SAFE LIST ARRAY (Rust-Injected)\n\
+             # =====================================================================\n\
+             # This bash array is declared in GLOBAL SCOPE\n\
+             # Both prepare() and build() can reference ENFORCER_SAFE_LIST[@]\n\
+             declare -a ENFORCER_SAFE_LIST=(\n{}\n)\nexport ENFORCER_SAFE_LIST\n\n\
+             {}\n",
+            array_content,
+            templates::RESTORE_GOATD_WHITELIST_FUNCTION
+        );
+        
+        // Find where to inject: right after pkgrel declaration (before any functions start)
+        // Look for the last variable declaration line (pkgrel)
+        let injection_point = if let Some(pkg_rel_pos) = content.find("pkgrel=") {
+            // Find the end of this line
+            match content[pkg_rel_pos..].find('\n') {
+                Some(newline_offset) => pkg_rel_pos + newline_offset + 1,
+                None => pkg_rel_pos,
+            }
+        } else {
+            // Fallback: Find prepare() function start if pkgrel not found
+            match find_function_body_start(&content, "prepare") {
+                Some(pos) => content[..pos].rfind('\n').unwrap_or(0),
+                None => return Err(PatchError::PatchFailed("Could not find injection point for ENFORCER_SAFE_LIST".to_string())),
+            }
+        };
+        
+        // Inject at global scope
+        content.insert_str(injection_point, &global_block);
+        fs::write(path, content).map_err(|e| PatchError::PatchFailed(e.to_string()))?;
+        eprintln!("[Patcher] [GLOBAL-SCOPE] ✓ Injected ENFORCER_SAFE_LIST bash array into global scope");
+        eprintln!("[Patcher] [GLOBAL-SCOPE] Array declaration with {} modules", safe_list_modules.len());
+        eprintln!("[Patcher] [GLOBAL-SCOPE] Modules: {}", safe_list);
+        eprintln!("[Patcher] [GLOBAL-SCOPE] ✓ Injected restore_goatd_whitelist() function");
+    } else {
+        eprintln!("[Patcher] [GLOBAL-SCOPE] ⚠ ENFORCER_SAFE_LIST already present (idempotent skip)");
     }
 
     Ok(())

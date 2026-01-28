@@ -73,7 +73,7 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     // All other device drivers are discovered dynamically via modprobed-db.
     //
     // FORCE-BUILTIN TRANSITION:
-    // - Filesystem drivers (ext4, btrfs, vfat, fat, exfat) are TRANSITIONED to =y
+    // - Filesystem drivers (ext4, btrfs, vfat, fat, exfat, iso9660, cifs, udf, ntfs3) are TRANSITIONED to =y
     // - NLS codepages (nls_ascii, nls_cp437, nls_utf8, nls_iso8859_1) are TRANSITIONED to =y
     // - This ensures these drivers are built into vmlinux and immune to modprobed-db filtering
     // - See FORCE_Y_WHITELIST_BLUEPRINT.md for architecture details
@@ -93,6 +93,10 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     "btrfs",         // Btrfs filesystem (modern copy-on-write filesystem)
     "vfat",          // FAT filesystem (boot partitions, USB compatibility) [FORCE-Y]
     "exfat",         // ExFAT filesystem (modern FAT extension, USB compatibility) [FORCE-Y]
+    "iso9660",       // ISO 9660 (CD/DVD filesystem for portability) [FORCE-Y]
+    "cifs",          // CIFS/SMB (network shares, Windows interoperability)
+    "udf",           // UDF filesystem (optical media compatibility)
+    "ntfs3",         // NTFS3 (modern NTFS support, Windows drives)
     "nls_cp437",     // DOS/Windows codepage for VFAT/ExFAT (US/English) [FORCE-Y]
     "nls_iso8859_1", // ISO-8859-1 codepage for VFAT/ExFAT (Western European) [FORCE-Y]
     "nls_utf8",      // UTF-8 codepage for ExFAT support (modern filesystems) [FORCE-Y]
@@ -101,7 +105,11 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     "evdev",       // Input event device handler (base for all input)
     "hid",         // Human Interface Device base (required before hid-generic)
     "hid-generic", // Generic HID driver (keyboards, mice, USB input)
+    "hid-apple",   // Apple HID devices (MacBook compatibility)
+    "hid-logitech-hidpp", // Logitech HID++ devices (mouse/keyboard)
     "usbhid",      // USB HID protocol (USB keyboard/mouse support)
+    "uinput",      // User input device (virtual input for tools)
+    "joydev",      // Joystick/gamepad device support (game controllers)
     // USB Subsystem (CRITICAL: USB storage and devices)
     "usb_core",    // USB core framework (dependency for all USB)
     "usb_storage", // USB mass storage (USB drives/external drives)
@@ -109,6 +117,15 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     "xhci_hcd",    // USB 3.0 host controller (modern standard)
     "ehci_hcd",    // USB 2.0 host controller (fallback)
     "ohci_hcd",    // USB 1.1 host controller (legacy fallback)
+    // Networking (for portability and peripheral support)
+    "virtio_net",  // VirtIO network (VM compatibility)
+    "e1000e",      // Intel Ethernet driver
+    "r8169",       // Realtek Ethernet driver
+    "tun",         // TUN/TAP virtual network (VPN, networking tools)
+    // Miscellaneous Desktop (loop, UEFI, SCSI generics)
+    "loop",        // Loop block device (mounting ISO images)
+    "efivarfs",    // EFI variables filesystem (UEFI boot support)
+    "sg",          // SCSI generic interface (CD/DVD tools)
 ];
 
 /// Get the list of essential drivers that must not be excluded.
@@ -307,6 +324,45 @@ mod tests {
         let drivers = get_essential_drivers();
         assert!(drivers.contains(&"ext4"));
         assert!(drivers.contains(&"vfat"));
+    }
+
+    #[test]
+    fn test_get_essential_drivers_contains_expanded_filesystems() {
+        let drivers = get_essential_drivers();
+        // New filesystem drivers for portability
+        assert!(drivers.contains(&"iso9660"), "Missing iso9660 (CD/DVD)");
+        assert!(drivers.contains(&"cifs"), "Missing cifs (SMB network shares)");
+        assert!(drivers.contains(&"udf"), "Missing udf (optical media)");
+        assert!(drivers.contains(&"ntfs3"), "Missing ntfs3 (Windows drives)");
+    }
+
+    #[test]
+    fn test_get_essential_drivers_contains_expanded_networking() {
+        let drivers = get_essential_drivers();
+        // New networking drivers for portability
+        assert!(drivers.contains(&"virtio_net"), "Missing virtio_net (VM networking)");
+        assert!(drivers.contains(&"e1000e"), "Missing e1000e (Intel Ethernet)");
+        assert!(drivers.contains(&"r8169"), "Missing r8169 (Realtek Ethernet)");
+        assert!(drivers.contains(&"tun"), "Missing tun (VPN/tunneling)");
+    }
+
+    #[test]
+    fn test_get_essential_drivers_contains_expanded_hid_devices() {
+        let drivers = get_essential_drivers();
+        // New HID devices for peripheral support
+        assert!(drivers.contains(&"hid-apple"), "Missing hid-apple (Apple keyboards/mice)");
+        assert!(drivers.contains(&"hid-logitech-hidpp"), "Missing hid-logitech-hidpp (Logitech devices)");
+        assert!(drivers.contains(&"uinput"), "Missing uinput (virtual input)");
+        assert!(drivers.contains(&"joydev"), "Missing joydev (game controllers)");
+    }
+
+    #[test]
+    fn test_get_essential_drivers_contains_expanded_misc() {
+        let drivers = get_essential_drivers();
+        // New miscellaneous drivers for desktop functionality
+        assert!(drivers.contains(&"loop"), "Missing loop (ISO mounting)");
+        assert!(drivers.contains(&"efivarfs"), "Missing efivarfs (UEFI support)");
+        assert!(drivers.contains(&"sg"), "Missing sg (SCSI generic interface)");
     }
 
     #[test]
@@ -587,13 +643,15 @@ mod tests {
 
     #[test]
     fn test_whitelist_excludes_network_drivers() {
-        // CANONICAL TRUTH: Network drivers are explicitly excluded
-        // Handled by modprobed-db, not whitelist
-        assert!(!is_essential_driver("e1000"));
-        assert!(!is_essential_driver("e1000e"));
-        assert!(!is_essential_driver("r8169"));
-        assert!(!is_essential_driver("virtio_net"));
-        assert!(!is_essential_driver("bnx2"));
+        // UPDATED: Network drivers are now ESSENTIAL for portability
+        // They are included in the whitelist for VM and cross-platform support
+        assert!(!is_essential_driver("e1000"),  "e1000 (Intel legacy) should not be essential");
+        assert!(is_essential_driver("e1000e"),  "e1000e (Intel modern) should be essential");
+        assert!(is_essential_driver("r8169"),   "r8169 (Realtek) should be essential");
+        assert!(is_essential_driver("virtio_net"), "virtio_net (VM) should be essential");
+        assert!(!is_essential_driver("bnx2"),   "bnx2 (Broadcom legacy) should not be essential");
+        // Also verify TUN is included for VPN/networking tools
+        assert!(is_essential_driver("tun"),     "tun (tunneling) should be essential");
     }
 
     #[test]

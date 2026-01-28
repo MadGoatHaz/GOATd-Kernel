@@ -1984,6 +1984,7 @@ mod tests {
             disk_free_gb: 100,
             gpu_vendor: GpuVendor::Nvidia,
             gpu_model: "NVIDIA RTX 3080".to_string(),
+            gpu_active_driver: true,
             storage_type: StorageType::Nvme,
             storage_model: "Samsung 970 EVO".to_string(),
             boot_type: BootType::Efi,

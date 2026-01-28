@@ -797,17 +797,42 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                          # Create a temporary file with all non-module configs
                          TEMP_CONFIG=$(mktemp)
                          grep -v "=m$" ".config" > "$TEMP_CONFIG"
-
+   
                          # Append the original filtered modules back
                          echo "$FILTERED_MODULES" >> "$TEMP_CONFIG"
-
-                         # STEP 3.5: Restore whitelisted modules from pre_g2 backup if not already in result
-                         if [[ -n "$SAFE_PATTERN" ]]; then
-                             # Extract whitelisted entries from backup that match safe pattern
-                             grep -E "$SAFE_PATTERN" ".config.pre_g2" >> "$TEMP_CONFIG" 2>/dev/null || true
-                             printf "[PHASE-G2] WHITELIST: Restored whitelisted essential drivers from safe list\n" >&2
+   
+                         # STEP 3.5: ENFORCE whitelisted modules with explicit =y values (NOT just restore from backup)
+                         # CRITICAL FIX: Instead of grep'ing from .config.pre_g2, FORCE whitelisted items to =y
+                         # This ensures critical filesystem drivers survive localmodconfig filtering
+                         if [[ -n "$ENFORCER_SAFE_LIST" ]]; then
+                             printf "[PHASE-G2] WHITELIST: ENFORCING whitelisted modules to explicit values (=y or =m)\n" >&2
+                             
+                             # Define force-builtin list (filesystem drivers and NLS must be =y)
+                             local force_y_list="FAT_FS VFAT_FS EXFAT_FS NLS_UTF8 NLS_ISO8859_1 NLS_CP437 NLS_ASCII"
+                             
+                             # Iterate through safe list and FORCE each to appropriate value
+                             for module in $ENFORCER_SAFE_LIST; do
+                                 local config_name="CONFIG_$(echo $module | tr '[:lower:]' '[:upper:]')"
+                                 local config_value="=m"  # Default to module
+                                 
+                                 # Check if this module should be FORCE-BUILTIN (=y)
+                                 for force_y_item in $force_y_list; do
+                                     if [[ "$config_name" == "CONFIG_$force_y_item" ]]; then
+                                         config_value="=y"  # Force built-in for critical filesystem drivers
+                                         break
+                                     fi
+                                 done
+                                 
+                                 # Remove any existing config line for this module (to prevent duplicates)
+                                 grep -v "^${config_name}=" "$TEMP_CONFIG" > "${TEMP_CONFIG}.tmp" 2>/dev/null
+                                 mv "${TEMP_CONFIG}.tmp" "$TEMP_CONFIG"
+                                 
+                                 # Explicitly add the enforced value
+                                 echo "${config_name}${config_value}" >> "$TEMP_CONFIG"
+                                 printf "[PHASE-G2] WHITELIST: ENFORCED %s%s\n" "$config_name" "$config_value" >&2
+                             done
                          fi
-
+   
                          # Deduplicate and sort
                          sort -u "$TEMP_CONFIG" > ".config"
                          rm "$TEMP_CONFIG"
@@ -957,10 +982,12 @@ pub const WHITELIST_INJECTION: &str = r#"
      # - Security features (CFI, SMACK, SELINUX, AppArmor)
      # - Core functionality (SYSFS, PROC, TMPFS, DEVTMPFS)
      # - Boot/Init essentials (INITRAMFS_SOURCE, RAMFS, BINFMT)
-     # - Critical filesystems (EXT4, BTRFS, FAT, VFAT, EXFAT, ISO9660, CIFS)
+     # - Critical filesystems (EXT4, BTRFS, FAT, VFAT, EXFAT, ISO9660, CIFS, UDF, NTFS3)
      # - NLS support (ASCII, CP437, UTF8, ISO8859-1 for filesystem compatibility)
-     # - Loopback and UEFI (LOOP, EFIVAR_FS)
+     # - Loopback, UEFI, and SCSI (LOOP, EFIVAR_FS, SCSI_GENERICS)
      # - Storage drivers (AHCI, NVMe, USB, USB_STORAGE, USB_HID)
+     # - Networking (VIRTIO_NET, E1000E, R8169, TUN)
+     # - Desktop peripherals (HID-APPLE, HID-LOGITECH, UINPUT, JOYDEV)
      #
      # These options will survive localmodconfig filtering and ensure
      # the kernel remains bootable even with aggressive module stripping.
@@ -999,8 +1026,10 @@ CONFIG_FAT_FS=y
 CONFIG_VFAT_FS=y
 CONFIG_EXFAT_FS=y
 CONFIG_EXFAT_DEFAULT_IOCHARSET="utf8"
-CONFIG_ISO9660=m
-CONFIG_CIFS=m
+CONFIG_ISO9660=y
+CONFIG_CIFS=y
+CONFIG_UDF_FS=y
+CONFIG_NTFS3_FS=y
 
 # NLS (National Language Support) for EFI partition mounting (CRITICAL - FORCED BUILT-IN)
 # Cross-reference: src/config/whitelist.rs ESSENTIAL_DRIVERS array
@@ -1010,10 +1039,13 @@ CONFIG_NLS_UTF8=y
 CONFIG_NLS_ISO8859_1=y
 
 # Loopback device mounting (CRITICAL)
-CONFIG_BLK_DEV_LOOP=m
+CONFIG_BLK_DEV_LOOP=y
 
 # UEFI variables support (CRITICAL for UEFI systems)
-CONFIG_EFIVAR_FS=m
+CONFIG_EFIVAR_FS=y
+
+# SCSI generic interface for CD/DVD and other SCSI devices
+CONFIG_CHR_DEV_SG=y
 
 # Storage device support (CRITICAL)
 CONFIG_AHCI=m
@@ -1025,6 +1057,16 @@ CONFIG_USB_STORAGE=m
 
 # Input device support (CRITICAL - USB keyboards, mice)
 CONFIG_USB_HID=m
+CONFIG_HID_APPLE=m
+CONFIG_HID_LOGITECH_HIDPP=m
+CONFIG_INPUT_UINPUT=m
+CONFIG_INPUT_JOYDEV=m
+
+# Networking support (for portability and peripheral support)
+CONFIG_VIRTIO_NET=m
+CONFIG_E1000E=m
+CONFIG_R8169=m
+CONFIG_TUN=m
 EOF
 
          printf "[WHITELIST] Kernel whitelist applied - critical features protected\n" >&2

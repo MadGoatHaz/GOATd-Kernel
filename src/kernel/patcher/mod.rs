@@ -2156,6 +2156,179 @@ export READELF=llvm-readelf
         eprintln!("[Patcher] [ORCHESTRATION] ✓ Full patching sequence completed successfully");
         Ok(())
     }
+
+    /// Post-Configuration Audit Gate (Phase 5)
+    ///
+    /// Re-scans the `.config` file after kernel build to verify that critical
+    /// LTO and hardening flags survived the `oldconfig` phase. This is essential
+    /// to ensure the kernel was built with the intended configuration.
+    ///
+    /// # Critical FLAGS Audited
+    /// - `CONFIG_LTO_CLANG_FULL=y` or `CONFIG_LTO_CLANG_THIN=y` (if LTO enabled)
+    /// - `CONFIG_FORTIFY_SOURCE=y` (hardening)
+    /// - `CONFIG_CC_IS_CLANG=y` (Clang/LLVM enforcement)
+    /// - `CONFIG_STACKPROTECTOR=y` (stack protection)
+    /// - `CONFIG_MODULE_COMPRESS_ZSTD=y` (module optimization)
+    ///
+    /// # Returns
+    /// Tuple of (total_issues: usize, critical_issues: usize) where:
+    /// - `total_issues`: Number of all missing/override issues
+    /// - `critical_issues`: Number of critical LTO/hardening issues
+    ///
+    /// # Behavior
+    /// - Returns error only if `.config` cannot be read
+    /// - Returns counts even if issues found (non-fatal, logged for visibility)
+    /// - Issues are categorized as CRITICAL (LTO/core) or WARNING (optional hardening)
+    pub fn audit_configuration(&self) -> PatchResult<(usize, usize)> {
+        let config_path = self.src_dir.join(".config");
+
+        if !config_path.exists() {
+            eprintln!("[Patcher] [AUDIT] ⚠ .config not found - skipping audit");
+            return Ok((0, 0)); // Non-fatal: config may need to be generated
+        }
+
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| PatchError::PatchFailed(
+                format!("Failed to read .config for audit: {}", e)
+            ))?;
+
+        let mut total_issues = 0usize;
+        let mut critical_issues = 0usize;
+
+        eprintln!("[Patcher] [AUDIT] Starting Post-Configuration Audit...");
+
+        // =====================================================================
+        // CRITICAL AUDIT: LTO Configuration
+        // =====================================================================
+        eprintln!("[Patcher] [AUDIT] Checking LTO configuration...");
+
+        // Check for LTO_CLANG (base LTO flag)
+        let has_lto_clang = content.contains("CONFIG_LTO_CLANG=y");
+        if !has_lto_clang && !content.contains("# CONFIG_LTO_CLANG is not set") {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] CONFIG_LTO_CLANG=y NOT FOUND and not explicitly disabled");
+            critical_issues += 1;
+            total_issues += 1;
+        } else if !has_lto_clang {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] CONFIG_LTO_CLANG is DISABLED (overridden)");
+            critical_issues += 1;
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_LTO_CLANG=y present");
+        }
+
+        // Check for LTO_CLANG_THIN or LTO_CLANG_FULL (type variants)
+        let has_lto_thin = content.contains("CONFIG_LTO_CLANG_THIN=y");
+        let has_lto_full = content.contains("CONFIG_LTO_CLANG_FULL=y");
+        let has_lto_none = content.contains("CONFIG_LTO_NONE=y");
+
+        if has_lto_none {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] CONFIG_LTO_NONE=y FOUND (LTO DISABLED - OVERRIDE DETECTED)");
+            critical_issues += 1;
+            total_issues += 1;
+        } else if !has_lto_thin && !has_lto_full {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] Neither CONFIG_LTO_CLANG_THIN nor CONFIG_LTO_CLANG_FULL found");
+            critical_issues += 1;
+            total_issues += 1;
+        } else if has_lto_thin {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_LTO_CLANG_THIN=y present");
+        } else if has_lto_full {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_LTO_CLANG_FULL=y present");
+        }
+
+        // Check for HAS_LTO_CLANG
+        let has_lto_clang_capability = content.contains("CONFIG_HAS_LTO_CLANG=y");
+        if !has_lto_clang_capability {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] CONFIG_HAS_LTO_CLANG=y NOT FOUND");
+            critical_issues += 1;
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_HAS_LTO_CLANG=y present");
+        }
+
+        // =====================================================================
+        // CRITICAL AUDIT: Clang Compiler Enforcement
+        // =====================================================================
+        eprintln!("[Patcher] [AUDIT] Checking Clang/LLVM compiler enforcement...");
+
+        let has_clang = content.contains("CONFIG_CC_IS_CLANG=y");
+        if !has_clang {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] CONFIG_CC_IS_CLANG=y NOT FOUND");
+            critical_issues += 1;
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_CC_IS_CLANG=y present");
+        }
+
+        let has_gcc_disabled = !content.contains("CONFIG_CC_IS_GCC=y");
+        if !has_gcc_disabled {
+            eprintln!("[Patcher] [AUDIT] [CRITICAL] CONFIG_CC_IS_GCC=y FOUND (GCC enabled instead of Clang)");
+            critical_issues += 1;
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ GCC is disabled");
+        }
+
+        // =====================================================================
+        // HARDENING AUDIT: Fortify Source and Stack Protection
+        // =====================================================================
+        eprintln!("[Patcher] [AUDIT] Checking hardening configuration...");
+
+        let has_fortify = content.contains("CONFIG_FORTIFY_SOURCE=y");
+        if !has_fortify && !content.contains("# CONFIG_FORTIFY_SOURCE is not set") {
+            eprintln!("[Patcher] [AUDIT] [WARNING] CONFIG_FORTIFY_SOURCE=y NOT FOUND");
+            total_issues += 1;
+        } else if !has_fortify {
+            eprintln!("[Patcher] [AUDIT] [WARNING] CONFIG_FORTIFY_SOURCE is DISABLED");
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_FORTIFY_SOURCE=y present");
+        }
+
+        let has_stackprotector = content.contains("CONFIG_STACKPROTECTOR=y");
+        if !has_stackprotector && !content.contains("# CONFIG_STACKPROTECTOR is not set") {
+            eprintln!("[Patcher] [AUDIT] [WARNING] CONFIG_STACKPROTECTOR=y NOT FOUND");
+            total_issues += 1;
+        } else if !has_stackprotector {
+            eprintln!("[Patcher] [AUDIT] [WARNING] CONFIG_STACKPROTECTOR is DISABLED");
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_STACKPROTECTOR=y present");
+        }
+
+        // =====================================================================
+        // OPTIMIZATION AUDIT: Module Compression
+        // =====================================================================
+        eprintln!("[Patcher] [AUDIT] Checking optimization configuration...");
+
+        let has_module_compress = content.contains("CONFIG_MODULE_COMPRESS_ZSTD=y");
+        if !has_module_compress && !content.contains("# CONFIG_MODULE_COMPRESS_ZSTD is not set") {
+            eprintln!("[Patcher] [AUDIT] [WARNING] CONFIG_MODULE_COMPRESS_ZSTD=y NOT FOUND");
+            total_issues += 1;
+        } else if !has_module_compress {
+            eprintln!("[Patcher] [AUDIT] [WARNING] CONFIG_MODULE_COMPRESS_ZSTD is DISABLED");
+            total_issues += 1;
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ CONFIG_MODULE_COMPRESS_ZSTD=y present");
+        }
+
+        // =====================================================================
+        // AUDIT SUMMARY
+        // =====================================================================
+        eprintln!("[Patcher] [AUDIT] ========================================");
+        eprintln!("[Patcher] [AUDIT] Audit Results:");
+        eprintln!("[Patcher] [AUDIT]   Total Issues: {}", total_issues);
+        eprintln!("[Patcher] [AUDIT]   Critical Issues: {}", critical_issues);
+
+        if critical_issues > 0 {
+            eprintln!("[Patcher] [AUDIT] ⚠ CRITICAL: {} issue(s) found - kernel may not be correctly configured!", critical_issues);
+        } else {
+            eprintln!("[Patcher] [AUDIT] ✓ All critical configurations verified");
+        }
+
+        eprintln!("[Patcher] [AUDIT] ========================================");
+
+        Ok((total_issues, critical_issues))
+    }
 }
 
 #[cfg(test)]

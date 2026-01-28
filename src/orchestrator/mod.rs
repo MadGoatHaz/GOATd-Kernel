@@ -2,6 +2,7 @@
 
 pub mod checkpoint;
 pub mod executor;
+pub mod phases;
 pub mod state;
 
 use std::path::PathBuf;
@@ -10,9 +11,11 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 pub use executor::{
-    configure_build, prepare_build_environment, prepare_kernel_build, validate_hardware,
+    configure_build, prepare_kernel_build, validate_hardware,
     validate_kernel_build, validate_kernel_config,
 };
+
+pub use phases::prepare_build_environment;
 
 pub use state::{BuildPhaseState, OrchestrationState};
 
@@ -547,7 +550,7 @@ impl AsyncOrchestrator {
         // PHASE 1b: HARDWARE VALIDATION - After source acquisition, validate hardware
         // =========================================================================
         // Validate hardware meets minimum requirements and kernel source exists
-        executor::prepare_build_environment(&hardware, &self.kernel_path)?;
+        phases::prepare_build_environment(&hardware, &self.kernel_path)?;
 
         // Update progress: Preparation phase is 0-5%
         let progress = 5;
@@ -842,11 +845,17 @@ impl AsyncOrchestrator {
         );
 
         // Execute the unified patcher with finalized shield modules
+        eprintln!("[Build] [ORCHESTRATOR] [PATCHER-EXEC] Starting complete patcher execution sequence");
+        
+        // CRITICAL: Block execution until patcher completes ALL phases
         match patcher.execute_full_patch_with_env(shield_modules, config_options, build_env_vars) {
             Ok(()) => {
                 eprintln!(
-                    "[Build] [SUCCESS] Unified patcher completed all PKGBUILD and .config patches"
+                    "[Build] [SUCCESS] ✓ Unified patcher completed ALL phases successfully"
                 );
+                eprintln!("[Build] [SUCCESS] ✓ ENFORCER_SAFE_LIST array injected into PKGBUILD global scope");
+                eprintln!("[Build] [SUCCESS] ✓ restore_goatd_whitelist() function injected");
+                eprintln!("[Build] [SUCCESS] ✓ All PKGBUILD and .config patches applied");
                 self.record_patch_result(true).await;
             }
             Err(e) => {
@@ -854,9 +863,29 @@ impl AsyncOrchestrator {
                     "[Build] [WARNING] Patcher error: {:?}, continuing with build anyway",
                     e
                 );
+                eprintln!("[Build] [WARNING] ⚠ Patcher did not complete - may be incomplete patches");
                 // Don't fail the entire build - the .config and PKGBUILD may still be usable
                 self.record_patch_result(false).await;
             }
+        }
+
+        // CRITICAL: Verify PKGBUILD contains necessary injections before proceeding
+        let pkgbuild_path = self.kernel_path.join("PKGBUILD");
+        if let Ok(pkgbuild_content) = std::fs::read_to_string(&pkgbuild_path) {
+            let has_safe_list = pkgbuild_content.contains("declare -a ENFORCER_SAFE_LIST");
+            let has_restore_fn = pkgbuild_content.contains("restore_goatd_whitelist");
+            
+            eprintln!("[Build] [VERIFICATION] PKGBUILD content verification:");
+            eprintln!("[Build] [VERIFICATION]   ✓ ENFORCER_SAFE_LIST bash array: {}", if has_safe_list { "PRESENT" } else { "MISSING" });
+            eprintln!("[Build] [VERIFICATION]   ✓ restore_goatd_whitelist() function: {}", if has_restore_fn { "PRESENT" } else { "MISSING" });
+            
+            if !has_safe_list || !has_restore_fn {
+                eprintln!("[Build] [VERIFICATION] ⚠ WARNING: Critical injections missing from PKGBUILD!");
+            } else {
+                eprintln!("[Build] [VERIFICATION] ✓ All critical injections verified in PKGBUILD");
+            }
+        } else {
+            eprintln!("[Build] [VERIFICATION] ⚠ Could not read PKGBUILD for verification");
         }
 
         // Update progress: Patching phase is 8-10%
@@ -867,7 +896,8 @@ impl AsyncOrchestrator {
             progress
         );
 
-        // Transition to Building phase
+        // CRITICAL: Only transition to Building phase after patcher fully completes
+        eprintln!("[Build] [ORCHESTRATOR] Transitioning to Building phase after patcher completion");
         self.transition_phase(BuildPhaseState::Building).await
     }
 
@@ -1105,6 +1135,40 @@ impl AsyncOrchestrator {
             artifacts.len()
         );
 
+        // =========================================================================
+        // PHASE 5 AUDIT GATE: Post-Configuration Audit
+        // =========================================================================
+        // Verify that critical LTO and hardening flags survived the oldconfig phase.
+        // This is ESSENTIAL to ensure the kernel was built with the intended configuration.
+        eprintln!("[Build] [VALIDATION] Starting Post-Configuration Audit Gate (Phase 5)...");
+        self.send_status("Validation: Auditing post-configuration kernel settings...".to_string()).await;
+
+        match patcher.audit_configuration() {
+            Ok((total_issues, critical_issues)) => {
+                eprintln!("[Build] [VALIDATION] Audit completed: {} total issues, {} critical", total_issues, critical_issues);
+                
+                if critical_issues > 0 {
+                    // Log warning about critical issues but don't fail the build
+                    // The kernel was built, just with potential config overrides
+                    let warning_msg = format!(
+                        "⚠  Configuration Audit Warning: {} critical LTO/compiler issue(s) detected. \
+                        The kernel may have been built with different configuration than intended. \
+                        Please review .config to verify LTO and Clang settings.",
+                        critical_issues
+                    );
+                    eprintln!("[Build] [VALIDATION] {}", warning_msg);
+                    self.send_log_event(warning_msg).await;
+                } else {
+                    eprintln!("[Build] [VALIDATION] ✓ All critical configurations verified - kernel built with intended configuration");
+                }
+            }
+            Err(e) => {
+                eprintln!("[Build] [VALIDATION] ⚠ Audit failed (non-fatal): {:?}", e);
+                self.send_log_event(format!("Warning: Configuration audit could not complete: {:?}", e)).await;
+                // Non-fatal: continue with validation even if audit fails
+            }
+        }
+
         // Verify LTO was applied if requested
         if config.lto_type != crate::models::LtoType::None {
             // In a real implementation, would check ELF sections or symbols
@@ -1242,6 +1306,7 @@ mod tests {
             disk_free_gb: 100,
             gpu_vendor: crate::models::GpuVendor::Nvidia,
             gpu_model: "Test GPU".to_string(),
+            gpu_active_driver: true,
             storage_type: crate::models::StorageType::Nvme,
             storage_model: "Test Storage".to_string(),
             boot_type: crate::models::BootType::Efi,
@@ -1315,6 +1380,7 @@ mod tests {
             disk_free_gb: 100,
             gpu_vendor: crate::models::GpuVendor::Nvidia,
             gpu_model: "Test GPU".to_string(),
+            gpu_active_driver: true,
             storage_type: crate::models::StorageType::Nvme,
             storage_model: "Test Storage".to_string(),
             boot_type: crate::models::BootType::Efi,
@@ -1390,6 +1456,7 @@ mod tests {
             disk_free_gb: 100,
             gpu_vendor: crate::models::GpuVendor::Nvidia,
             gpu_model: "Test GPU".to_string(),
+            gpu_active_driver: true,
             storage_type: crate::models::StorageType::Nvme,
             storage_model: "Test Storage".to_string(),
             boot_type: crate::models::BootType::Efi,

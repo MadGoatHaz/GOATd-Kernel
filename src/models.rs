@@ -201,6 +201,7 @@ pub struct HardwareInfo {
     pub disk_free_gb: u32,         // Disk GiB
     pub gpu_vendor: GpuVendor,     // GPU
     pub gpu_model: String,         // Model
+    pub gpu_active_driver: bool,   // GPU driver active?
     pub storage_type: StorageType, // Type
     pub storage_model: String,     // Model
     pub boot_type: BootType,       // Firmware
@@ -219,6 +220,7 @@ impl Default for HardwareInfo {
             disk_free_gb: 50,
             gpu_vendor: GpuVendor::Unknown,
             gpu_model: "Generic GPU".to_string(),
+            gpu_active_driver: false,
             storage_type: StorageType::Ssd,
             storage_model: "Generic SSD".to_string(),
             boot_type: BootType::Efi,
@@ -673,6 +675,7 @@ mod tests {
             disk_free_gb: 100,
             gpu_vendor: GpuVendor::Nvidia,
             gpu_model: "NVIDIA RTX 3080".to_string(),
+            gpu_active_driver: true,
             storage_type: StorageType::Nvme,
             storage_model: "Samsung 970 EVO Plus".to_string(),
             boot_type: BootType::Efi,
@@ -687,6 +690,7 @@ mod tests {
         };
         assert_eq!(hw.ram_gb, 32);
         assert_eq!(hw.gpu_vendor, GpuVendor::Nvidia);
+        assert_eq!(hw.gpu_active_driver, true);
         assert_eq!(hw.cpu_cores, 8);
         assert_eq!(hw.cpu_threads, 16);
     }
