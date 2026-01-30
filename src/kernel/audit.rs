@@ -422,7 +422,7 @@ fn read_kernel_config(version: Option<&str>) -> String {
             if output.status.success() {
                 let config_str = String::from_utf8_lossy(&output.stdout);
                 if !config_str.is_empty() {
-                    log_info!("[KernelAudit] Successfully read kernel config from /proc/config.gz");
+                    log::debug!("[KernelAudit] Successfully read kernel config from /proc/config.gz");
                     return config_str.to_string();
                 }
             }
@@ -1399,7 +1399,7 @@ fn read_package_temperature() -> Option<f32> {
 
 fn detect_mglru_status() -> String {
     // Log the attempt
-    log_info!("[KernelAudit] Attempting MGLRU sysfs read from /sys/kernel/mm/lru_gen/enabled");
+    log::debug!("[KernelAudit] Attempting MGLRU sysfs read from /sys/kernel/mm/lru_gen/enabled");
 
     // Read /sys/kernel/mm/lru_gen/enabled to detect MGLRU status
     match std::fs::read_to_string("/sys/kernel/mm/lru_gen/enabled") {

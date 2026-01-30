@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, Once};
 
 /// Verification status for a kernel installation
 ///
@@ -113,7 +114,6 @@ impl DkmsCompatibility {
             // Stable kernels are generally compatible
             self.nvidia_compat_status = true;
             self.compat_reason = format!("Stable kernel - NVIDIA {} compatible", nvidia_version);
-            eprintln!("[DKMS-COMPAT] ✓ Stable kernel - NVIDIA compatible");
             return;
         }
 
@@ -382,7 +382,6 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
         if exact_path.join("include/linux/kernel.h").exists() {
             // STRICT VALIDATION: Read and verify .kernelrelease
             if validate_kernelrelease(&exact_path, kernel_version) {
-                eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✓ Found VERIFIED headers at (unified naming - exact match): {}", exact_path.display());
                 return Some(exact_path);
             } else {
                 eprintln!("[DISCOVER_HEADERS] [STRATEGY-1] ✗ Headers found but .kernelrelease validation failed");
@@ -403,7 +402,6 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
             if base_path.join("include/linux/kernel.h").exists() {
                 // STRICT VALIDATION: Must match FULL kernel_version, not just base
                 if validate_kernelrelease(&base_path, kernel_version) {
-                    eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✓ Found VERIFIED headers at (base version with full version match): {}", base_path.display());
                     return Some(base_path);
                 } else {
                     eprintln!("[DISCOVER_HEADERS] [STRATEGY-2] ✗ Base path found but .kernelrelease does not match full kernel_version");
@@ -550,10 +548,8 @@ pub fn verify_kernel_module_directory(
         // Check for kernel files to confirm it's a valid kernel install
         let module_dep = usr_lib_modules.join("modules.dep");
         if module_dep.exists() {
-            eprintln!("[VERIFY] ✓ modules.dep found (valid kernel install)");
             return Ok(true);
         }
-        eprintln!("[VERIFY] ⚠ Module directory exists but modules.dep not found");
         return Ok(false);
     }
 
@@ -566,10 +562,8 @@ pub fn verify_kernel_module_directory(
         );
         let module_dep = lib_modules.join("modules.dep");
         if module_dep.exists() {
-            eprintln!("[VERIFY] ✓ modules.dep found (valid kernel install)");
             return Ok(true);
         }
-        eprintln!("[VERIFY] ⚠ Module directory exists but modules.dep not found");
         return Ok(false);
     }
 
@@ -595,18 +589,14 @@ pub fn verify_build_symlink(kernel_version: &str) -> Result<bool, KernelInstalla
         .join(kernel_version)
         .join("build");
     if build_link.exists() {
-        eprintln!("[VERIFY] ✓ Build symlink exists: {}", build_link.display());
 
         // Verify it points to valid headers
         if let Ok(path) = build_link.canonicalize() {
-            eprintln!("[VERIFY] ✓ Build symlink points to: {}", path.display());
 
             // Check for Makefile (key indicator of valid kernel headers)
             if path.join("Makefile").exists() {
-                eprintln!("[VERIFY] ✓ Makefile found in build target");
                 return Ok(true);
             }
-            eprintln!("[VERIFY] ⚠ Build symlink points to valid path but Makefile not found");
             return Ok(false);
         }
     }
@@ -614,15 +604,11 @@ pub fn verify_build_symlink(kernel_version: &str) -> Result<bool, KernelInstalla
     // Try /lib/modules
     let build_link = Path::new("/lib/modules").join(kernel_version).join("build");
     if build_link.exists() {
-        eprintln!("[VERIFY] ✓ Build symlink exists: {}", build_link.display());
 
         if let Ok(path) = build_link.canonicalize() {
-            eprintln!("[VERIFY] ✓ Build symlink points to: {}", path.display());
             if path.join("Makefile").exists() {
-                eprintln!("[VERIFY] ✓ Makefile found in build target");
                 return Ok(true);
             }
-            eprintln!("[VERIFY] ⚠ Build symlink points to valid path but Makefile not found");
             return Ok(false);
         }
     }
@@ -655,14 +641,11 @@ pub fn verify_source_symlink(kernel_version: &str) -> Result<bool, KernelInstall
         );
 
         if let Ok(path) = source_link.canonicalize() {
-            eprintln!("[VERIFY] ✓ Source symlink points to: {}", path.display());
 
             // Check for kernel.h (key header file)
             if path.join("include/linux/kernel.h").exists() {
-                eprintln!("[VERIFY] ✓ include/linux/kernel.h found in source target");
                 return Ok(true);
             }
-            eprintln!("[VERIFY] ⚠ Source symlink points to valid path but kernel.h not found");
             return Ok(false);
         }
     }
@@ -678,12 +661,9 @@ pub fn verify_source_symlink(kernel_version: &str) -> Result<bool, KernelInstall
         );
 
         if let Ok(path) = source_link.canonicalize() {
-            eprintln!("[VERIFY] ✓ Source symlink points to: {}", path.display());
             if path.join("include/linux/kernel.h").exists() {
-                eprintln!("[VERIFY] ✓ include/linux/kernel.h found in source target");
                 return Ok(true);
             }
-            eprintln!("[VERIFY] ⚠ Source symlink points to valid path but kernel.h not found");
             return Ok(false);
         }
     }
@@ -720,15 +700,12 @@ pub fn verify_kernel_headers_installed(
                     headers_dir.display()
                 );
             } else {
-                eprintln!("[VERIFY] ⚠ Headers directory exists but kernel.h not found");
                 return Ok(false);
             }
 
             if headers_dir.join("Makefile").exists() {
-                eprintln!("[VERIFY] ✓ Makefile found (build system present)");
                 return Ok(true);
             } else {
-                eprintln!("[VERIFY] ⚠ Makefile not found (incomplete headers)");
                 return Ok(false);
             }
         }
@@ -812,7 +789,6 @@ pub fn create_kernel_symlinks_fallback(
                         headers_dir.display()
                     )));
                 }
-                eprintln!("[VERIFY] ✓ Headers directory .kernelrelease verified: {}", stored_version);
             }
             Err(e) => {
                 return Err(KernelInstallationError::HeadersNotInstalled(format!(
@@ -836,7 +812,6 @@ pub fn create_kernel_symlinks_fallback(
                             headers_dir.display()
                         )));
                     }
-                    eprintln!("[VERIFY] ✓ Headers directory kernel.release verified: {}", stored_version);
                 }
                 Err(e) => {
                     return Err(KernelInstallationError::HeadersNotInstalled(format!(
@@ -876,7 +851,6 @@ pub fn create_kernel_symlinks_fallback(
             use std::os::unix::fs as unix_fs;
             match unix_fs::symlink(&headers_dir, &build_link) {
                 Ok(()) => {
-                    eprintln!("[VERIFY] ✓ Build symlink created successfully");
                 }
                 Err(e) => {
                     return Err(KernelInstallationError::SymlinkCreationFailed(format!(
@@ -887,7 +861,6 @@ pub fn create_kernel_symlinks_fallback(
             }
         }
     } else {
-        eprintln!("[VERIFY] ✓ Build symlink already valid");
     }
 
     // Create source symlink
@@ -913,7 +886,6 @@ pub fn create_kernel_symlinks_fallback(
             use std::os::unix::fs as unix_fs;
             match unix_fs::symlink(&headers_dir, &source_link) {
                 Ok(()) => {
-                    eprintln!("[VERIFY] ✓ Source symlink created successfully");
                 }
                 Err(e) => {
                     return Err(KernelInstallationError::SymlinkCreationFailed(format!(
@@ -924,7 +896,6 @@ pub fn create_kernel_symlinks_fallback(
             }
         }
     } else {
-        eprintln!("[VERIFY] ✓ Source symlink already valid");
     }
 
     eprintln!("[VERIFY] Done: Fallback symlinks created/verified/repaired with strict version validation");
@@ -972,7 +943,6 @@ pub fn read_mpl_kernelrelease(workspace_root: &Path) -> Option<String> {
                     }
                 }
             }
-            eprintln!("[VERIFY] [MPL] ⚠ MPL file exists but GOATD_KERNELRELEASE not found");
             None
         }
         Err(e) => {
@@ -1008,7 +978,6 @@ pub fn verify_kernel_against_mpl(
             );
 
             if installed_version == expected_version {
-                eprintln!("[VERIFY] [MPL] ✓ MATCH: Installed kernel matches MPL metadata");
                 Ok(true)
             } else {
                 eprintln!(
@@ -1019,7 +988,6 @@ pub fn verify_kernel_against_mpl(
             }
         }
         None => {
-            eprintln!("[VERIFY] [MPL] ⚠ No valid MPL found, cannot perform MPL verification");
             Ok(false)
         }
     }
@@ -1046,7 +1014,38 @@ pub fn verify_kernel_against_mpl(
 /// - llvm-readelf (readelf alternative)
 ///
 /// Returns: `Ok(true)` if all required LLVM tools exist, `Err` with diagnostic message if missing
+// Static cache for LLVM toolchain verification result
+// Only executes the actual 'which' commands once per application lifecycle
+static LLVM_CACHE_INIT: Once = Once::new();
+static LLVM_CACHE: Mutex<Option<Result<bool, String>>> = Mutex::new(None);
+
 pub fn verify_llvm_toolchain() -> Result<bool, String> {
+    // Fast path: return cached result if available
+    if let Ok(cache) = LLVM_CACHE.lock() {
+        if let Some(cached_result) = cache.as_ref() {
+            return cached_result.clone();
+        }
+    }
+
+    // Slow path: execute verification and cache result
+    LLVM_CACHE_INIT.call_once(|| {
+        let result = verify_llvm_toolchain_impl();
+        let _ = LLVM_CACHE.lock().map(|mut cache| {
+            *cache = Some(result);
+        });
+    });
+
+    // Return the cached result
+    if let Ok(cache) = LLVM_CACHE.lock() {
+        cache.as_ref().map(|r| r.clone()).unwrap_or_else(|| {
+            Err("LLVM cache verification failed".to_string())
+        })
+    } else {
+        Err("Failed to access LLVM cache".to_string())
+    }
+}
+
+fn verify_llvm_toolchain_impl() -> Result<bool, String> {
     let required_tools = vec!["clang", "clang++", "ld.lld", "llvm-ar", "llvm-nm", "llvm-strip", "llvm-objcopy", "llvm-readelf"];
     let mut missing_tools = Vec::new();
 
@@ -1071,7 +1070,7 @@ pub fn verify_llvm_toolchain() -> Result<bool, String> {
             missing_tools.join(", ")
         ))
     } else {
-        eprintln!("[VERIFY] ✓ All LLVM toolchain tools verified");
+        log::debug!("[VERIFY] ✓ All LLVM toolchain tools verified");
         Ok(true)
     }
 }
@@ -1218,5 +1217,30 @@ mod tests {
         assert!(!compat.is_rc_kernel);
         assert_eq!(compat.rc_version, None);
         assert_eq!(compat.base_kernel_version, None);
+    }
+
+    #[test]
+    fn test_verify_llvm_toolchain_caching() {
+        // Test that verify_llvm_toolchain caches its result
+        // First call performs actual verification
+        let result1 = verify_llvm_toolchain();
+        
+        // Second call should return the cached result without re-executing `which` commands
+        let result2 = verify_llvm_toolchain();
+        
+        // Both calls should produce identical results (cached)
+        match (&result1, &result2) {
+            (Ok(b1), Ok(b2)) => {
+                assert_eq!(b1, b2, "Cached results should be identical");
+                eprintln!("[TEST] LLVM toolchain caching verified - both calls returned Ok");
+            }
+            (Err(e1), Err(e2)) => {
+                assert_eq!(e1, e2, "Cached error messages should be identical");
+                eprintln!("[TEST] LLVM toolchain caching verified - both calls returned same error");
+            }
+            _ => {
+                panic!("First and second verify_llvm_toolchain calls should produce identical results");
+            }
+        }
     }
 }

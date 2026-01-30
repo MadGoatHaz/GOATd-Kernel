@@ -137,7 +137,11 @@ fn render_dashboard_content(
     // System Health Status Section
     ui.heading("System Health");
 
-    let health_report = HealthManager::check_system_health();
+    // Use cached health report from controller instead of direct system health check (respects 60s cache)
+    let health_report = match controller.try_read() {
+        Ok(controller_guard) => controller_guard.get_cached_health_report(),
+        Err(_) => HealthManager::check_system_health(), // Fallback if lock is held
+    };
 
     // Display health status with color coding
     let status_color = match health_report.status {
@@ -377,7 +381,11 @@ fn render_dashboard_content(
                             // STEP 3: Re-check system health
                             // ================================================================
                             eprintln!("[DASHBOARD] [HEALTH] [STEP 3] Re-checking system health...");
-                            let updated_health = HealthManager::check_system_health();
+                            let updated_health = if let Ok(guard) = controller_clone.try_read() {
+                                guard.get_cached_health_report()
+                            } else {
+                                HealthManager::check_system_health()
+                            };
                             eprintln!("[DASHBOARD] [HEALTH] [STEP 3] Health status after fixes: {} | Missing Official: {} | Missing GPG: {} | Missing Optional: {}",
                                 updated_health.status.as_str(),
                                 updated_health.missing_official_packages.len(),
