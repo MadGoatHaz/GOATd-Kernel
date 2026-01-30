@@ -54,30 +54,30 @@ pub type GitResult<T> = Result<T, GitError>;
 pub fn get_latest_remote_version(url: &str) -> GitResult<String> {
     use git2::Repository;
 
-    eprintln!("[GIT_POLL] Starting version poll for: {}", url);
+    log::debug!("[GIT_POLL] Starting version poll for: {}", url);
 
     // Create a temporary directory for repository operations with RAII cleanup
     let temp_dir = tempfile::tempdir().map_err(|e| GitError::Io(e))?;
 
     // Create a temporary bare repository
     let repo = Repository::init_bare(temp_dir.path()).map_err(|e| {
-        eprintln!("[GIT_POLL] ERROR: Failed to create bare repository: {}", e);
+        log::error!("[GIT_POLL] ERROR: Failed to create bare repository: {}", e);
         GitError::Repository(format!("Failed to create temporary repository: {}", e))
     })?;
 
-    eprintln!("[GIT_POLL] Bare repository created at: {:?}", temp_dir);
+    log::trace!("[GIT_POLL] Bare repository created at: {:?}", temp_dir);
 
     // Add the remote URL
     let remote = repo.remote("origin", url).map_err(|e| {
-        eprintln!("[GIT_POLL] ERROR: Failed to add remote {}: {}", url, e);
+        log::error!("[GIT_POLL] ERROR: Failed to add remote {}: {}", url, e);
         GitError::Repository(format!("Failed to add remote {}: {}", url, e))
     })?;
 
-    eprintln!("[GIT_POLL] Remote added successfully");
+    log::trace!("[GIT_POLL] Remote added successfully");
 
     // List remote references
     let remote_refs = remote.list().map_err(|e| {
-        eprintln!("[GIT_POLL] ERROR: Failed to list remote references: {}", e);
+        log::error!("[GIT_POLL] ERROR: Failed to list remote references: {}", e);
         GitError::Repository(format!(
             "Failed to list remote references for {}: {}",
             url, e
@@ -88,7 +88,7 @@ pub fn get_latest_remote_version(url: &str) -> GitResult<String> {
     let mut branches: Vec<(String, String)> = Vec::new();
     let mut tag_set: HashSet<String> = HashSet::new();
 
-    eprintln!("[GIT_POLL] Analyzing remote references...");
+    log::trace!("[GIT_POLL] Analyzing remote references...");
 
     // Parse refs into tags and branches, with deduplication
     for reference in remote_refs {
@@ -104,9 +104,9 @@ pub fn get_latest_remote_version(url: &str) -> GitResult<String> {
                     .strip_suffix("^{}")
                     .unwrap_or(&tag_name)
                     .to_string();
-                eprintln!("[GIT_POLL]   Found peeled tag (dedup): {}", tag_name);
+                log::trace!("[GIT_POLL]   Found peeled tag (dedup): {}", tag_name);
             } else {
-                eprintln!("[GIT_POLL]   Found tag: {}", tag_name);
+                log::trace!("[GIT_POLL]   Found tag: {}", tag_name);
             }
 
             // Add to tag set for deduplication
@@ -115,12 +115,12 @@ pub fn get_latest_remote_version(url: &str) -> GitResult<String> {
             }
         } else if name.starts_with("refs/heads/") {
             let branch_name = name.strip_prefix("refs/heads/").unwrap_or(name);
-            eprintln!("[GIT_POLL]   Found branch: {}", branch_name);
+            log::trace!("[GIT_POLL]   Found branch: {}", branch_name);
             branches.push((branch_name.to_string(), oid.to_string()));
         }
     }
 
-    eprintln!(
+    log::debug!(
         "[GIT_POLL] Total unique tags: {}, branches: {}",
         tags.len(),
         branches.len()
@@ -132,41 +132,41 @@ pub fn get_latest_remote_version(url: &str) -> GitResult<String> {
         tags.sort_by(|a, b| {
             let a_num = extract_version_number(a);
             let b_num = extract_version_number(b);
-            eprintln!(
+            log::trace!(
                 "[GIT_POLL] Comparing: {} ({:?}) vs {} ({:?})",
                 a, a_num, b, b_num
             );
             b_num.cmp(&a_num) // Reverse order for descending sort
         });
 
-        eprintln!("[GIT_POLL] Top 5 sorted tags:");
+        log::trace!("[GIT_POLL] Top 5 sorted tags:");
         for (idx, tag) in tags.iter().take(5).enumerate() {
-            eprintln!("[GIT_POLL]   {}. {}", idx + 1, tag);
+            log::trace!("[GIT_POLL]   {}. {}", idx + 1, tag);
         }
 
         let selected = tags[0].clone();
-        eprintln!("[GIT_POLL] ✓ Selected version: {}", selected);
+        log::info!("[GIT_POLL] ✓ Selected version: {}", selected);
         Ok(selected)
     } else if !branches.is_empty() {
         // Fallback to main or master branch
         if let Some(main_branch) = branches.iter().find(|b| b.0 == "main") {
             let result = format!("HEAD-{}", main_branch.1[..7].to_string());
-            eprintln!("[GIT_POLL] ✓ Fallback to main branch: {}", result);
+            log::info!("[GIT_POLL] ✓ Fallback to main branch: {}", result);
             Ok(result)
         } else if let Some(master_branch) = branches.iter().find(|b| b.0 == "master") {
             let result = format!("HEAD-{}", master_branch.1[..7].to_string());
-            eprintln!("[GIT_POLL] ✓ Fallback to master branch: {}", result);
+            log::info!("[GIT_POLL] ✓ Fallback to master branch: {}", result);
             Ok(result)
         } else {
             let result = format!("HEAD-{}", branches[0].1[..7].to_string());
-            eprintln!(
+            log::info!(
                 "[GIT_POLL] ✓ Fallback to first available branch: {}",
                 result
             );
             Ok(result)
         }
     } else {
-        eprintln!("[GIT_POLL] ✗ ERROR: No tags or branches found");
+        log::error!("[GIT_POLL] ✗ ERROR: No tags or branches found");
         Err(GitError::Repository(format!(
             "No tags or branches found in remote: {}",
             url
@@ -233,8 +233,8 @@ fn extract_version_number(tag: &str) -> (u32, u32, u32) {
 /// }
 /// ```
 pub fn validate_source_version(path: &Path, expected_version: &str) -> GitResult<bool> {
-    eprintln!("[GIT] [VALIDATE] Checking source version at: {:?}", path);
-    eprintln!("[GIT] [VALIDATE] Expected version: {}", expected_version);
+    log::debug!("[GIT] [VALIDATE] Checking source version at: {:?}", path);
+    log::debug!("[GIT] [VALIDATE] Expected version: {}", expected_version);
 
     // Read PKGBUILD file
     let pkgbuild_path = path.join("PKGBUILD");
@@ -250,7 +250,7 @@ pub fn validate_source_version(path: &Path, expected_version: &str) -> GitResult
     })?;
 
     let actual_version = format!("{}-{}", pkgver, pkgrel);
-    eprintln!(
+    log::debug!(
         "[GIT] [VALIDATE] Extracted version from source: {}",
         actual_version
     );
@@ -258,12 +258,12 @@ pub fn validate_source_version(path: &Path, expected_version: &str) -> GitResult
     // Compare versions
     let matches = actual_version == expected_version;
     if matches {
-        eprintln!(
+        log::info!(
             "[GIT] [VALIDATE] ✓ Version match: {} == {}",
             actual_version, expected_version
         );
     } else {
-        eprintln!(
+        log::warn!(
             "[GIT] [VALIDATE] ✗ Version mismatch: {} != {}",
             actual_version, expected_version
         );
@@ -310,16 +310,16 @@ impl GitManager {
     pub fn clone(url: &str, target_path: impl AsRef<Path>) -> GitResult<Self> {
         let target_path = target_path.as_ref();
 
-        eprintln!(
+        log::debug!(
             "[Git] [CLONE] Starting shallow clone with depth=1 for: {}",
             url
         );
-        eprintln!("[Git] [CLONE] Target path: {:?}", target_path);
+        log::trace!("[Git] [CLONE] Target path: {:?}", target_path);
 
         // Attempt shallow clone with depth=1 for optimization
         Self::shallow_clone(url, target_path).or_else(|shallow_err| {
-            eprintln!("[Git] [CLONE] ⚠ Shallow clone failed: {}", shallow_err);
-            eprintln!("[Git] [CLONE] Falling back to standard (full) clone");
+            log::debug!("[Git] [CLONE] ⚠ Shallow clone failed: {}", shallow_err);
+            log::debug!("[Git] [CLONE] Falling back to standard (full) clone");
 
             // Fallback to standard clone if shallow clone fails
             Repository::clone(url, target_path)
@@ -332,7 +332,7 @@ impl GitManager {
                 })
         })?;
 
-        eprintln!("[Git] [CLONE] ✓ Clone completed successfully");
+        log::info!("[Git] [CLONE] ✓ Clone completed successfully");
         GitManager::new(target_path)
     }
 
@@ -349,8 +349,8 @@ impl GitManager {
     /// * `Ok(())` if shallow clone succeeds
     /// * `Err(GitError)` if shallow clone fails
     fn shallow_clone(url: &str, target_path: &Path) -> GitResult<()> {
-        eprintln!("[Git] [SHALLOW-CLONE] Initiating shallow clone (depth=1)");
-        eprintln!("[Git] [SHALLOW-CLONE] URL: {}", url);
+        log::debug!("[Git] [SHALLOW-CLONE] Initiating shallow clone (depth=1)");
+        log::trace!("[Git] [SHALLOW-CLONE] URL: {}", url);
 
         // Create a new RepoBuilder for shallow cloning
         let mut builder = RepoBuilder::new();
@@ -359,7 +359,7 @@ impl GitManager {
         let mut fetch_options = git2::FetchOptions::new();
 
         // Enable shallow cloning with depth=1
-        eprintln!("[Git] [SHALLOW-CLONE] Setting fetch depth to 1");
+        log::trace!("[Git] [SHALLOW-CLONE] Setting fetch depth to 1");
         fetch_options.depth(1);
 
         // Set up callbacks for progress reporting
@@ -373,7 +373,7 @@ impl GitManager {
 
             if total > 0 {
                 let percent = (received as f32 / total as f32 * 100.0) as u32;
-                eprintln!(
+                log::trace!(
                     "[Git] [SHALLOW-CLONE] [PROGRESS] {}/{} objects ({} indexed) - {}%",
                     received, total, indexed, percent
                 );
@@ -386,16 +386,16 @@ impl GitManager {
         builder.fetch_options(fetch_options);
 
         // Clone the repository
-        eprintln!(
+        log::trace!(
             "[Git] [SHALLOW-CLONE] Cloning repository to {:?}",
             target_path
         );
         builder.clone(url, target_path).map_err(|e| {
-            eprintln!("[Git] [SHALLOW-CLONE] ✗ Shallow clone failed: {}", e);
+            log::error!("[Git] [SHALLOW-CLONE] ✗ Shallow clone failed: {}", e);
             GitError::Clone(format!("Shallow clone failed for {}: {}", url, e))
         })?;
 
-        eprintln!("[Git] [SHALLOW-CLONE] ✓ Shallow clone completed successfully");
+        log::info!("[Git] [SHALLOW-CLONE] ✓ Shallow clone completed successfully");
         Ok(())
     }
 

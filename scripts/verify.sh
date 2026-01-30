@@ -37,6 +37,46 @@ NC='\033[0m' # No Color
 FAILURES=0
 
 # ========================================================================
+# TOOLCHAIN VALIDATION: Verify clang, ld.lld, and NO gcc in prioritized path
+# ========================================================================
+echo -e "${YELLOW}[TOOLCHAIN VALIDATION] Verifying LLVM/Clang toolchain...${NC}"
+echo ""
+
+# Check for clang availability
+echo -e "${YELLOW}  Checking for clang...${NC}"
+if ! command -v clang &> /dev/null; then
+    echo -e "${RED}✗ clang not found in PATH${NC}"
+    FAILURES=$((FAILURES + 1))
+else
+    echo -e "${GREEN}✓ clang found: $(which clang)${NC}"
+fi
+
+# Check for ld.lld availability
+echo -e "${YELLOW}  Checking for ld.lld...${NC}"
+if ! command -v ld.lld &> /dev/null; then
+    echo -e "${RED}✗ ld.lld not found in PATH${NC}"
+    FAILURES=$((FAILURES + 1))
+else
+    echo -e "${GREEN}✓ ld.lld found: $(which ld.lld)${NC}"
+fi
+
+# Check for gcc in prioritized path - Informational only for now
+echo -e "${YELLOW}  Checking for gcc in prioritized path...${NC}"
+if command -v gcc &> /dev/null; then
+    GCC_PATH=$(which gcc)
+    # Check if it's from /usr/bin (prioritized) or /usr/local/bin (not prioritized)
+    if [[ "$GCC_PATH" == /usr/bin/* ]] || [[ "$GCC_PATH" == /bin/* ]]; then
+        echo -e "${YELLOW}! gcc found in prioritized path: $GCC_PATH (Overridden by LLVM enforcement)${NC}"
+    else
+        echo -e "${GREEN}✓ gcc exists in non-prioritized path: $GCC_PATH${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ gcc not in PATH (ideal)${NC}"
+fi
+
+echo ""
+
+# ========================================================================
 # TEST 1: Logging Robustness Test
 # ========================================================================
 echo -e "${YELLOW}[TEST 1/3] Running Logging Robustness Test${NC}"

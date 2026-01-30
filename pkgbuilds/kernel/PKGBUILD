@@ -10,7 +10,8 @@ pkgrel=1
 arch=(x86_64)
 url="https://github.com/archlinux/linux"
 license=(GPL2)
-makedepends=(bc libelf pahole python python-sphinx texinfo base-devel git)
+makedepends=(bc libelf pahole python python-sphinx texinfo llvm clang lld git)
+# Note: gcc removed from makedepends; LLVM toolchain enforced. gcc-libs in depends provides C runtime compatibility.
 options=('!strip')
 
 # Source configuration
@@ -136,6 +137,11 @@ package_linux-headers() {
         find rust -maxdepth 1 -type f -name '*.so' -exec install -Dt "$builddir/rust" {} +
     fi
     
+    # Install .kernelrelease file to module build directory
+    install -Dm644 "build/.kernelrelease" "$pkgdir/usr/lib/modules/$_kernver/build/.kernelrelease"
+    
+    # Install .kernelrelease file to kernel source path
+    install -Dm644 "build/.kernelrelease" "$builddir/.kernelrelease"
     # === CRITICAL: Create DKMS symlinks for module compilation ===
     # These symlinks allow DKMS and kernel module compilation to find the build headers.
     # The symlinks must point to the headers directory installed above.

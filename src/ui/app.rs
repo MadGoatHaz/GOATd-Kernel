@@ -805,17 +805,16 @@ impl eframe::App for AppUI {
         }
         
         // =====================================================================
-        // CONTINUOUS REPAINT MODE: Force real-time rendering during high-volume builds
+        // THROTTLED REPAINT MODE: Prevent GPU command buffer saturation during builds
         // =====================================================================
-        // When is_building=true, enable "Continuous Repaint" mode that requests repaints
-        // on every frame without waiting for events or polling intervals. This ensures
-        // the UI stays responsive during heavy log bursts (thousands of lines/sec) and
-        // prevents perceived lag in the build log display.
+        // When is_building=true, use timed repaint throttling (16ms = ~60Hz) instead of
+        // continuous request_repaint(). This prevents GPU command buffer saturation and OOM
+        // errors during high-volume logging while maintaining responsive UI updates.
         //
-        // Cost: CPU usage increases only during active builds (is_building=true).
-        // Benefit: Logs display immediately without perceptible delay.
+        // Cost: Minimal (timed repaints only at 60Hz)
+        // Benefit: Prevents GPU OOM, maintains responsiveness without GPU buffer exhaustion
         if self.ui_state.is_building {
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
         // HEAVY LOGIC OUT OF RENDER LOOP (FIX 4) - TAB-GATED AND FRAME-THROTTLED
@@ -941,44 +940,48 @@ impl eframe::App for AppUI {
                 "linux-tkg",
             ];
             let now = Instant::now();
-            let poll_interval = std::time::Duration::from_secs(1800);
+             // CRITICAL THROTTLE: 30 second interval between polls per variant (prevents network spam)
+             let poll_interval = std::time::Duration::from_secs(30);
 
-            for variant in variants {
-                // Only poll if:
-                // 1. Not currently polling for this variant
-                // 2. Either missing from latest_versions OR last poll was >= 30 seconds ago
-                if !self.ui_state.version_poll_active.contains(variant) {
-                    let should_poll = if !self.ui_state.latest_versions.contains_key(variant) {
-                        // Version not fetched yet
-                        true
-                    } else if let Some(&last_poll_time) =
-                        self.ui_state.last_version_poll.get(variant)
-                    {
-                        // Version exists but check if refresh is needed (30s throttle)
-                        now.duration_since(last_poll_time) >= poll_interval
-                    } else {
-                        // Version exists but no last_poll record (shouldn't happen, but be safe)
-                        true
-                    };
+             for variant in variants {
+                 // SAFETY: Three-layer throttling to prevent concurrent duplicate requests
+                 // Layer 1: Check if currently active (inflight request tracking at controller level)
+                 // Layer 2: Check if last poll was within 30s window (time-based throttle)
+                 // Layer 3: Mark as active BEFORE spawning (prevents duplicate spawn submissions)
+                 if !self.ui_state.version_poll_active.contains(variant) {
+                     let should_poll = if !self.ui_state.latest_versions.contains_key(variant) {
+                         // Version not fetched yet - initial population
+                         true
+                     } else if let Some(&last_poll_time) =
+                         self.ui_state.last_version_poll.get(variant)
+                     {
+                         // Version exists but check if refresh is needed (30s throttle window)
+                         now.duration_since(last_poll_time) >= poll_interval
+                     } else {
+                         // Version exists but no last_poll record, should poll for safety
+                         true
+                     };
 
-                    if should_poll {
-                        let variant_str = variant.to_string();
-                        let controller = self.controller.clone();
-                        tokio::spawn(async move {
-                            let ctrl = controller.read().await;
-                            ctrl.trigger_version_poll(variant_str);
-                        });
-                        // Mark as polling
-                        self.ui_state
-                            .version_poll_active
-                            .insert(variant.to_string());
-                        // Record poll attempt time
-                        self.ui_state
-                            .last_version_poll
-                            .insert(variant.to_string(), now);
-                    }
-                }
-            }
+                     if should_poll {
+                         // Mark as polling BEFORE spawning to prevent duplicate submissions
+                         self.ui_state
+                             .version_poll_active
+                             .insert(variant.to_string());
+                         // Record poll attempt time
+                         self.ui_state
+                             .last_version_poll
+                             .insert(variant.to_string(), now);
+                         
+                         let variant_str = variant.to_string();
+                         let controller = self.controller.clone();
+                         tokio::spawn(async move {
+                             let ctrl = controller.read().await;
+                             // Controller has independent inflight tracking (Arc<Mutex<HashSet>> in pkgbuild module)
+                             ctrl.trigger_version_poll(variant_str);
+                         });
+                     }
+                 }
+             }
         }
 
         // Render UI layers

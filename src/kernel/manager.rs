@@ -327,7 +327,7 @@ impl KernelArtifactRegistry {
                 .trim_start_matches("/");
 
             // Check if any line in tarball contents matches this critical file
-            // Use suffix matching to handle Arch's deep directory structure (usr/lib/modules/*/build/...)
+            // Use suffix matching to handle Arch's deep directory structure (usr/lib/modules/*/...)
             let found = tarball_contents.lines().any(|line| {
                 let normalized_line = line.trim_start_matches("./").trim_start_matches("/");
 
@@ -342,7 +342,7 @@ impl KernelArtifactRegistry {
                 }
 
                 // Suffix match for deeply nested paths
-                // E.g., "usr/lib/modules/6.18/build/include/linux/memremap.h" ends with "include/linux/memremap.h"
+                // E.g., "usr/lib/modules/6.18/include/linux/memremap.h" ends with "include/linux/memremap.h"
                 if normalized_line.ends_with(normalized_critical) {
                     // Verify it's a proper path boundary (preceded by / or at start)
                     let prefix_len = normalized_line
@@ -377,71 +377,118 @@ impl KernelArtifactRegistry {
         Ok(all_files_found)
     }
 
-    /// Deep validation: Extract and verify .kernelrelease from headers tarball
-    /// Peeks into tarball to ensure headers match the kernel release version
+    /// Deep validation: Extract and verify versioning from headers tarball
+    /// Peeks into tarball to ensure headers match the kernel release version.
+    /// Supports .kernelrelease (base kernel) and Makefile (headers package).
     fn validate_kernelrelease_in_tarball(
         &self,
         headers_path: &PathBuf,
     ) -> Result<bool, String> {
         use std::process::Command;
 
-        // Extract .kernelrelease from headers tarball using tar -xOf
+        log_info!("[KernelArtifactRegistry] Attempting deep version validation for {}", headers_path.display());
+
+        // Strategy 1: Look for .kernelrelease (Standard for base kernel packages)
+        let primary_dot_release = format!("usr/lib/modules/{}/.kernelrelease", self.kernel_release);
         let output = Command::new("tar")
-            .args(&["-xOf"])
+            .args(&["-xO", "-f"])
             .arg(headers_path)
-            .arg("usr/lib/modules/*/build/.kernelrelease") // Wildcard for any kernel version subdir
+            .arg(&primary_dot_release)
             .output();
 
-        let output = match output {
-            Ok(o) => o,
-            Err(_) => {
-                // Try alternate path without wildcard
-                match Command::new("tar")
-                    .args(&["-xOf"])
+        if let Ok(o) = output {
+            if o.status.success() {
+                let tarball_version = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if !tarball_version.is_empty() {
+                    if tarball_version == self.kernel_release {
+                        log_info!("[KernelArtifactRegistry] ✓ .kernelrelease matches: {}", tarball_version);
+                        return Ok(true);
+                    } else {
+                        return Err(format!("Mismatch in .kernelrelease: {} != {}", tarball_version, self.kernel_release));
+                    }
+                }
+            }
+        }
+
+        // Strategy 2: Look for Makefile (Standard for Arch linux-headers packages)
+        // Path is usually usr/lib/modules/{kernel_release}/build/Makefile
+        let primary_makefile = format!("usr/lib/modules/{}/build/Makefile", self.kernel_release);
+        let output = Command::new("tar")
+            .args(&["-xO", "-f"])
+            .arg(headers_path)
+            .arg(&primary_makefile)
+            .output();
+
+        let (makefile_content, source_path) = match output {
+            Ok(o) if o.status.success() => (String::from_utf8_lossy(&o.stdout).to_string(), primary_makefile),
+            _ => {
+                // Fallback: usr/lib/modules/*/build/Makefile (wildcard)
+                let alt_output = Command::new("tar")
+                    .args(&["-xO", "--wildcards", "-f"])
                     .arg(headers_path)
-                    .arg(".kernelrelease")
-                    .output()
-                {
-                    Ok(alt_o) => alt_o,
-                    Err(e) => {
-                        log_info!("[KernelArtifactRegistry] ⚠️ Cannot extract .kernelrelease from headers: {}", e);
-                        return Err(format!("Failed to peek into headers tarball: {}", e));
+                    .arg("usr/lib/modules/*/build/Makefile")
+                    .output();
+
+                match alt_output {
+                    Ok(o) if o.status.success() => (String::from_utf8_lossy(&o.stdout).to_string(), "wildcard Makefile".to_string()),
+                    _ => {
+                        log_info!("[KernelArtifactRegistry] ⚠️ Missing .kernelrelease AND Makefile in headers tarball");
+                        return Err("Failed to find version identification file (.kernelrelease or Makefile) in headers".to_string());
                     }
                 }
             }
         };
 
-        if !output.status.success() {
-            log_info!(
-                "[KernelArtifactRegistry] ⚠️ .kernelrelease tar extraction failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return Err("Failed to extract .kernelrelease from headers tarball".to_string());
+        // Parse Makefile for VERSION, PATCHLEVEL, SUBLEVEL, EXTRAVERSION
+        let mut version = String::new();
+        let mut patchlevel = String::new();
+        let mut sublevel = String::new();
+        let mut extraversion = String::new();
+
+        for line in makefile_content.lines() {
+            let line = line.trim();
+            if line.starts_with("VERSION =") {
+                version = line.split('=').nth(1).unwrap_or("").trim().to_string();
+            } else if line.starts_with("PATCHLEVEL =") {
+                patchlevel = line.split('=').nth(1).unwrap_or("").trim().to_string();
+            } else if line.starts_with("SUBLEVEL =") {
+                sublevel = line.split('=').nth(1).unwrap_or("").trim().to_string();
+            } else if line.starts_with("EXTRAVERSION =") {
+                extraversion = line.split('=').nth(1).unwrap_or("").trim().to_string();
+            }
+            
+            // Optimization: stop if we have all 4
+            if !version.is_empty() && !patchlevel.is_empty() && !sublevel.is_empty() && !extraversion.is_empty() {
+                break;
+            }
         }
 
-        let tarball_kernel_release = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        
-        if tarball_kernel_release.is_empty() {
-            log_info!("[KernelArtifactRegistry] ⚠️ .kernelrelease file in tarball is empty");
-            return Err(".kernelrelease is empty in headers tarball".to_string());
+        if version.is_empty() || patchlevel.is_empty() {
+            return Err(format!("Malformed Makefile at {}: Could not find version components", source_path));
         }
 
-        // Validate exact match with stored kernel_release
-        if tarball_kernel_release == self.kernel_release {
+        // Construct version string
+        // Note: Kernel release format is often {VERSION}.{PATCHLEVEL}.{SUBLEVEL}{EXTRAVERSION}
+        // But Arch often appends -archX to it.
+        let mut constructed = format!("{}.{}.{}", version, patchlevel, sublevel);
+        if !extraversion.is_empty() {
+            constructed.push_str(&extraversion);
+        }
+
+        // Partial match check: Arch adds -archX-goatd-gaming or similar to the final directory name
+        // The Makefile version usually matches the START of self.kernel_release
+        if self.kernel_release.starts_with(&constructed) {
             log_info!(
-                "[KernelArtifactRegistry] ✓ .kernelrelease VERIFIED: {} matches kernel_release",
-                tarball_kernel_release
+                "[KernelArtifactRegistry] ✓ Makefile version verified: {} matches prefix of {}",
+                constructed, self.kernel_release
             );
             Ok(true)
         } else {
             log_info!(
-                "[KernelArtifactRegistry] ✗ .kernelrelease MISMATCH: tarball='{}' vs kernel_release='{}'",
-                tarball_kernel_release, self.kernel_release
+                "[KernelArtifactRegistry] ✗ Version MISMATCH in {}: constructed '{}' vs expected '{}'",
+                source_path, constructed, self.kernel_release
             );
-            Err(format!(
-                "Kernel release mismatch in headers: tarball contains '{}', expected '{}'",
-                tarball_kernel_release, self.kernel_release
-            ))
+            Err(format!("Version mismatch in headers Makefile: {} doesn't match {}", constructed, self.kernel_release))
         }
     }
 

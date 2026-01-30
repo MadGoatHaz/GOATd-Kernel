@@ -783,4 +783,71 @@ mod tests {
         let colon_count = purified.matches(':').count();
         assert!(colon_count >= 1, "PATH should have multiple entries separated by colons");
     }
+
+    #[test]
+    fn test_purify_path_edge_cases() {
+        // Validates three critical PATH purity requirements:
+        use std::path::Path;
+        use std::env;
+        
+        // Edge case 1: Redundant LLVM/Clang directory structures are preserved
+        {
+            let initial_path = "/opt/clang-19/bin:/usr/lib/clang/14:/opt/llvm-19/bin:/usr/bin:/bin";
+            env::set_var("PATH", initial_path);
+            
+            let llvm_override = Some(Path::new("/opt/llvm-19/bin"));
+            let purified = purify_path(llvm_override);
+            
+            // Primary LLVM override should be at the front
+            assert!(purified.starts_with("/opt/llvm-19/bin:"),
+                    "LLVM override should be first: {}", purified);
+            // LLVM/clang paths should be preserved (after standard paths)
+            assert!(purified.contains("/opt/clang-19/bin"),
+                    "Clang directory should be preserved: {}", purified);
+            assert!(purified.contains("/usr/lib/clang/14"),
+                    "LLVM clang lib should be preserved: {}", purified);
+        }
+        
+        // Edge case 2: GCC directories removed even with "gcc" in path name
+        // NOTE: Current implementation preserves paths with "llvm" substring first.
+        // This test documents that GCC-only paths (without llvm binaries) are filtered.
+        {
+            let initial_path = "/opt/gcc-13/bin:/opt/gcc-14/libexec:/usr/bin:/bin";
+            env::set_var("PATH", initial_path);
+            
+            let llvm_override = Some(Path::new("/opt/llvm-19/bin"));
+            let purified = purify_path(llvm_override);
+            
+            // Pure GCC compiler directories should be removed
+            assert!(!purified.contains("/opt/gcc-13"),
+                    "GCC compiler directory should be removed: {}", purified);
+            assert!(!purified.contains("/opt/gcc-14"),
+                    "GCC libexec directory should be removed: {}", purified);
+            // Safe standard paths should remain
+            assert!(purified.contains("/usr/bin"),
+                    "Standard /usr/bin should be preserved: {}", purified);
+        }
+        
+        // Edge case 3: Detected primary LLVM bin directory moved to front
+        {
+            let initial_path = "/usr/bin:/custom/llvm-clang/bin:/opt/llvm-19/bin:/bin:/usr/local/bin";
+            env::set_var("PATH", initial_path);
+            
+            let llvm_override = Some(Path::new("/opt/llvm-19/bin"));
+            let purified = purify_path(llvm_override);
+            
+            // Verify the override appears at the beginning
+            assert!(purified.starts_with("/opt/llvm-19/bin:"),
+                    "Primary LLVM bin directory should be at the front: {}", purified);
+            
+            // Standard paths should follow immediately
+            let after_override = &purified["/opt/llvm-19/bin:".len()..];
+            assert!(after_override.starts_with("/usr/bin:") || after_override.starts_with("/bin:"),
+                    "Standard safe paths should follow override: {}", after_override);
+            
+            // LLVM-capable directories should be included
+            assert!(purified.contains("/custom/llvm-clang/bin"),
+                    "LLVM clang path should be preserved: {}", purified);
+        }
+    }
 }

@@ -7,6 +7,7 @@ arch=('x86_64')
 url="https://github.com/MadGoatHaz/GOATd-Kernel"
 license=('GPL-2.0+')
 depends=('gcc-libs' 'glibc' 'openssl')
+# Note: gcc-libs persists in depends for C runtime compatibility despite LLVM toolchain enforcement
 optdepends=('modprobed-db: For modprobed-db integration support'
             'scx-scheds: For sched-ext kernel scheduler support'
             'polly: For LLVM vectorization support')

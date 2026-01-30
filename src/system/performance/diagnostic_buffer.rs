@@ -3,13 +3,13 @@
 //! Provides a lock-free mechanism for collecting diagnostic messages
 //! without blocking high-precision measurement loops.
 //!
-//! Uses crossbeam_channel for thread-safe, non-blocking message passing
+//! Uses tokio::sync::mpsc for thread-safe, non-blocking message passing
 //! between measurement threads and a background consumer thread.
 //!
 //! Also provides event consumer that reads CollectorEvent's from an rtrb ring buffer
 //! and formats them into diagnostic messages for asynchronous logging.
 
-use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use tokio::sync::mpsc::{channel, Receiver, Sender, error::TrySendError};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -23,7 +23,7 @@ pub struct DiagnosticMessage {
     pub timestamp: std::time::Instant,
 }
 
-/// Non-blocking diagnostic buffer using crossbeam channels
+/// Non-blocking diagnostic buffer using tokio mpsc channels
 pub struct DiagnosticBuffer {
     /// Sender side of the channel for non-blocking sends
     sender: Option<Sender<DiagnosticMessage>>,
@@ -44,7 +44,7 @@ impl DiagnosticBuffer {
     /// * `capacity` - Maximum number of pending messages before blocking
     ///   (typically 1024-4096 for measurement loops)
     pub fn new(capacity: usize) -> Self {
-        let (sender, receiver) = bounded(capacity);
+        let (sender, receiver) = channel(capacity);
         DiagnosticBuffer {
             sender: Some(sender),
             receiver: Some(receiver),
@@ -60,21 +60,17 @@ impl DiagnosticBuffer {
     /// and writes them to stderr. This should be called once before
     /// using `send()` in measurement loops.
     pub fn start_consumer(&mut self) {
-        if let Some(receiver) = self.receiver.take() {
+        if let Some(mut receiver) = self.receiver.take() {
             let stop_flag = self.stop_flag.clone();
             let consumer_thread = thread::spawn(move || {
                 while !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
                     // Try to receive with a timeout to avoid blocking forever
-                    match receiver.recv_timeout(Duration::from_millis(100)) {
-                        Ok(msg) => {
+                    match receiver.blocking_recv() {
+                        Some(msg) => {
                             // Write directly to stderr for minimal latency
                             eprintln!("{}", msg.message);
                         }
-                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                            // Timeout is fine, continue looping
-                            continue;
-                        }
-                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        None => {
                             // Sender was dropped, consumer can exit
                             break;
                         }
@@ -100,7 +96,7 @@ impl DiagnosticBuffer {
             };
             sender.try_send(msg)
         } else {
-            Err(TrySendError::Disconnected(DiagnosticMessage {
+            Err(TrySendError::Closed(DiagnosticMessage {
                 message: message.to_string(),
                 timestamp: std::time::Instant::now(),
             }))
@@ -142,12 +138,12 @@ impl Drop for DiagnosticBuffer {
     }
 }
 
-lazy_static::lazy_static! {
-    /// Global diagnostic buffer instance (singleton)
-    static ref GLOBAL_DIAGNOSTIC_BUFFER: std::sync::Mutex<Option<Arc<DiagnosticBuffer>>> = {
-        std::sync::Mutex::new(None)
-    };
-}
+use once_cell::sync::Lazy;
+
+/// Global diagnostic buffer instance (singleton)
+static GLOBAL_DIAGNOSTIC_BUFFER: Lazy<std::sync::Mutex<Option<Arc<DiagnosticBuffer>>>> = Lazy::new(|| {
+    std::sync::Mutex::new(None)
+});
 
 /// Initialize the global diagnostic buffer
 pub fn init_global_buffer(capacity: usize) -> Arc<DiagnosticBuffer> {

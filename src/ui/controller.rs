@@ -1284,7 +1284,7 @@ impl AppController {
             // Previously DKMS was conditionally added, then redundantly executed again later.
             // Now it's batched with Pacman in a single privileged session for Polkit caching.
             let dkms_cmd = format!(
-                "LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld dkms autoinstall -k {}",
+                "LLVM=1 LLVM_IAS=1 CC=clang CXX=clang++ LD=ld.lld HOSTCC=clang HOSTCXX=clang++ dkms autoinstall -k {}",
                 resolved_kernel_version
             );
             eprintln!("[KERNEL] DKMS will be batched with kernel installation for unified privilege session");
@@ -1334,6 +1334,10 @@ if [[ "$kernelver" == *"-goatd-"* ]]; then
 
    # Force LLVM linker
    export LD=ld.lld
+
+   # HOST COMPILER ENFORCEMENT (for host-side tools during DKMS builds)
+   export HOSTCC=clang
+   export HOSTCXX=clang++
 
    # Additional LLVM toolchain tools
    export AR=llvm-ar

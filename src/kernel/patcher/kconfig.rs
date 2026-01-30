@@ -594,6 +594,60 @@ impl crate::kernel::patcher::KernelPatcher {
             "[Patcher] [PHASE-13-ABI] NVIDIA ABI Preservation complete - Safety Cluster enforced"
         );
 
+        // ============================================================================
+        // PHASE 3: SECURITY CLUSTER ENFORCEMENT (RELR/KASLR/PIE)
+        // ============================================================================
+        // CRITICAL: Enforce ASLR (Address Space Layout Randomization) and relocatable
+        // kernel image support to mitigate ROP/JOP attacks and improve exploit hardening.
+        //
+        // Security Cluster Definition:
+        // - CONFIG_RANDOMIZE_BASE: Enable kernel address space layout randomization (KASLR)
+        // - CONFIG_RELOCATABLE: Make kernel image position-independent (PIE)
+        // - CONFIG_RELR: Use RELR relocation format for faster/smaller relocations
+        //
+        // MANDATORY: These are ALWAYS enforced regardless of hardening level as they are
+        // fundamental to modern kernel exploit mitigation strategies.
+
+        eprintln!("[Patcher] [PHASE-3-SECURITY] Starting Security Cluster Enforcement (RELR/KASLR/PIE)...");
+
+        let security_cluster = vec![
+            ("CONFIG_RANDOMIZE_BASE", "y"),  // Enable kernel ASLR
+            ("CONFIG_RELOCATABLE", "y"),     // Enable position-independent kernel
+            ("CONFIG_RELR", "y"),            // Use RELR relocation format
+        ];
+
+        for (key, value) in security_cluster {
+            // Remove existing line if present to prevent conflicts
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{}=", key)))
+                .collect();
+
+            if lines.len() != content.lines().count() {
+                content = lines.join("\n");
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                eprintln!("[Patcher] [PHASE-3-SECURITY] Removed existing {} entry", key);
+            }
+
+            // Inject Security Cluster option with ABSOLUTE priority
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&format!("{}={}", key, value));
+            content.push('\n');
+
+            eprintln!(
+                "[Patcher] [PHASE-3-SECURITY] CRITICAL: Injected {}={} (Security Cluster)",
+                key, value
+            );
+        }
+
+        eprintln!(
+            "[Patcher] [PHASE-3-SECURITY] Security Cluster Enforcement complete - RELR/KASLR/PIE enabled"
+        );
+
         // STEP 4: Final cleanup - remove any dangling GCC settings
         let final_lines: Vec<String> = content
             .lines()

@@ -30,7 +30,7 @@
 //! - **Error Recovery**: Graceful degradation if UI unavailable
 
 use chrono::Local;
-use crossbeam_channel::{unbounded, Sender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use log::{Log, Metadata, Record};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -45,10 +45,10 @@ static COLLECTOR_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Global dispatcher registry mapping collector IDs to their message channels
 static GLOBAL_LOG_DISPATCHER: std::sync::OnceLock<
-    Arc<std::sync::Mutex<HashMap<u64, Sender<LogMessage>>>>,
+    Arc<std::sync::Mutex<HashMap<u64, UnboundedSender<LogMessage>>>>,
 > = std::sync::OnceLock::new();
 
-fn get_global_dispatcher() -> Arc<std::sync::Mutex<HashMap<u64, Sender<LogMessage>>>> {
+fn get_global_dispatcher() -> Arc<std::sync::Mutex<HashMap<u64, UnboundedSender<LogMessage>>>> {
     GLOBAL_LOG_DISPATCHER
         .get_or_init(|| Arc::new(std::sync::Mutex::new(HashMap::new())))
         .clone()
@@ -131,8 +131,8 @@ impl LogLine {
 pub struct LogCollector {
     /// Unique ID for this collector in the global dispatcher registry
     id: u64,
-    /// Channel sender for log lines (internal) - crossbeam unbounded for cross-runtime reliability
-    tx: Sender<LogMessage>,
+    /// Channel sender for log lines (internal) - tokio::sync::mpsc unbounded for async compatibility
+    tx: UnboundedSender<LogMessage>,
     /// Current log directory
     log_dir: PathBuf,
     /// UI channel sender for real-time log display
@@ -172,10 +172,10 @@ impl LogCollector {
         // Allocate unique ID for this collector
         let id = COLLECTOR_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-        // Create unbounded crossbeam channel for log messages (both regular logs and flush markers)
-        // CRITICAL: crossbeam unbounded channels are thread-safe and work across ANY runtime,
-        // even nested tokio runtimes. This prevents logs from being lost in executor threads.
-        let (tx, rx) = unbounded::<LogMessage>();
+        // Create unbounded tokio channel for log messages (both regular logs and flush markers)
+        // CRITICAL: tokio unbounded channels are thread-safe and work with the tokio runtime.
+        // For blocking recv from a thread, use blocking_recv() which is ergonomic.
+        let (tx, mut rx) = unbounded_channel::<LogMessage>();
 
         // Register this collector in the global dispatcher
         {
@@ -260,8 +260,8 @@ impl LogCollector {
                 }
             }
 
-            // Use blocking recv() from crossbeam - works from any runtime or thread
-            while let Ok(msg) = rx.recv() {
+            // Use blocking_recv() from tokio - allows blocking in a thread without holding Tokio runtime lock
+            while let Some(msg) = rx.blocking_recv() {
                 match msg {
                     LogMessage::Line(log_line) => {
                         // BATCHED UI SIGNALING: Check for milestone lines (bypass batching)
@@ -778,7 +778,7 @@ mod tests {
         let collector = LogCollector::new(temp_dir.clone(), ui_tx).unwrap();
 
         // Spam logs - should all be accepted without blocking
-        // This uses crossbeam channel now, which is non-blocking and thread-safe
+        // This uses tokio::sync::mpsc channel now, which is non-blocking and thread-safe
         for i in 0..1000 {
             collector.log_str(format!("Log message {}", i));
         }

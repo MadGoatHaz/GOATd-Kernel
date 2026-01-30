@@ -70,6 +70,7 @@ fn create_test_config() -> KernelConfig {
         native_optimizations: true,
         user_toggled_native_optimizations: false,
         kernel_variant: String::new(),
+        pkgbase: "linux".to_string(),
     }
 }
 

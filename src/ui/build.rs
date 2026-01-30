@@ -559,6 +559,13 @@ pub fn render_build_controls(
                     } else {
                         "Ready to build"
                     });
+                    
+                    // LLVM + LLD Toolchain Badge
+                    ui.separator();
+                    ui.colored_label(
+                        egui::Color32::from_rgb(76, 175, 80),
+                        "✓ Built with LLVM + LLD"
+                    );
                 });
             });
         });

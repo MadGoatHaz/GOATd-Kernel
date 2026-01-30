@@ -4,10 +4,47 @@
 //! and extracting version information using regex patterns.
 //!
 //! Uses the KernelSourceDB to locate PKGBUILD URLs based on canonical variant names.
+//!
+//! CONCURRENCY CONTROL: Prevents multiple concurrent network fetches for the same variant
+//! using an inflight request tracking mechanism with Arc<Mutex<HashSet<String>>>.
 
 use crate::kernel::sources::KernelSourceDB;
 use log;
 use regex::Regex;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
+
+/// Global set of variants currently being fetched
+/// Prevents concurrent network calls for the same variant
+static INFLIGHT_REQUESTS: Lazy<Arc<Mutex<std::collections::HashSet<String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(std::collections::HashSet::new())));
+
+/// Acquires an inflight slot for a variant if not already in-flight
+/// Returns a guard that removes the variant from inflight when dropped
+fn acquire_inflight_slot(variant: &str) -> Option<InflightGuard> {
+    let mut inflight = INFLIGHT_REQUESTS.lock().unwrap();
+    if !inflight.contains(variant) {
+        inflight.insert(variant.to_string());
+        Some(InflightGuard {
+            variant: variant.to_string(),
+        })
+    } else {
+        None
+    }
+}
+
+/// RAII guard to track inflight requests
+struct InflightGuard {
+    variant: String,
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        let mut inflight = INFLIGHT_REQUESTS.lock().unwrap();
+        inflight.remove(&self.variant);
+        log::debug!("[PKGBUILD] [INFLIGHT] Released slot for variant: '{}'", self.variant);
+    }
+}
 
 /// Maps kernel variant names (canonical form) to their raw PKGBUILD URLs
 /// Uses the centralized KernelSourceDB for consistency
@@ -127,6 +164,26 @@ pub async fn get_latest_version_by_variant(variant: &str) -> Result<String, Stri
     );
     log::info!(
         "[PKGBUILD] [GET_VERSION] Fetching latest version for variant: '{}'",
+        variant
+    );
+
+    // CONCURRENCY CONTROL: Attempt to acquire inflight slot
+    let _guard = acquire_inflight_slot(variant).ok_or_else(|| {
+        let err_msg = format!(
+            "Version fetch already in progress for variant: {} (throttled)",
+            variant
+        );
+        eprintln!("[PKGBUILD] [GET_VERSION] [THROTTLED] {}", err_msg);
+        log::warn!("[PKGBUILD] [GET_VERSION] [THROTTLED] {}", err_msg);
+        err_msg
+    })?;
+
+    eprintln!(
+        "[PKGBUILD] [GET_VERSION] Acquired inflight slot for variant: '{}'",
+        variant
+    );
+    log::debug!(
+        "[PKGBUILD] [GET_VERSION] Acquired inflight slot for variant: '{}'",
         variant
     );
 

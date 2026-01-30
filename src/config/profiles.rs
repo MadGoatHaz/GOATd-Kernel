@@ -1,11 +1,10 @@
 //! Kernel build profiles.
 
 use crate::models::{HardeningLevel, LtoType};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
-lazy_static! {
-    static ref PROFILES: HashMap<String, ProfileDefinition> = {
+static PROFILES: Lazy<HashMap<String, ProfileDefinition>> = Lazy::new(|| {
         let mut profiles = HashMap::new();
 
         profiles.insert(
@@ -72,8 +71,7 @@ lazy_static! {
         );
 
         profiles
-    };
-}
+    });
 
 /// Profile definition.
 #[derive(Debug, Clone)]

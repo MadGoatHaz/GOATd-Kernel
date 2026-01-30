@@ -164,7 +164,7 @@ pub fn sanitize_build_environment(env_vars: &mut HashMap<String, String>) {
 /// HashMap of environment variable names to values
 pub fn prepare_build_environment(
     src_dir: &Path,
-    native_optimizations: bool,
+    config: &crate::models::KernelConfig,
 ) -> HashMap<String, String> {
     let mut env_vars = HashMap::new();
 
@@ -286,11 +286,15 @@ pub fn prepare_build_environment(
     // ============================================================================
     // CLANG/LLVM v19+ ENFORCEMENT
     // ============================================================================
+    // CRITICAL: LLVM linker hardening - LD=ld.lld MUST be explicitly set to prevent
+    // fallback to GNU ld which could introduce incompatibilities or security issues
     env_vars.insert("LLVM".to_string(), "1".to_string());
     env_vars.insert("LLVM_IAS".to_string(), "1".to_string());
     env_vars.insert("CC".to_string(), "clang".to_string());
     env_vars.insert("CXX".to_string(), "clang++".to_string());
+    // HARDENING: Explicit LLVM linker enforcement - prevents fallback to GNU ld
     env_vars.insert("LD".to_string(), "ld.lld".to_string());
+    eprintln!("[Patcher] [ENV] [HARDENING] Explicitly set LD=ld.lld for LLVM linker enforcement");
 
     // DYNAMIC TOOLCHAIN DISCOVERY: All toolchain binaries use LLVM-19 prioritization
     let ar_cmd = find_toolchain_binary("ar");
@@ -338,37 +342,54 @@ pub fn prepare_build_environment(
     if !env_vars.contains_key("GOATD_HARDENING_FLAGS") {
         env_vars.insert(
             "GOATD_HARDENING_FLAGS".to_string(),
-            "-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE".to_string(),
+            "-fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fPIE".to_string(),
         );
         eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_HARDENING_FLAGS with stack-protector and _FORTIFY_SOURCE");
     }
 
-    // GOATD_NATIVE_FLAGS: Native CPU optimization for gaming performance
+    // GOATD_NATIVE_FLAGS: Native CPU optimization based on config
     if !env_vars.contains_key("GOATD_NATIVE_FLAGS") {
-        env_vars.insert(
-            "GOATD_NATIVE_FLAGS".to_string(),
-            "-march=native -mtune=native".to_string(),
-        );
-        eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_NATIVE_FLAGS=-march=native -mtune=native (gaming optimization)");
-    }
-
-    // GOATD_LTO_FLAGS: Will be set by executor based on LTO level (full/thin/none)
-    // Default to thin LTO if not set (balanced performance/compile time)
-    if !env_vars.contains_key("GOATD_LTO_FLAGS") {
-        env_vars.insert("GOATD_LTO_FLAGS".to_string(), "-flto=thin".to_string());
-        eprintln!("[Patcher] [ENV] [HARDENING] Set GOATD_LTO_FLAGS=-flto=thin (default fallback)");
-    }
-
-    // GOATD_POLLY_FLAGS: LLVM loop optimization (gaming kernel vectorization boost)
-    // Polly enables advanced loop transformations for better cache locality
-    if !env_vars.contains_key("GOATD_POLLY_FLAGS") {
-        env_vars.insert(
-            "GOATD_POLLY_FLAGS".to_string(),
-            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-omp-backend=GOMP"
-                .to_string(),
-        );
+        let native_flags = if config.native_optimizations {
+            "-march=native -mtune=native".to_string()
+        } else {
+            "".to_string()
+        };
+        env_vars.insert("GOATD_NATIVE_FLAGS".to_string(), native_flags.clone());
         eprintln!(
-            "[Patcher] [ENV] [HARDENING] Set GOATD_POLLY_FLAGS with advanced loop optimization"
+            "[Patcher] [ENV] [FLAG-INJECT] Set GOATD_NATIVE_FLAGS={} (config.native_optimizations={})",
+            if native_flags.is_empty() { "(disabled)" } else { &native_flags },
+            config.native_optimizations
+        );
+    }
+
+    // GOATD_LTO_FLAGS: Dynamically set based on LTO type from config
+    if !env_vars.contains_key("GOATD_LTO_FLAGS") {
+        let lto_flags = match config.lto_type {
+            crate::models::LtoType::Full => "-flto=full".to_string(),
+            crate::models::LtoType::Thin => "-flto=thin".to_string(),
+            crate::models::LtoType::None => "".to_string(),
+        };
+        env_vars.insert("GOATD_LTO_FLAGS".to_string(), lto_flags.clone());
+        eprintln!(
+            "[Patcher] [ENV] [FLAG-INJECT] Set GOATD_LTO_FLAGS={} (LtoType={:?})",
+            if lto_flags.is_empty() { "(disabled)" } else { &lto_flags },
+            config.lto_type
+        );
+    }
+
+    // GOATD_POLLY_FLAGS: Dynamically set based on Polly configuration
+    if !env_vars.contains_key("GOATD_POLLY_FLAGS") {
+        let polly_flags = if config.use_polly {
+            "-mllvm -polly -mllvm -polly-vectorizer=stripmine -mllvm -polly-omp-backend=GOMP"
+                .to_string()
+        } else {
+            "".to_string()
+        };
+        env_vars.insert("GOATD_POLLY_FLAGS".to_string(), polly_flags.clone());
+        eprintln!(
+            "[Patcher] [ENV] [FLAG-INJECT] Set GOATD_POLLY_FLAGS={} (config.use_polly={})",
+            if polly_flags.is_empty() { "(disabled)" } else { &polly_flags },
+            config.use_polly
         );
     }
 
@@ -377,7 +398,7 @@ pub fn prepare_build_environment(
     // ============================================================================
     // NATIVE OPTIMIZATIONS (-march=native support)
     // ============================================================================
-    if native_optimizations {
+    if config.native_optimizations {
         env_vars.insert("KCFLAGS".to_string(), "\"-march=native\"".to_string());
         eprintln!("[Patcher] [ENV] Injected KCFLAGS=\"-march=native\" for native host-optimized kernel compilation");
     } else {

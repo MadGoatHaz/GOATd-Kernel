@@ -234,9 +234,9 @@ impl std::error::Error for KernelInstallationError {}
 /// that was generated during the build.
 ///
 /// For example:
+/// - Deterministic: "6.18.7-arch1-1-goatd-gaming" → tries "/usr/src/linux-goatd-gaming-6.18.7-arch1-1"
 /// - Exact kernel: "6.18.3-arch1-2-goatd-gaming" → tries "/usr/src/linux-6.18.3-arch1-2-goatd-gaming"
 /// - Base version: "6.18.3-arch1-2-goatd-gaming" → tries "/usr/src/linux-6.18.3-arch1-2"
-/// - Legacy: "6.18.3" → tries "/usr/src/linux-6.18.3"
 ///
 /// # Arguments
 /// * `kernel_version` - Kernel version string (e.g., "6.18.3-arch1-2" or "6.18.3-arch1-2-goatd-gaming")
@@ -304,14 +304,11 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
 
     // Extract base version (remove profile suffix if present)
     // E.g., "6.18.3-arch1-2-goatd-gaming" -> "6.18.3-arch1-2"
-    let base_version = if let Some(dash_pos) = kernel_version.rfind('-') {
+    let base_version = if let Some(pos) = kernel_version.find("-goatd-") {
+        &kernel_version[..pos]
+    } else if let Some(dash_pos) = kernel_version.rfind('-') {
         let potential_suffix = &kernel_version[dash_pos + 1..];
-        // If the suffix looks like a profile name (all lowercase letters), strip it
-        if potential_suffix
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c == '-')
-            && potential_suffix.len() > 2
-        {
+        if potential_suffix.chars().all(|c| c.is_ascii_lowercase() || c == '-') && potential_suffix.len() > 2 {
             &kernel_version[..dash_pos]
         } else {
             kernel_version
@@ -370,6 +367,23 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
         eprintln!("[DISCOVER_HEADERS] [STRATEGY-0] No verified headers found in workspace, falling back to OS paths");
     }
 
+    // STRATEGY 0.5: Try new deterministic variant-aware naming (pkgbase-version)
+    // Pattern: /usr/src/{variant}-goatd-{profile}-{version}
+    if let Some(pos) = kernel_version.find("-goatd-") {
+        let variant = "linux"; // Default variant, but ideally we would detect this
+        let profile_part = &kernel_version[pos + 7..];
+        let base_ver = &kernel_version[..pos];
+
+        eprintln!("[DISCOVER_HEADERS] [STRATEGY-0.5] Trying deterministic naming: /usr/src/linux-goatd-{}-{}", profile_part, base_ver);
+        let det_path = Path::new("/usr/src").join(format!("linux-goatd-{}-{}", profile_part, base_ver));
+        if det_path.exists() && det_path.is_dir() {
+            if det_path.join("include/linux/kernel.h").exists() {
+                if validate_kernelrelease(&det_path, kernel_version) {
+                    return Some(det_path);
+                }
+            }
+        }
+    }
     // STRATEGY 1: Try exact match with full kernel version (unified naming)
     // This matches files installed using the exact .kernelrelease string
     // STRICT: Validate .kernelrelease inside
@@ -422,7 +436,7 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
             if let Ok(metadata) = entry.metadata() {
                 if metadata.is_dir() {
                     if let Some(name) = entry.file_name().to_str() {
-                        if name.starts_with("linux-") {
+                        if name.starts_with("linux-") || name.starts_with("linux-goatd-") {
                             let candidate = Path::new("/usr/src").join(name);
 
                             // Validate: must have key header files
@@ -485,7 +499,7 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
             if let Ok(metadata) = entry.metadata() {
                 if metadata.is_dir() {
                     if let Some(name) = entry.file_name().to_str() {
-                        if name.starts_with("linux-") && name.contains("-goatd-") {
+                        if name.starts_with("linux-") || name.starts_with("linux-goatd-") && name.contains("-goatd-") {
                             let candidate = Path::new("/usr/src").join(name);
 
                             // Validate: must have key header files

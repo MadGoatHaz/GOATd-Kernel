@@ -1222,7 +1222,13 @@ where
     eprintln!("[Build] [ENV-CONFIG] Exported GOATD_KERNEL_VARIANT={}", config.kernel_variant);
 
     let patcher = crate::kernel::patcher::KernelPatcher::new(canonical_kernel_path.to_path_buf());
-    let hardened_env = patcher.prepare_build_environment(config.native_optimizations);
+    eprintln!("[Build] [ENV-UNIFY] ========== FLAG INJECTION PREPARATION START ==========");
+    eprintln!("[Build] [ENV-UNIFY] Passing full KernelConfig to patcher.prepare_build_environment");
+    eprintln!("[Build] [ENV-UNIFY] config.native_optimizations={}", config.native_optimizations);
+    eprintln!("[Build] [ENV-UNIFY] config.lto_type={:?}", config.lto_type);
+    eprintln!("[Build] [ENV-UNIFY] config.use_polly={}", config.use_polly);
+    let hardened_env = patcher.prepare_build_environment(config);
+    eprintln!("[Build] [ENV-UNIFY] ========== FLAG INJECTION PREPARATION COMPLETE ==========");
 
     eprintln!("[Build] [ENV-UNIFY] ========== SURGICAL INJECTION LOOP START ==========");
     eprintln!("[Build] [ENV-UNIFY] Obtained hardened environment from patcher");

@@ -641,7 +641,7 @@ fn render_audit_results_two_column(
                     // COLUMN 0: Deep Audit Results
                     strip.cell(|ui| {
                         ui.group(|ui| {
-                            ui.label("Deep Audit");
+                            ui.label("Deep Toolchain Audit");
 
                             match controller.try_read() {
                                 Ok(controller_guard) => match controller_guard.get_active_audit() {
@@ -654,7 +654,7 @@ fn render_audit_results_two_column(
                                                 ui.monospace(&audit_data.version);
                                                 ui.end_row();
 
-                                                ui.label("Compiler:");
+                                                ui.label("LLVM Toolchain:");
                                                 ui.monospace(&audit_data.compiler);
                                                 ui.end_row();
 
@@ -787,7 +787,7 @@ fn render_audit_results_two_column(
                     // COLUMN 0: Deep Audit Results
                     strip.cell(|ui| {
                         ui.group(|ui| {
-                            ui.label("Deep Audit");
+                            ui.label("Deep Toolchain Audit");
 
                             match controller.try_read() {
                                 Ok(controller_guard) => match controller_guard.get_active_audit() {
@@ -800,7 +800,7 @@ fn render_audit_results_two_column(
                                                 ui.monospace(&audit_data.version);
                                                 ui.end_row();
 
-                                                ui.label("Compiler:");
+                                                ui.label("LLVM Toolchain:");
                                                 ui.monospace(&audit_data.compiler);
                                                 ui.end_row();
 
@@ -934,7 +934,7 @@ fn render_audit_results_single_column(
 ) {
     // Deep Audit Results
     ui.group(|ui| {
-        ui.label("Deep Audit");
+        ui.label("Deep Toolchain Audit");
 
         match controller.try_read() {
             Ok(controller_guard) => match controller_guard.get_active_audit() {
@@ -947,7 +947,7 @@ fn render_audit_results_single_column(
                             ui.monospace(&audit_data.version);
                             ui.end_row();
 
-                            ui.label("Compiler:");
+                            ui.label("LLVM Toolchain:");
                             ui.monospace(&audit_data.compiler);
                             ui.end_row();
 

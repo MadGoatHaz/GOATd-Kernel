@@ -305,10 +305,12 @@ check_and_install_arch_deps() {
     
     # STEP 2: Immediately attempt to install all required packages
     # The --needed flag ensures only missing packages are installed (safe and idempotent)
-    echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly${NC}" >&2
+        # LLVM 19+ installation with integrated assembler support (LLVM=1 LLVM_IAS=1 for kernel builds)
+        echo -e "${BLUE}[ARCH INSTALL]${NC} Running: sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly${NC} (LLVM 19+ with IAS support)${NC}" &>2
     echo -e "${YELLOW}Installing Arch packages (sudo password required)...${NC}"
     echo ""
     
+        # LLVM 19+ installation with integrated assembler support (LLVM=1 LLVM_IAS=1 for kernel builds)
     if sudo pacman -S --needed --noconfirm rust base-devel git bc rust-bindgen rust-src graphviz python-sphinx texlive-latexextra llvm clang lld polly; then
         echo ""
         echo -e "${GREEN}✓ Packages installed successfully${NC}"
@@ -366,6 +368,7 @@ check_and_install_arch_deps() {
         echo ""
         echo -e "${RED}Error: Package installation failed${NC}"
         echo -e "${RED}Cannot continue without required packages. Please install manually:${NC}"
+        # LLVM 19+ installation with integrated assembler support (LLVM=1 LLVM_IAS=1 for kernel builds)
         echo "  sudo pacman -S --needed --noconfirm rust base-devel git"
         return 1
     fi

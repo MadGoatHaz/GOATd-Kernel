@@ -74,9 +74,9 @@ const SCX_READINESS_CACHE_DURATION: Duration = Duration::from_secs(60); // 60-se
 
 // State tracking for redundant log suppression
 // Stores the last logged SCXReadiness state to detect changes
-lazy_static::lazy_static! {
-    static ref SCX_READINESS_LOGGED_STATE: Mutex<Option<SCXReadiness>> = Mutex::new(None);
-}
+use once_cell::sync::Lazy;
+
+static SCX_READINESS_LOGGED_STATE: Lazy<Mutex<Option<SCXReadiness>>> = Lazy::new(|| Mutex::new(None));
 
 /// SCX Scheduler Mode - Abstracts complex CLI flags into standardized profiles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

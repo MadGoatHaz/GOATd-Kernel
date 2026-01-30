@@ -215,6 +215,11 @@ pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
     export HOSTCXXFLAGS="${HOSTCXXFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export HOSTLDFLAGS="${HOSTLDFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
 
+    # LLVM Toolchain Hardening: Force LLVM/Clang/lld to prevent GCC fallback
+    export FORCE_CC=clang
+    export FORCE_CXX=clang++
+    export LLVM=1 LLVM_IAS=1
+
     # Tool-specific flag variants (some kernel makefiles use these aliases)
     export CFLAGS_HOST="${CFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS_HOST="${CXXFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
@@ -234,6 +239,9 @@ pub fn get_prebuild_lto_enforcer(lto_type: LtoType) -> &'static str {
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CFLAGS=\"%s\"\n" "$CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: LDFLAGS=\"%s\"\n" "$LDFLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only: KCFLAGS=\"%s\"\n" "$KCFLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only (Polly): GOATD_POLLY_FLAGS=\"%s\"\n" "$GOATD_POLLY_FLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only (Native): GOATD_NATIVE_FLAGS=\"%s\"\n" "$GOATD_NATIVE_FLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools: HOSTCFLAGS=\"%s\"\n" "$HOSTCFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools: HOSTCXXFLAGS=\"%s\"\n" "$HOSTCXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools: HOSTLDFLAGS=\"%s\"\n" "$HOSTLDFLAGS" >&2
@@ -348,6 +356,11 @@ EOF
     export HOSTCXXFLAGS="${HOSTCXXFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export HOSTLDFLAGS="${HOSTLDFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
 
+    # LLVM Toolchain Hardening: Force LLVM/Clang/lld to prevent GCC fallback
+    export FORCE_CC=clang
+    export FORCE_CXX=clang++
+    export LLVM=1 LLVM_IAS=1
+
     # Tool-specific flag variants (some kernel makefiles use these aliases)
     export CFLAGS_HOST="${CFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
     export CXXFLAGS_HOST="${CXXFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
@@ -367,6 +380,9 @@ EOF
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CFLAGS=\"%s\"\n" "$CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel: LDFLAGS=\"%s\"\n" "$LDFLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only: KCFLAGS=\"%s\"\n" "$KCFLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only (Polly): GOATD_POLLY_FLAGS=\"%s\"\n" "$GOATD_POLLY_FLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only (Native): GOATD_NATIVE_FLAGS=\"%s\"\n" "$GOATD_NATIVE_FLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools: HOSTCFLAGS=\"%s\"\n" "$HOSTCFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools: HOSTCXXFLAGS=\"%s\"\n" "$HOSTCXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools: HOSTLDFLAGS=\"%s\"\n" "$HOSTLDFLAGS" >&2
@@ -476,6 +492,11 @@ EOF
      export HOSTCXXFLAGS="${HOSTCXXFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
      export HOSTLDFLAGS="${HOSTLDFLAGS:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
 
+     # LLVM Toolchain Hardening: Force LLVM/Clang/lld to prevent GCC fallback
+     export FORCE_CC=clang
+     export FORCE_CXX=clang++
+     export LLVM=1 LLVM_IAS=1
+
      # Tool-specific flag variants (some kernel makefiles use these aliases)
      export CFLAGS_HOST="${CFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
      export CXXFLAGS_HOST="${CXXFLAGS_HOST:-} $GOATD_BASE_FLAGS $GOATD_HARDENING_FLAGS $GOATD_NATIVE_FLAGS"
@@ -495,6 +516,9 @@ EOF
      printf "[PREBUILD] [PHASE-G1.1] Main kernel (no LTO): CFLAGS=\"%s\"\n" "$CFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel (no LTO): CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Main kernel (no LTO): LDFLAGS=\"%s\"\n" "$LDFLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only: KCFLAGS=\"%s\"\n" "$KCFLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only (Polly): GOATD_POLLY_FLAGS=\"%s\"\n" "$GOATD_POLLY_FLAGS" >&2
+     printf "[PREBUILD] [PHASE-G1.1] Kernel-only (Native): GOATD_NATIVE_FLAGS=\"%s\"\n" "$GOATD_NATIVE_FLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools (no LTO): HOSTCFLAGS=\"%s\"\n" "$HOSTCFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools (no LTO): HOSTCXXFLAGS=\"%s\"\n" "$HOSTCXXFLAGS" >&2
      printf "[PREBUILD] [PHASE-G1.1] Host tools (no LTO): HOSTLDFLAGS=\"%s\"\n" "$HOSTLDFLAGS" >&2
@@ -726,22 +750,27 @@ LTOEODEFAULT
 /// PHASE G2 POST-MODPROBED hard enforcer
 ///
 /// After localmodconfig filtering, olddefconfig can re-expand modules.
-/// This enforcer surgically removes all CONFIG_*=m entries NOT in modprobed.db.
+/// PHASE 3 CHUNK 2: Immediately restores whitelisted modules to .config after localmodconfig.
+/// This enforcer surgically removes all CONFIG_*=m entries NOT in modprobed.db,
+/// while preserving whitelisted essential drivers.
 pub const PHASE_G2_ENFORCER: &str = r#"
      # =====================================================================
-     # PHASE G2 POST-MODPROBED: Hard enforcer to protect filtered modules
+     # PHASE G2 POST-MODPROBED: Hard enforcer + whitelist restoration
      # =====================================================================
-     # CRITICAL FIX FOR MODPROBED-DB EXPANSION:
-     # After localmodconfig filters to ~170 modules, olddefconfig's Kconfig
-     # dependency expansion re-enables thousands of unwanted modules.
+     # PHASE 3 CHUNK 2: Modprobed-db Post-Filter Whitelist Injection
+     #
+     # CRITICAL: After localmodconfig filters to ~170 modules, IMMEDIATELY restore
+     # whitelisted essential drivers to .config BEFORE olddefconfig re-expansion.
      #
      # This enforcer:
      # 1. Reads modprobed.db to get list of modules to KEEP
-     # 2. Surgically removes all CONFIG_*=m entries NOT in modprobed.db
-     # 3. Runs olddefconfig ONCE to handle consistent dependencies
-     # 4. Result: ~170 modules preserved with correct Kconfig dependencies
+     # 2. Runs olddefconfig to handle consistent Kconfig dependencies
+     # 3. IMMEDIATELY restores whitelisted modules to .config
+     # 4. Surgically removes all CONFIG_*=m entries NOT in modprobed.db
+     # 5. Result: ~170 modules preserved + whitelisted drivers + correct dependencies
      #
-     # This MUST run AFTER localmodconfig but BEFORE make olddefconfig (or in place of it)
+     # CRITICAL: Whitelist restoration happens IMMEDIATELY after localmodconfig,
+     # ensuring WHITELIST_INJECTION baseline is preserved through the filtering process.
 
      # CRITICAL: Find modprobed.db using robust path detection (same as modprobed_injection)
      # In makepkg context, $HOME may be /root but modprobed.db is at user's ~/.config/
@@ -810,6 +839,10 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                      # This may add NEW dependencies but we'll restore our 170 filtered modules afterward
                      printf "[PHASE-G2] Running: make LLVM=1 LLVM_IAS=1 olddefconfig\n" >&2
                      if make LLVM=1 LLVM_IAS=1 olddefconfig > /dev/null 2>&1; then
+                         # PHASE 3 CHUNK 2: CRITICAL - Restore whitelisted modules IMMEDIATELY after localmodconfig
+                         # This ensures WHITELIST_INJECTION baseline survives the filtering process
+                         printf "[PHASE-G2] PHASE 3 CHUNK 2: WHITELIST RESTORATION - appending essential drivers immediately after localmodconfig\n" >&2
+                         
                          # STEP 3: Restore the original filtered modules AND whitelisted modules
                          # Create a temporary file with all non-module configs
                          TEMP_CONFIG=$(mktemp)
@@ -818,16 +851,20 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                          # Append the original filtered modules back
                          echo "$FILTERED_MODULES" >> "$TEMP_CONFIG"
    
-                         # STEP 3.5: ENFORCE whitelisted modules with explicit =y values (NOT just restore from backup)
-                         # CRITICAL FIX: Instead of grep'ing from .config.pre_g2, FORCE whitelisted items to =y
-                         # This ensures critical filesystem drivers survive localmodconfig filtering
+                         # STEP 3.5: PHASE 3 CHUNK 2 - POST-FILTER WHITELIST INJECTION MARKER
+                         # CRITICAL: Append whitelisted essential drivers AFTER all filtering
+                         # This ensures the whitelist baseline from WHITELIST_INJECTION persists through localmodconfig
+                         # PHASE_G2_ENFORCER_POST_FILTER_WHITELIST_MARKER: Essential drivers appended here
                          if [[ -n "$ENFORCER_SAFE_LIST" ]]; then
-                             printf "[PHASE-G2] WHITELIST: ENFORCING whitelisted modules to explicit values (=y or =m)\n" >&2
+                             printf "[PHASE-G2] WHITELIST INJECTION: Appending essential drivers after modprobed filtering\n" >&2
+                             printf "[PHASE-G2] WHITELIST: Safe list modules: $ENFORCER_SAFE_LIST\n" >&2
                              
-                             # Define force-builtin list (filesystem drivers and NLS must be =y)
-                             local force_y_list="FAT_FS VFAT_FS EXFAT_FS NLS_UTF8 NLS_ISO8859_1 NLS_CP437 NLS_ASCII"
+                             # Define force-builtin list (filesystem drivers and NLS must be =y for bootability)
+                             # From src/config/whitelist.rs ESSENTIAL_DRIVERS
+                             local force_y_list="FAT_FS VFAT_FS EXFAT_FS ISO9660 NLS_UTF8 NLS_ISO8859_1 NLS_CP437 NLS_ASCII"
                              
-                             # Iterate through safe list and FORCE each to appropriate value
+                             # PHASE 3 CHUNK 2: Iterate through safe list and append each to .config
+                             # These are restored AFTER filtering to ensure persistence
                              for module in $ENFORCER_SAFE_LIST; do
                                  local config_name="CONFIG_$(echo $module | tr '[:lower:]' '[:upper:]')"
                                  local config_value="=m"  # Default to module
@@ -844,9 +881,9 @@ pub const PHASE_G2_ENFORCER: &str = r#"
                                  grep -v "^${config_name}=" "$TEMP_CONFIG" > "${TEMP_CONFIG}.tmp" 2>/dev/null
                                  mv "${TEMP_CONFIG}.tmp" "$TEMP_CONFIG"
                                  
-                                 # Explicitly add the enforced value
+                                 # PHASE 3 CHUNK 2: Explicitly append the whitelisted value
                                  echo "${config_name}${config_value}" >> "$TEMP_CONFIG"
-                                 printf "[PHASE-G2] WHITELIST: ENFORCED %s%s\n" "$config_name" "$config_value" >&2
+                                 printf "[PHASE-G2] WHITELIST APPENDED: %s%s\n" "$config_name" "$config_value" >&2
                              done
                          fi
    
@@ -988,96 +1025,104 @@ pub const MODPROBED_INJECTION: &str = r#"
 /// Kernel whitelist protection injection
 ///
 /// Ensures critical kernel CONFIG options are always enabled.
+/// PHASE 3 CHUNK 2: POST-FILTER WHITELIST INJECTION
+/// This template applies BEFORE localmodconfig to establish baseline,
+/// then PHASE_G2_ENFORCER restores whitelist AFTER localmodconfig.
 pub const WHITELIST_INJECTION: &str = r#"
      # =====================================================================
-     # KERNEL WHITELIST PROTECTION: Ensure critical features are always built
+     # KERNEL WHITELIST PROTECTION: Critical features protected from modprobed
      # =====================================================================
-     # This section implements a whitelist of critical kernel CONFIG options
-     # that MUST always be enabled, protected from modprobed-db filtering.
+     # PHASE 3 CHUNK 2: Modprobed-db Post-Filter Whitelist Injection
+     #
+     # CRITICAL: This section establishes BASELINE whitelist protection BEFORE localmodconfig.
+     # After localmodconfig filtering, PHASE_G2_ENFORCER IMMEDIATELY restores whitelisted modules.
+     # PHASE_G2_ENFORCER_POST_FILTER_WHITELIST_MARKER ensures these are appended AFTER all filtering.
      #
      # The whitelist includes:
-     # - Security features (CFI, SMACK, SELINUX, AppArmor)
+     # - Security features (SELINUX, AUDIT, LSM)
      # - Core functionality (SYSFS, PROC, TMPFS, DEVTMPFS)
-     # - Boot/Init essentials (INITRAMFS_SOURCE, RAMFS, BINFMT)
+     # - Boot/Init essentials (BLK_DEV_INITRD, RAMFS, BINFMT)
      # - Critical filesystems (EXT4, BTRFS, FAT, VFAT, EXFAT, ISO9660, CIFS, UDF, NTFS3)
      # - NLS support (ASCII, CP437, UTF8, ISO8859-1 for filesystem compatibility)
      # - Loopback, UEFI, and SCSI (LOOP, EFIVAR_FS, SCSI_GENERICS)
      # - Storage drivers (AHCI, NVMe, USB, USB_STORAGE, USB_HID)
+     # - Input devices (HID, HID_APPLE, HID_LOGITECH, UINPUT, JOYDEV)
      # - Networking (VIRTIO_NET, E1000E, R8169, TUN)
-     # - Desktop peripherals (HID-APPLE, HID-LOGITECH, UINPUT, JOYDEV)
      #
-     # These options will survive localmodconfig filtering and ensure
-     # the kernel remains bootable even with aggressive module stripping.
+     # These are established BEFORE localmodconfig and restored AFTER by PHASE_G2_ENFORCER.
 
      if [[ -f ".config" ]]; then
-         printf "[WHITELIST] Applying kernel whitelist protection...\n" >&2
+         printf "[WHITELIST] PRE-LOCALMODCONFIG: Establishing kernel whitelist baseline...\n" >&2
 
          # CRITICAL: These CONFIG options MUST be present for bootability
-         # We enforce them BEFORE localmodconfig to establish the baseline
-         [ -f ".config" ] && cat >> ".config" << 'EOF'
+         # We establish them BEFORE localmodconfig as the baseline
+         # PHASE_G2_ENFORCER will restore these AFTER localmodconfig filtering
+         cat >> ".config" << 'EOF'
 
 # ====================================================================
-# KERNEL WHITELIST: Critical features protected from modprobed filtering
+# KERNEL WHITELIST BASELINE: Established before localmodconfig
 # ====================================================================
-# These options are enforced to ensure kernel bootability and security
+# PHASE 3 CHUNK 2: Post-filter whitelist injection ensures these survive
+# these baseline settings are preserved by PHASE_G2_ENFORCER
 
-# Core filesystem and procfs support (MANDATORY)
+# Core filesystem and procfs support (MANDATORY FOR BOOT)
 CONFIG_SYSFS=y
 CONFIG_PROC_FS=y
 CONFIG_TMPFS=y
 CONFIG_DEVTMPFS=y
 CONFIG_BLK_DEV_INITRD=y
-CONFIG_ROOTS_FS_DEFAULT_CFI=y
 
 # Security features (MANDATORY)
 CONFIG_SELINUX=y
 CONFIG_AUDIT=y
-CONFIG_LSM="selinux,apparmor"
 
 # Primary filesystems (MANDATORY)
 CONFIG_EXT4_FS=y
 CONFIG_BTRFS_FS=y
 
-# Additional filesystems for bootability and compatibility (CRITICAL - FORCED BUILT-IN)
+# Additional filesystems for bootability (CRITICAL - FORCED BUILT-IN)
 CONFIG_FAT_FS=y
 CONFIG_VFAT_FS=y
 CONFIG_EXFAT_FS=y
-CONFIG_EXFAT_DEFAULT_IOCHARSET="utf8"
 CONFIG_ISO9660=y
 CONFIG_CIFS=y
 CONFIG_UDF_FS=y
 CONFIG_NTFS3_FS=y
 
-# NLS (National Language Support) for EFI partition mounting (CRITICAL - FORCED BUILT-IN)
+# NLS (National Language Support) for filesystem mounting (CRITICAL - FORCED BUILT-IN)
 # Cross-reference: src/config/whitelist.rs ESSENTIAL_DRIVERS array
 CONFIG_NLS_ASCII=y
 CONFIG_NLS_CP437=y
 CONFIG_NLS_UTF8=y
 CONFIG_NLS_ISO8859_1=y
 
-# Loopback device mounting (CRITICAL)
+# Loopback device mounting (CRITICAL for ISO mounting)
 CONFIG_BLK_DEV_LOOP=y
 
 # UEFI variables support (CRITICAL for UEFI systems)
 CONFIG_EFIVAR_FS=y
 
-# SCSI generic interface for CD/DVD and other SCSI devices
+# SCSI generic interface (CRITICAL for CD/DVD tools)
 CONFIG_CHR_DEV_SG=y
 
-# Storage device support (CRITICAL)
+# Storage device support (CRITICAL for hardware detection)
 CONFIG_AHCI=m
 CONFIG_SATA_AHCI=m
 CONFIG_NVME=m
 CONFIG_USB=m
 CONFIG_USB_COMMON=m
 CONFIG_USB_STORAGE=m
+CONFIG_SCSI_GENERICS=m
 
-# Input device support (CRITICAL - USB keyboards, mice)
-CONFIG_USB_HID=m
+# Input device support (CRITICAL for keyboard/mouse)
+CONFIG_INPUT_EVDEV=m
+CONFIG_HID=m
+CONFIG_HID_GENERIC=m
 CONFIG_HID_APPLE=m
 CONFIG_HID_LOGITECH_HIDPP=m
-CONFIG_INPUT_UINPUT=m
-CONFIG_INPUT_JOYDEV=m
+CONFIG_USB_HID=m
+CONFIG_UINPUT=m
+CONFIG_JOYDEV=m
 
 # Networking support (for portability and peripheral support)
 CONFIG_VIRTIO_NET=m
@@ -1086,7 +1131,7 @@ CONFIG_R8169=m
 CONFIG_TUN=m
 EOF
 
-         printf "[WHITELIST] Kernel whitelist applied - critical features protected\n" >&2
+         printf "[WHITELIST] Kernel whitelist baseline established\n" >&2
      fi
      "#;
 
@@ -1517,8 +1562,8 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
 
         if [ -n "${_actual_ver}" ]; then
             # Create /usr/src/linux-{kernelrelease} directory for headers installation
-            echo "[PHASE-E2] Installing headers to: /usr/src/linux-${_actual_ver}" >&2
-            mkdir -p "${pkgdir}/usr/src/linux-${_actual_ver}"
+            echo "[PHASE-E2] Installing headers to: /usr/src/${pkgbase}-${pkgver}-${pkgrel}" >&2
+            mkdir -p "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
             mkdir -p "${pkgdir}/usr/lib/modules/${_actual_ver}"
 
             # =====================================================================
@@ -1526,10 +1571,10 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
             # =====================================================================
             # CRITICAL: DKMS searches for /usr/lib/modules/\$(uname -r)/build
             # We MUST create this symlink EXPLICITLY pointing to the headers directory
-            if [ -d "${pkgdir}/usr/src/linux-${_actual_ver}" ]; then
+            if [ -d "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}" ]; then
                 (cd "${pkgdir}/usr/lib/modules/${_actual_ver}" && \
-                 ln -sf /usr/src/linux-${_actual_ver} build) 2>/dev/null
-                echo "[PHASE-E2] Created build symlink: /usr/lib/modules/${_actual_ver}/build -> /usr/src/linux-${_actual_ver}" >&2
+                 ln -sf /usr/src/${pkgbase}-${pkgver}-${pkgrel} build) 2>/dev/null
+                echo "[PHASE-E2] Created build symlink: /usr/lib/modules/${_actual_ver}/build -> /usr/src/${pkgbase}-${pkgver}-${pkgrel}" >&2
             fi
 
             # =====================================================================
@@ -1556,13 +1601,13 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
             echo "[PHASE-E2] VERIFICATION: Checking symlink creation..." >&2
             _verify_pass=0
             if [ -L "${pkgdir}/usr/lib/modules/${_actual_ver}/build" ]; then
-                echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${_actual_ver}/build -> /usr/src/linux-${_actual_ver}" >&2
+                echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${_actual_ver}/build -> /usr/src/${pkgbase}-${pkgver}-${pkgrel}" >&2
                 _verify_pass=$((${_verify_pass} + 1))
             else
                 echo "[PHASE-E2] ✗ Failed: /usr/lib/modules/${_actual_ver}/build not created" >&2
             fi
             if [ -L "${pkgdir}/usr/lib/modules/${_pretty_ver}/build" ] && [ "${_pretty_ver}" != "${_actual_ver}" ]; then
-                echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${_pretty_ver}/build -> /usr/src/linux-${_actual_ver}" >&2
+                echo "[PHASE-E2] ✓ Verified: /usr/lib/modules/${_pretty_ver}/build -> /usr/src/${pkgbase}-${pkgver}-${pkgrel}" >&2
                 _verify_pass=$((${_verify_pass} + 1))
             fi
             echo "[PHASE-E2] Verification result: ${_verify_pass} symlink(s) verified" >&2
@@ -1571,10 +1616,10 @@ pub fn get_headers_injection(version: Option<&str>) -> String {
             # PHASE-E2.1: CORE METADATA INJECTION (.kernelrelease)
             # =====================================================================
             # CRITICAL: Create root-level .kernelrelease for "Strict Protocol" hooks
-            # This ensures /usr/src/linux-${_actual_ver}/.kernelrelease exists
-            if [ -n "${_actual_ver}" ] && [ -d "${pkgdir}/usr/src/linux-${_actual_ver}" ]; then
-                echo "${_actual_ver}" > "${pkgdir}/usr/src/linux-${_actual_ver}/.kernelrelease"
-                echo "[PHASE-E2.1] Created root metadata: ${pkgdir}/usr/src/linux-${_actual_ver}/.kernelrelease" >&2
+            # This ensures /usr/src/${pkgbase}-${pkgver}-${pkgrel}/.kernelrelease exists
+            if [ -n "${_actual_ver}" ] && [ -d "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}" ]; then
+                echo "${_actual_ver}" > "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}/.kernelrelease"
+                echo "[PHASE-E2.1] Created root metadata: ${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}/.kernelrelease" >&2
             fi
 
             echo "[PHASE-E2] SUCCESS: Hardened header naming applied for kernelrelease: ${_actual_ver}" >&2
@@ -1672,8 +1717,8 @@ pub fn get_module_dir_creation(actual_version: Option<&str>) -> (String, String)
     // Headers package action
     let headers_action = r#"
    if [ -n "${_actual_ver}" ]; then
-       echo "[PHASE-E2] Installing headers to: /usr/src/linux-${_actual_ver}" >&2
-       mkdir -p "${pkgdir}/usr/src/linux-${_actual_ver}"
+       echo "[PHASE-E2] Installing headers to: /usr/src/${pkgbase}-${pkgver}-${pkgrel}" >&2
+       mkdir -p "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
        mkdir -p "${pkgdir}/usr/lib/modules/${_actual_ver}"
 
        # Version Bridge
@@ -1945,14 +1990,14 @@ pub const NVIDIA_DKMS_HEADER_PACKAGE_SHIM: &str = r#"    # =====================
    _header_resolved_via=""
 
    # TIER 1: Check _actual_ver variable (usually set by phase setup)
-   if [ -n "${_actual_ver}" ] && [ -d "${pkgdir}/usr/src/linux-${_actual_ver}" ]; then
-       _header_dir="${pkgdir}/usr/src/linux-${_actual_ver}"
+   if [ -n "${_actual_ver}" ] && [ -d "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}" ]; then
+       _header_dir="${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
        _header_resolved_via="_actual_ver"
        log_json "INFO" "NVIDIA-DKMS" "Path resolved via _actual_ver" "{\"version\":\"${_actual_ver}\"}"
 
    # TIER 2: Fallback to _kernver variable if _actual_ver unavailable
-   elif [ -n "${_kernver}" ] && [ -d "${pkgdir}/usr/src/linux-${_kernver}" ]; then
-       _header_dir="${pkgdir}/usr/src/linux-${_kernver}"
+   elif [ -n "${_kernver}" ] && [ -d "${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}" ]; then
+       _header_dir="${pkgdir}/usr/src/${pkgbase}-${pkgver}-${pkgrel}"
        _header_resolved_via="_kernver"
        log_json "INFO" "NVIDIA-DKMS" "Path resolved via _kernver" "{\"version\":\"${_kernver}\"}"
 
@@ -1960,7 +2005,7 @@ pub const NVIDIA_DKMS_HEADER_PACKAGE_SHIM: &str = r#"    # =====================
    else
        log_json "INFO" "NVIDIA-DKMS" "Variables unavailable/directories not found - initiating discovery"
        log_json "INFO" "NVIDIA-DKMS" "Initiating dynamic path discovery"
-       _discovered=$(find "${pkgdir}/usr/src" -maxdepth 1 -type d -name "linux-*" 2>/dev/null | head -n 1)
+       _discovered=$(find "${pkgdir}/usr/src" -maxdepth 1 -type d -name "*-${pkgver}-${pkgrel}" 2>/dev/null | head -n 1)
 
        if [ -n "$_discovered" ]; then
            _header_dir="$_discovered"

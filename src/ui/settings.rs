@@ -215,6 +215,50 @@ pub fn render_settings(
 
     ui.separator();
 
+    // Toolchain Information
+    ui.group(|ui| {
+        ui.label("Toolchain Information");
+        ui.separator();
+
+        // Detect and display Clang/LLVM version
+        let clang_version = std::process::Command::new("clang")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|output| {
+                String::from_utf8(output.stdout).ok()
+            })
+            .and_then(|output| {
+                output.lines().next().map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "Not detected".to_string());
+
+        ui.horizontal(|ui| {
+            ui.label("Clang/LLVM Version:");
+            ui.monospace(clang_version);
+        });
+
+        // Detect and display LLD version
+        let lld_version = std::process::Command::new("lld")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|output| {
+                String::from_utf8(output.stdout).ok()
+            })
+            .and_then(|output| {
+                output.lines().next().map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "Not detected".to_string());
+
+        ui.horizontal(|ui| {
+            ui.label("LLD Version:");
+            ui.monospace(lld_version);
+        });
+    });
+
+    ui.separator();
+
     // UI Customization
     ui.group(|ui| {
         ui.label("UI Customization");

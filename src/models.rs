@@ -291,6 +291,7 @@ pub struct KernelConfig {
     pub native_optimizations: bool,              // Enable -march=native
     pub user_toggled_native_optimizations: bool, // User manually toggled native optimizations
     pub kernel_variant: String,                  // Kernel variant
+    pub pkgbase: String,                         // Package base (linux-goatd-{profile} or linux-{variant}-goatd-{profile})
 }
 
 impl Default for KernelConfig {
@@ -325,6 +326,7 @@ impl Default for KernelConfig {
             native_optimizations: true,               // Default: native optimizations enabled
             user_toggled_native_optimizations: false, // Not manually toggled by default
             kernel_variant: String::new(),            // Default: empty kernel variant
+            pkgbase: "linux-goatd-generic".to_string(), // Default: linux-goatd-{profile}
         }
     }
 }
@@ -729,6 +731,7 @@ mod tests {
             native_optimizations: true,
             user_toggled_native_optimizations: false,
             kernel_variant: String::new(),
+            pkgbase: "linux-goatd-generic".to_string(),
         };
         assert_eq!(config.lto_type, LtoType::Thin);
         assert_eq!(config.hardening, HardeningLevel::Standard);

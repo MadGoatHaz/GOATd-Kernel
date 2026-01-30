@@ -25,7 +25,7 @@ GOATd Kernel requires:
 - **Linux**: Arch Linux or Arch-based distribution (Manjaro, EndeavourOS, etc.)
 - **System update**: Current package database
 - **Rust toolchain**: For compiling the GOATd application
-- **LLVM/Clang 16+**: For kernel compilation (automatically detected/installed)
+- **LLVM/Clang 19+**: For kernel compilation (automatically detected/installed)
 - **Base Development Tools**: `base-devel` group (pacman, git, gcc, make, etc.)
 
 ### Pre-Installation Checklist
@@ -107,6 +107,7 @@ The build system creates a "clean room" compilation context by:
 - **Explicit Variable Management**: All CFLAGS, LDFLAGS, and compiler flags defined centrally (not inherited from system defaults)
 - **PATH Purification**: GCC directories removed; only Clang/LLVM tools available in build PATH
 - **Global Clang Enforcement**: All build phases mandatory use Clang via `_FORCE_CLANG=1` environment variable
+- **Integrated Assembler**: `LLVM=1 LLVM_IAS=1` enables LLVM integrated assembler for optimized kernel compilation
 - **Bytecode Cache Prevention**: `PYTHONDONTWRITEBYTECODE=1` prevents Python tools from contaminating build artifacts with cached `.pyc` files
 
 #### Impact on Your Builds
@@ -173,6 +174,7 @@ All critical operations run through the **Unified Surgical Engine** ([`KernelPat
 - **Verification Before Commit**: All patches validated via dry-run before actual file modification
 - **Rollback Capability**: Original files preserved; easy revert if build fails verification
 - **Audit Trail**: All modifications logged with timestamps and context for future reference
+- **Dynamic Versioning**: `pkgver-pkgrel` synchronization maintains consistent build metadata across all configurations, ensuring reproducible builds and proper version tracking in package repositories
 
 **[↑ Back to Table of Contents](#table-of-contents)** | **[→ Next: Understanding modprobed-db](#understanding-modprobed-db)**
 
@@ -633,7 +635,7 @@ GOATd Kernel's dashboard is structured as a **5-step guided workflow**. Each tab
 
 **What It Checks**:
 - ✅ Rust installation and version
-- ✅ LLVM/Clang version (minimum 16+)
+- ✅ LLVM/Clang version (minimum 19+)
 - ✅ Base-devel package group
 - ✅ Git installation
 - ✅ modprobed-db installation status
@@ -679,7 +681,7 @@ Click **Auto-Fix** to automatically install missing packages (requires sudo pass
 Copy individual commands and run them manually for more control:
 ```bash
 sudo pacman -S rust               # Install Rust if missing
-sudo pacman -S llvm clang lld polly  # Install LLVM 16+
+sudo pacman -S llvm clang lld polly  # Install LLVM 19+
 sudo pacman -S base-devel         # Install development tools
 ```
 
@@ -888,20 +890,34 @@ Should output a version number (e.g., `modprobed-db 2.43`).
 
 **Error Message**:
 ```
-error: found clang version 15.0, expected 16.0 or higher
+error: found clang version 15.0, expected 19.0 or higher
 ```
 
 **Solution**:
 
 1. Check current version: `clang --version`
-2. Install LLVM 16+:
+2. Install LLVM 19+:
    ```bash
    sudo pacman -S llvm clang lld polly
    ```
-3. Verify update: `clang --version` (should show 16+)
+3. Verify update: `clang --version` (should show 19+)
 4. Retry kernel build
 
 **Prevention**: Keep LLVM updated with `sudo pacman -Syu` before building.
+
+---
+
+#### Issue: Build-Time UI Repaint Throttling (60Hz Maximum)
+
+**Behavior**: The UI dashboard may display compilation progress with a maximum 60Hz refresh rate during kernel builds. This is intentional.
+
+**Explanation**:
+- **60Hz Throttling** limits UI repaints to prevent excessive CPU/GPU consumption during intensive kernel compilation
+- **Visual Impact**: Compile progress updates appear every ~17ms rather than in real-time
+- **Performance Benefit**: Reduces contention between the build process and the UI renderer, allowing more CPU scheduling for actual kernel compilation
+- **Monitor Alternative**: Use `tail -f /var/log/goatd/build.log` in a terminal for real-time, unthrottled compile output
+
+**Prevention**: This is normal behavior and requires no action. Build performance *improves* with throttling enabled.
 
 ---
 
@@ -1266,6 +1282,57 @@ If you encounter issues not covered above:
 ---
 
 ## Advanced Topics
+
+### LLVM Toolchain & Linker Transition (Developer Guide)
+
+**GOATd Kernel is now a fully LLVM/Clang/lld project.** This section documents the transition from traditional GCC/ld.bfd to modern LLVM infrastructure.
+
+#### Linker Migration: From ld.bfd to ld.lld
+
+**What Changed**:
+- **Previous**: GCC-based compilation with GNU ld (ld.bfd) linker
+- **Current**: LLVM/Clang compilation with LLVM lld linker
+
+**Why lld**:
+- **Faster linking**: lld is 2-3x faster than ld.bfd for large projects like the Linux kernel
+- **Better LTO support**: Native ThinLTO and full LTO integration without GNU extensions
+- **Modern standards**: Active development and bug fixes aligned with LLVM ecosystem
+- **Reduced memory usage**: More efficient memory handling during linking phase
+
+#### Hardened LLVM Enforcement
+
+To prevent any accidental fallback to GCC or unintended tool selection, GOATd Kernel enforces:
+
+```bash
+export FORCE_CC=clang          # Force Clang C compiler
+export FORCE_CXX=clang++       # Force Clang C++ compiler
+export LLVM=1                  # Use LLVM infrastructure
+export LLVM_IAS=1              # Use LLVM Integrated Assembler
+```
+
+These exports are set in `src/kernel/patcher/templates.rs` across all build profiles to guarantee LLVM-only compilation.
+
+#### For Developers: Customization
+
+If you fork or extend GOATd Kernel and need to modify compiler selection:
+
+1. **Edit `src/kernel/patcher/templates.rs`** — Search for `FORCE_CC=clang`, `FORCE_CXX=clang++`, `LLVM=1`, and `LLVM_IAS=1`
+2. **Three build profile sections exist** (LTO-enabled, LTO-disabled, and no-LTO variants) — Update all three for consistency
+3. **Verify with `clang --version`** — Ensure correct Clang toolchain is selected
+4. **Test with `lld --version`** — Confirm lld linker is available
+
+#### Common Issues
+
+**"Unknown linker: lld"**
+- Solution: Ensure `lld` package is installed: `sudo pacman -S lld`
+
+**"error: could not find clang"**
+- Solution: Verify LLVM installation: `sudo pacman -S llvm clang`
+
+**GCC still being used**
+- Solution: Clear build artifacts and ensure `FORCE_CC` exports are in shell environment
+
+---
 
 ### Sched_ext SCX Scheduler Options
 

@@ -243,11 +243,33 @@ pub fn is_module_used(module_name: &str, modprobed_modules: &HashSet<String>) ->
 /// add_missing_modules(&mut config, &modules);
 /// ```
 pub fn add_missing_modules(config: &mut KernelConfig, modprobed_modules: &HashSet<String>) {
-    // Filter driver exclusions to remove any modules that are actively used
+    // PHASE 3 CHUNK 2: Modprobed-db Post-Filter Whitelist Injection
+    // This function ensures whitelisted modules are appended AFTER all filtering steps
+    //
+    // Step 1: Filter driver exclusions to remove any modules that are actively used
     if !modprobed_modules.is_empty() {
         config
             .driver_exclusions
             .retain(|excluded| !is_module_used(excluded, modprobed_modules));
+    }
+    
+    // Step 2: POST-FILTER WHITELIST INJECTION
+    // CRITICAL: Apply whitelist protection AFTER modprobed filtering
+    // This ensures essential drivers are appended/restored after localmodconfig filtering
+    // The whitelist restoration happens IMMEDIATELY AFTER filtering to preserve baseline
+    if config.use_whitelist {
+        use crate::config::whitelist;
+        // Step 2a: Apply whitelist to remove essential drivers from exclusions
+        // This is the critical post-filter injection ensuring whitelisted modules persist
+        whitelist::apply_whitelist(config);
+        
+        // Step 2b: Ensure no whitelisted module remains in exclusions
+        // Double-check that ALL essential drivers are protected from removal
+        let essential_drivers = whitelist::get_essential_drivers();
+        for driver in &essential_drivers {
+            // Remove from exclusions if present (whitelist takes priority)
+            config.driver_exclusions.retain(|e| e.to_lowercase() != driver.to_lowercase());
+        }
     }
 }
 

@@ -42,7 +42,7 @@ static PACKAGE_FUNCTION_REGEX: Lazy<Regex> = Lazy::new(|| {
 ///   - pkgbase="linux-goatd-custom" -> 'linux'
 /// CRITICAL FIX: Uses [^\n'"]+ to prevent multi-line capture
 static PKGBASE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?m)^\s*pkgbase=['"]?(?:([^\n'"]+?)-goatd-[^\n'"]*|([^\n'"]+))['"]?\s*$"#)
+    Regex::new(r#"(?m)^\s*pkgbase=['"]?(linux(?:-[a-zA-Z0-9]+)?-goatd-[a-zA-Z0-9]+)['"]?\s*$"#)
         .expect("Invalid pkgbase regex")
 });
 
@@ -148,10 +148,35 @@ fn find_function_body_end(content: &str, start_pos: usize) -> Option<usize> {
 /// Extract pkgver from PKGBUILD
 /// Returns the version string if found (e.g., "6.19rc6-1")
 fn extract_pkgver(content: &str) -> Option<String> {
-    // Pattern: pkgver=<anything>
-    if let Ok(regex) = Regex::new(r"(?m)^pkgver=(.+?)$") {
+    // Robust regex: pkgver=<value> with support for quoted or unquoted values
+    // Handles: pkgver="6.19rc6", pkgver='6.19rc6', pkgver=6.19rc6
+    if let Ok(regex) = Regex::new(r#"pkgver\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))"#) {
         if let Some(caps) = regex.captures(content) {
-            return caps.get(1).map(|m| m.as_str().trim().to_string());
+            // Try group 1 (double quotes), then group 2 (single quotes), then group 3 (unquoted)
+            let value = caps.get(1)
+                .or_else(|| caps.get(2))
+                .or_else(|| caps.get(3))
+                .map(|m| m.as_str().to_string());
+            return value;
+        }
+    }
+    None
+}
+
+/// Extract pkgrel from PKGBUILD content
+/// Robust extraction supporting quoted and unquoted values
+/// Handles: pkgrel="1", pkgrel='1', pkgrel=1
+fn extract_pkgrel(content: &str) -> Option<String> {
+    // Robust regex: pkgrel=<value> with support for quoted or unquoted values
+    // Handles: pkgrel="1", pkgrel='1', pkgrel=1
+    if let Ok(regex) = Regex::new(r#"pkgrel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))"#) {
+        if let Some(caps) = regex.captures(content) {
+            // Try group 1 (double quotes), then group 2 (single quotes), then group 3 (unquoted)
+            let value = caps.get(1)
+                .or_else(|| caps.get(2))
+                .or_else(|| caps.get(3))
+                .map(|m| m.as_str().to_string());
+            return value;
         }
     }
     None
@@ -1794,24 +1819,36 @@ impl super::KernelPatcher {
             current_variant
         );
 
-        // STEP 3a: Extract current pkgver
+        // STEP 3a: Extract current pkgver and pkgrel
         let current_pkgver = extract_pkgver(&content);
+        let current_pkgrel = extract_pkgrel(&content);
         eprintln!(
             "[Patcher] [SOURCE-REPAIR] Current pkgver: '{}'",
             current_pkgver.as_deref().unwrap_or("NOT FOUND")
         );
+        eprintln!(
+            "[Patcher] [SOURCE-REPAIR] Current pkgrel: '{}'",
+            current_pkgrel.as_deref().unwrap_or("NOT FOUND")
+        );
+
+        // STEP 3b: Construct current_full_version from pkgver-pkgrel
+        let current_full_version = if let (Some(ver), Some(rel)) = (current_pkgver.as_ref(), current_pkgrel.as_ref()) {
+            format!("{}-{}", ver, rel)
+        } else {
+            current_pkgver.clone().unwrap_or_else(|| "NOT FOUND".to_string())
+        };
 
         // Log the BEFORE state
         eprintln!("[Patcher] [SOURCE-REPAIR] ========== BEFORE REPAIR ==========");
         eprintln!("[Patcher] [SOURCE-REPAIR] variant: '{}'", current_variant);
         eprintln!(
-            "[Patcher] [SOURCE-REPAIR] pkgver: '{}'",
-            current_pkgver.as_deref().unwrap_or("NOT FOUND")
+            "[Patcher] [SOURCE-REPAIR] full version: '{}'",
+            current_full_version
         );
 
         // STEP 4: Check for mismatches
         let variant_mismatch = current_variant != kernel_variant;
-        let version_mismatch = current_pkgver.as_deref() != Some(resolved_version);
+        let version_mismatch = current_full_version != resolved_version;
 
         if !variant_mismatch && !version_mismatch {
             eprintln!("[Patcher] [SOURCE-REPAIR] ✓ No mismatches detected - PKGBUILD is correct");

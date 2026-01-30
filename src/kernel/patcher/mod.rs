@@ -532,7 +532,14 @@ impl KernelPatcher {
     ///
     /// # Returns
     /// HashMap of environment variable names to values
-    pub fn prepare_build_environment(&self, native_optimizations: bool) -> HashMap<String, String> {
+    pub fn prepare_build_environment(&self, config: &crate::models::KernelConfig) -> HashMap<String, String> {
+        // Delegate to env::prepare_build_environment which now accepts config
+        crate::kernel::patcher::env::prepare_build_environment(&self.src_dir, config)
+    }
+
+    /// DEPRECATED: Legacy wrapper kept for backward compatibility during transition
+    /// Use prepare_build_environment(&config) instead
+    pub fn prepare_build_environment_legacy(&self, native_optimizations: bool) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
 
         // CRITICAL: Sanitize environment FIRST to remove leaked paths and GCC contamination
@@ -758,6 +765,12 @@ impl KernelPatcher {
 LLVM := 1
 LLVM_IAS := 1
 export LLVM LLVM_IAS
+CC := clang
+CXX := clang++
+LD := ld.lld
+HOSTCC := clang
+HOSTCXX := clang++
+export CC CXX LD HOSTCC HOSTCXX
 
 "#;
 
@@ -767,7 +780,7 @@ export LLVM LLVM_IAS
             .map_err(|e| PatchError::PatchFailed(format!("Failed to write Makefile: {}", e)))?;
 
         eprintln!(
-            "[Patcher] [MAKEFILE] Prepended toolchain enforcement block (LLVM=1, LLVM_IAS=1)"
+            "[Patcher] [MAKEFILE] Prepended toolchain enforcement block (LLVM=1, LLVM_IAS=1, CC=clang, CXX=clang++, LD=ld.lld, HOSTCC=clang, HOSTCXX=clang++)"
         );
         Ok(())
     }

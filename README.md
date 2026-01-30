@@ -136,7 +136,7 @@ The project uses a unified Rust + egui stack with a modular component architectu
 ### 0. **Out-of-the-Box Reliability: Zero-Touch Automation**
 - **Arch Linux Auto-Install**: Single command `./goatdkernel.sh` triggers automatic detection and installation of all required system packages via `pacman` (Rust, LLVM/Clang, base-devel, etc.)
 - **Automatic GPG Key Verification**: Kernel signature keys (Greg Kroah-Hartman, Arch kernel maintainers) imported and verified automatically with fingerprint validation and multi-keyserver failover
-- **LLVM Toolchain Setup**: Clang 16+ (`llvm`, `clang`, `lld`, `polly`) automatically detected or installed; enforced globally via `_FORCE_CLANG=1`
+- **LLVM Toolchain Setup**: **Fully LLVM/Clang/lld Project** — Clang 19+ (`llvm`, `clang`, `lld`, `polly`) automatically detected or installed; enforced globally via `FORCE_CC=clang`, `FORCE_CXX=clang++`, `LLVM=1`, and `LLVM_IAS=1` to prevent any fallback to GCC or undesired integration. All kernel compilation exclusively uses LLVM infrastructure with lld linker.
 - **Modprobed-DB Module Filtering**: Reduces 6500+ Linux kernel modules down to <200 loaded modules—a **97% reduction** with compounding effects:
   - **30-50% faster build time** (fewer modules to compile)
   - **40-60% faster LTO optimization** (Link-Time Optimization processes only loaded modules)
@@ -144,7 +144,7 @@ The project uses a unified Rust + egui stack with a modular component architectu
   - **50-70% smaller kernel size** (storage savings, faster transfers)
   - **Significantly reduced RAM/CPU stress** during compilation
   Automatic population via `modprobed-db store` if installed; manual AUR installation available for maximum control.
-- **Ashpd Compatibility Lock**: Pinned `rfd = "0.13"` in `Cargo.toml` for guaranteed compatibility with system `ashpd` library versions
+- **Ashpd Compatibility Lock**: Pinned `rfd = "0.15"` in `Cargo.toml` with `ashpd` git patch for guaranteed compatibility with system `ashpd` library versions
 
 ### 1. **Pure Rust Core + egui UI**
 - **Full Rust Architecture**
@@ -159,9 +159,17 @@ The project uses a unified Rust + egui stack with a modular component architectu
 - **Microarchitecture Detection**: Automatic CPU feature parsing (`/proc/cpuinfo`, `CPUID`) to enable `-march` optimizations tailored to the exact processor generation
 - **Multi-GPU Policy Manager**: Unified handling of NVIDIA (Open/Proprietary), AMD, and Intel integrated GPUs with fallback logic and driver conflict resolution
 - **ESP (EFI System Partition) Discovery**: Intelligent bootloader detection (GRUB, systemd-boot, rEFInd) with privileged `bootctl` integration for reliable ESP localization
-- **Hardware-Aware Driver Auto-Discovery**: Modprobed-db auto-discovery of loaded drivers as the primary source of hardware reality, with optional Desktop Experience safety-net whitelist (Critical Filesystems: Ext4, FAT, VFAT, ISO9660, CIFS; NLS Support: ASCII, CP437 for EFI mounting; Storage Drivers: NVMe, AHCI/SATA; Input Devices: USB HID for keyboards/mice; Loopback and UEFI support) that only works in conjunction with auto-discovery to guarantee normal desktop functionality and bootability regardless of auto-discovery completeness
+- **Hardware-Aware Driver Auto-Discovery**: Modprobed-db auto-discovery of loaded drivers as the primary source of hardware reality, with optional Desktop Experience safety-net whitelist (Critical Filesystems: Ext4, FAT, VFAT, ISO9660, CIFS; NLS Support: ASCII, CP437 for EFI mounting; Storage Drivers: NVMe, AHCI/SATA; Input Devices: USB HID for keyboards/mice; Loopback and UEFI support) that only works in conjunction with auto-discovery to guarantee normal desktop functionality and bootability.
 
-### 3. **High-Fidelity Diagnostics**
+### 3. **Kernel Header Management & DKMS Compatibility**
+- **Deterministic Naming Schema**: Headers are packaged using a strict `variant-version-profile` schema (e.g., `linux-goatd-6.13.1-gaming`), ensuring unique identification and preventing collision between multiple concurrent optimizations.
+- **3-Tier Resolution Logic**: 
+    1. **Direct Match**: Primary resolution via exact version-release-variant matching.
+    2. **GOATd-Aware Pivoting**: Secondary resolution for profiles that deviate from the standard naming conventions.
+    3. **Makefile Parsing Fallback**: Last-resort synchronization by parsing the build directory's top-level Makefile to guarantee version parity.
+- **Standardized Installation Paths**: All headers are installed into `/usr/src/${pkgbase}-${pkgver}-${pkgrel}`, perfectly aligning with `uname -r` outputs to ensure seamless DKMS module builds for out-of-tree drivers (NVIDIA, VirtualBox, etc.).
+
+### 4. **High-Fidelity Diagnostics**
 - **GOATd Full Benchmark Suite**: Standardized performance evaluation sequence spanning 6 phases (Baseline, Computational Heat, Memory Saturation, Scheduler Flood, Gaming Simulator, The Gauntlet) with automated 10-second intervals, visual pulsing indicators, and integrated result naming.
 - **High-Density Result Comparison**: Advanced 48px full-width card interface featuring horizontal bi-directional delta bars and detailed tooltips for side-by-side kernel analysis.
 - **Performance Spectrum Visualization**: High-density horizontal metric strips (7-metric: Latency, Consistency, Jitter, Throughput, Efficiency, Thermal, SMI Resilience) with integrated sparklines and moving-average pulse overlays in cyberpunk "Signal & Pulse" UI style.
@@ -171,14 +179,14 @@ The project uses a unified Rust + egui stack with a modular component architectu
 - **Consolidated Real-time Log Piping**: Integrated telemetry stream bridging `LogCollector` and UI for unified tracing and system logs.
 - **CPU Thermal Heatmap**: Per-physical-core thermal monitoring via sysfs to validate cooling efficiency and detect throttling under stress.
 
-### 4. **3-Level Kernel Hardening System**
+### 5. **3-Level Kernel Hardening System**
 - **Minimal Hardening**: Performance-focused baseline with standard security mitigations disabled for maximum throughput
 - **Standard Hardening**: Balanced security profile with essential mitigations (stack canaries, ASLR, DEP) enabled
 - **Hardened Profile**: Maximum security enforcement with CFI, LSM (SELinux/AppArmor), SMACK, and lockdown mechanisms for security-critical systems
 - **Binary-Level CONFIG_CMDLINE Enforcement**: Critical security and optimization parameters are baked directly into the kernel binary via `CONFIG_CMDLINE`, ensuring runtime enforcement independent of bootloader configuration
 - **MGLRU (Multi-Gen LRU) Support**: Advanced multi-generation LRU memory management with configurable `enabled_mask` and `min_ttl_ms` per profile, enforced via `CONFIG_CMDLINE` binary bake-in for predictable memory behavior
 
-### 5. **Modular Component Architecture**
+### 6. **Modular Component Architecture**
 - **Decoupled Design**: The application has been fully modularized into specialized, independently testable modules:
   - **`system/`**: OS abstractions (logging, package management, process control) and **Performance Diagnostics**.
   - **`kernel/`**: Kernel package management, Patcher (`KernelPatcher`), and system audit.
@@ -190,7 +198,7 @@ The project uses a unified Rust + egui stack with a modular component architectu
 - **Unified Error Handling**: Global `AppError` enum with 8 variants covering all failure modes (OS commands, hardware detection, config, I/O, etc.)
 - **Input Validation Contracts**: All external inputs (package names, file paths) validated before OS command execution, preventing RCE via shell injection
 
-### 6. **Kernel Manager & Lifecycle Suite: Complete System Kernel Management**
+### 7. **Kernel Manager & Lifecycle Suite: Complete System Kernel Management**
 - **System Kernel Discovery**: Automatic detection and cataloging of all installed kernels across the system via direct `/boot`, `/efi`, and bootloader entry scanning
 - **Workspace Build Artifact Installation**: Seamless integration of locally compiled kernels into the bootloader and system registry with full module validation
 - **Booted Kernel Safety Protections**: Enhanced "Safety Net" mechanism that prevents accidental modification or deletion of the currently booted kernel via PID verification and version matching
@@ -207,14 +215,15 @@ The project uses a unified Rust + egui stack with a modular component architectu
 - **Recursive Workspace Cleanup**: Safe deletion of cached builds, temporary artifacts, and package caches with confirmation prompts
 - **Automatic Branding Injection**: Seamless `pkgbase` identifier transformation for custom kernel naming and bootloader visibility
 
-### 7. **Four-Profile Kernel Optimization System with Sched_ext Integration & GOATd Full Benchmark**
+### 8. **Four-Profile Kernel Optimization System with Sched_ext Integration & GOATd Full Benchmark**
 - **Gaming Profile**: Low-latency optimizations (Thin LTO default, 1000Hz timer, Polly loop optimization) for esports and real-time applications with optional SCX performance tuning.
 - **Workstation Profile**: Professional security-hardened kernel (security focus, Thin LTO default, 1000Hz timer, hardened defaults) for developers and security-conscious users.
 - **Server Profile**: Maximum throughput optimization (EEVDF baseline with optional SCX throughput strategy, Full LTO default, 100Hz timer, no preemption) for datacenter and enterprise workloads.
 - **Laptop Profile**: Power-efficient kernel (EEVDF baseline with optional SCX power-efficient strategy, Thin LTO default, 300Hz timer, voluntary preemption) optimized for battery life without sacrificing responsiveness.
 - **LTO Strategy**: Link-Time Optimization options (None, Thin, Full) available to all profiles. Each profile sets a **default** LTO level (Thin for Gaming/Workstation/Laptop, Full for Server) that applies when selected, but users can **change to any LTO option** before building—full control retained.
 - **Polly LLVM Loop Optimization**: Integrated `-mllvm -polly -mllvm -polly-vectorizer=stripmine` flags for advanced loop vectorization and optimization, with visible build tracking via real-time compilation logs.
-- **Rolling Clang Compiler Model**: All profiles enforce Clang (latest available, minimum 16+) exclusively via `_FORCE_CLANG=1` global enforcement; no version pinning, ensuring access to latest compiler optimizations. Compiler version tracked in post-build Performance Tier classification.
+- **Rolling Clang Compiler Model**: All profiles enforce Clang (latest available, minimum 19+) exclusively via `_FORCE_CLANG=1` global enforcement; no version pinning, ensuring access to latest compiler optimizations. Compiler version tracked in post-build Performance Tier classification.
+- **Stability & Performance**: Integrated UI OOM prevention and Concurrent Versioning Stability ensure robust kernel compilation with memory safety; dynamic `pkgver-pkgrel` synchronization maintains build consistency across platform configurations.
 - **Benchmark-Driven Profile Selection**: Run the GOATd Full Benchmark (60s) immediately post-install to measure results in one of four Performance Tiers and guide future customizations.
 
 
