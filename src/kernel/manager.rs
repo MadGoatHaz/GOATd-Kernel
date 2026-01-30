@@ -40,6 +40,7 @@ impl KernelPackage {
 ///     PathBuf::from("/path/to/linux-6.18.3-x86_64.pkg.tar.zst"),
 ///     "linux".to_string(),
 ///     "6.18.3-arch1-1".to_string(),
+///     None,
 /// );
 /// ```
 #[derive(Clone, Debug)]

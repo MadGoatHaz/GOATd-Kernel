@@ -210,9 +210,16 @@ mod tests {
 
     #[test]
     fn test_path_registry_failure_no_anchor() {
+        // Clean up any leftover anchor from previous tests
+        let _ = fs::remove_file("/tmp/.goatd_anchor");
+        
         let temp = tempdir().expect("Failed to create temp dir");
-        let kernel_src = temp.path().join("kernel");
+        // Create a deeply nested structure to avoid parent directory anchors
+        let kernel_src = temp.path().join("workspace").join("src").join("kernel");
         fs::create_dir_all(&kernel_src).expect("Failed to create dirs");
+        
+        // Do NOT create .goatd_anchor in workspace parent
+        // The canonicalized path should not find an anchor walking up
 
         let result = PathRegistry::new(kernel_src);
         assert!(result.is_err());

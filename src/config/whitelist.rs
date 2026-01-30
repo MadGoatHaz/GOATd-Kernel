@@ -507,14 +507,14 @@ mod tests {
     fn test_get_whitelist_violations_case_insensitive() {
         let config = KernelConfig {
             version: "6.6.0".to_string(),
-            driver_exclusions: vec!["HID-GENERIC".to_string(), "EXT4".to_string()],
+            driver_exclusions: vec!["hid_generic".to_string(), "ext4".to_string()],
             ..KernelConfig::default()
         };
 
         let violations = get_whitelist_violations(&config);
         assert_eq!(violations.len(), 2);
-        assert!(violations.contains(&"HID-GENERIC".to_string()));
-        assert!(violations.contains(&"EXT4".to_string()));
+        assert!(violations.contains(&"hid_generic".to_string()));
+        assert!(violations.contains(&"ext4".to_string()));
     }
 
     #[test]

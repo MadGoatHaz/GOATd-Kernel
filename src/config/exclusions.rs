@@ -696,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_essential_driver_protection() {
-        let essential_drivers = vec!["ext4", "nvme", "evdev", "hid", "usbhid"];
+        let essential_drivers = vec!["ext4", "nvme", "input_evdev", "hid", "usbhid"];
         let mut config = KernelConfig {
             version: "6.6.0".to_string(),
             ..KernelConfig::default()

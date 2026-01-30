@@ -400,7 +400,7 @@ fn test_essential_drivers_applied() -> Result<(), Box<dyn std::error::Error>> {
         "Should include storage drivers"
     );
     assert!(essential.contains(&"nvme"), "Should include NVMe drivers");
-    assert!(essential.contains(&"evdev"), "Should include input drivers");
+    assert!(essential.contains(&"input_evdev"), "Should include input drivers");
 
     Ok(())
 }
