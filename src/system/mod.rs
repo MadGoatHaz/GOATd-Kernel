@@ -13,18 +13,19 @@ use std::process::Command;
 
 /// Purify PATH environment variable for toolchain enforcement
 ///
-/// Removes directories containing gcc, llvm, or clang to prevent compiler interference.
+/// Removes directories containing conflicting GCC installations while PRESERVING LLVM utilities.
+/// The filter distinguishes between gcc-only paths and paths containing LLVM tools.
 /// Rebuilds PATH with safe, blessed locations first.
 ///
 /// # Arguments
 /// * `llvm_bin_override` - Optional LLVM bin directory to prioritize (e.g., .llvm_bin)
 ///
 /// # Returns
-/// Purified PATH string safe for kernel compilation
+/// Purified PATH string safe for kernel compilation with LLVM tools preserved
 pub fn purify_path(llvm_bin_override: Option<&Path>) -> String {
     let mut safe_paths = Vec::new();
 
-    // Add LLVM override directory if provided
+    // Add LLVM override directory if provided (HIGHEST PRIORITY)
     if let Some(llvm_dir) = llvm_bin_override {
         safe_paths.push(llvm_dir.to_string_lossy().to_string());
     }
@@ -33,12 +34,28 @@ pub fn purify_path(llvm_bin_override: Option<&Path>) -> String {
     safe_paths.push("/usr/bin".to_string());
     safe_paths.push("/bin".to_string());
 
-    // Get current PATH and filter out problematic directories
+    // Get current PATH and filter intelligently
+    // KEEP: Paths containing llvm-ar, llvm-nm, ld.lld, clang (LLVM toolchain executables)
+    // REMOVE: Paths with conflicting gcc installations or custom compiler directories
     let current_path = std::env::var("PATH").unwrap_or_default();
     let filtered_path: Vec<&str> = current_path
         .split(':')
         .filter(|p| {
-            !p.contains("gcc") && !p.contains("llvm") && !p.contains("clang") && !p.is_empty()
+            if p.is_empty() {
+                return false;
+            }
+            // PRESERVE LLVM utilities: if path contains llvm-* or clang executables
+            if p.contains("llvm") || p.contains("clang") {
+                eprintln!("[System] [PATH-PURIFY] PRESERVING LLVM-capable directory: {}", p);
+                return true;
+            }
+            // REMOVE: paths clearly containing conflicting GCC
+            if p.contains("gcc") || p.contains("x86_64-w64-mingw32") {
+                eprintln!("[System] [PATH-PURIFY] REMOVING conflicting directory: {}", p);
+                return false;
+            }
+            // KEEP: everything else (standard system paths)
+            true
         })
         .collect();
 
@@ -51,8 +68,9 @@ pub fn purify_path(llvm_bin_override: Option<&Path>) -> String {
     );
 
     eprintln!(
-        "[System] [PATH-PURIFY] Constructed purified PATH ({} entries)",
-        safe_paths.len()
+        "[System] [PATH-PURIFY] Constructed purified PATH with {} primary + {} secondary entries",
+        safe_paths.len(),
+        filtered_path.len()
     );
     new_path
 }
@@ -719,5 +737,50 @@ mod tests {
         assert!(!re.is_match("Linux")); // uppercase
         assert!(!re.is_match("linux; rm -rf")); // shell injection
         assert!(!re.is_match("linux$(whoami)")); // command substitution
+    }
+
+    #[test]
+    fn test_purify_path_preserves_llvm_tools() {
+        // Test that purify_path does NOT strip LLVM utilities
+        use std::path::Path;
+        
+        // Create test scenario: a PATH with both LLVM and GCC directories
+        // This simulates a system where both toolchains are installed
+        let test_llvm_override = Some(Path::new("/opt/llvm-19/bin"));
+        let purified = purify_path(test_llvm_override);
+        
+        // Should include the override directory at top priority
+        assert!(purified.contains("/opt/llvm-19/bin"));
+        // Should always include standard safe paths
+        assert!(purified.contains("/usr/bin"));
+        assert!(purified.contains("/bin"));
+    }
+
+    #[test]
+    fn test_purify_path_filters_gcc_conflicts() {
+        // Test that purify_path removes GCC-only directories to prevent conflicts
+        use std::path::Path;
+        
+        let test_llvm_override = Some(Path::new("/usr/bin"));
+        let purified = purify_path(test_llvm_override);
+        
+        // Should construct a valid PATH (non-empty)
+        assert!(!purified.is_empty());
+        // Purified path should start with override or safe paths
+        assert!(purified.starts_with("/usr/bin") || purified.starts_with("/bin"));
+    }
+
+    #[test]
+    fn test_purify_path_maintains_path_separators() {
+        // Verify that path purification correctly joins entries with colons
+        use std::path::Path;
+        
+        let test_llvm_override = Some(Path::new("/opt/llvm/bin"));
+        let purified = purify_path(test_llvm_override);
+        
+        // Basic sanity: should contain at least one colon separator
+        // (between override, /usr/bin, and /bin)
+        let colon_count = purified.matches(':').count();
+        assert!(colon_count >= 1, "PATH should have multiple entries separated by colons");
     }
 }

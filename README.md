@@ -34,7 +34,7 @@ On **Arch Linux and Arch-based systems**, simply run:
 The script will automatically:
 - ✅ Detect your Arch system and install all required packages via `pacman`
 - ✅ Setup GPG keys for kernel signature verification (Greg Kroah-Hartman, Arch kernel maintainers)
-- ✅ Initialize the LLVM/Clang 16+ toolchain for kernel compilation
+- ✅ Initialize the LLVM/Clang 19+ toolchain for kernel compilation
 - ✅ Build and launch the GOATd Kernel GUI
 
 ### First-Start Guide

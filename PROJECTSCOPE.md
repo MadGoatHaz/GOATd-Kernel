@@ -1,14 +1,14 @@
 # GOATd Kernel Project Scope
 
-**Document Version**: 2.3
-**Last Updated**: 2026-01-26 (Phase 46: UI Stabilization & Telemetry - V2 Dynamic Scaling, Surgical Atomic Enforcer)
+**Document Version**: 3.0
+**Last Updated**: 2026-01-30 (Phase 47: LLVM 19+ Integration & Purity Verification)
 **Purpose**: Define the role, responsibility, and interface boundaries of every major component to prevent conceptual drift and ensure long-term maintainability. Tracks implemented features with checkmarks and defers non-implemented work to Future Development.
 
 ---
 
 ## Executive Summary
 
-GOATd Kernel Builder is a **modular, multi-architecture kernel customization and build orchestration system** written in Rust with an egui UI frontend. The orchestrator (GOATd Kernel Builder) manages the complete lifecycle of building, optimizing, and deploying custom Linux kernels (GOATd Kernel) with **laboratory-grade hardening**, hardware-aware configurations, **resilient kernel building with 5-phase enforcement**, and real-time performance validation.
+GOATd Kernel Builder is a **modular, multi-architecture kernel customization and build orchestration system** written in Rust with an egui UI frontend. The system is built on a **Full LLVM 19+ baseline**, utilizing the latest Clang/LLD/Polly toolchain for **Advanced LLVM Optimization**. The orchestrator manages the complete lifecycle of building, optimizing, and deploying custom Linux kernels with laboratory-grade hardening and real-time performance validation.
 
 ### ✅ Recent Achievement Milestones (Phase 46: UI Stabilization & Telemetry)
 

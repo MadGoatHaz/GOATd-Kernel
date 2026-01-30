@@ -33,9 +33,9 @@
 //! - Environment variable `PWD` may not reflect actual filesystem location in fakeroot
 //! - Relative paths fail when switching between app dir and workspace dir
 //!
-//! ## Solution: 5-Level Fallback Strategy with Shell Injection
+//! ## Solution: 2-Tier Fallback Strategy (LLVM-Only)
 //! The patcher injects robust shell code into PKGBUILD functions that locates `.kernelrelease`
-//! using a prioritized fallback strategy. This ensures the package() function can ALWAYS find
+//! using a prioritized LLVM-only fallback strategy. This ensures the package() function can ALWAYS find
 //! the kernel version, even across mount point boundaries and in fakeroot execution:
 //!
 //! ```bash
@@ -166,11 +166,11 @@ static ICF_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\s*--icf[=a-zA-Z0-9]*\s*").expect("Invalid --icf regex"));
 static SPACE_CLEANUP_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r" {2,}").expect("Invalid space cleanup regex"));
-static CC_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)^\s*(?:export\s+)?CC\s*=\s*(?:gcc|cc)[^\n]*").expect("Invalid CC regex")
+static CLANG_CC_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?m)^\s*(?:export\s+)?CC\s*=\s*clang[^\n]*").expect("Invalid Clang CC regex")
 });
-static CXX_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)^\s*(?:export\s+)?CXX\s*=\s*(?:g\+\+|c\+\+)[^\n]*").expect("Invalid CXX regex")
+static CLANG_CXX_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?m)^\s*(?:export\s+)?CXX\s*=\s*clang\+\+[^\n]*").expect("Invalid Clang CXX regex")
 });
 static LD_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)^\s*(?:export\s+)?LD\s*=\s*(?:ld)[^\n]*").expect("Invalid LD regex")
@@ -182,10 +182,6 @@ static LTO_REMOVAL_REGEX: Lazy<Regex> = Lazy::new(|| {
 static SPACE_COLLAPSE_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\n\n+").expect("Invalid space collapse regex"));
 static MAKE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\bmake\b").expect("Invalid make regex"));
-static GCC_PATTERN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?m)^\s*(?:export\s+)?(GCC|CFLAGS|CXXFLAGS|LDFLAGS)_[A-Z0-9_]*\s*=")
-        .expect("Invalid GCC pattern regex")
-});
 static OLDCONFIG_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)(make\s+(?:old)?config|make\s+syncconfig)")
         .expect("Invalid oldconfig pattern regex")
@@ -211,17 +207,16 @@ static NVIDIA_MAKE_REGEX: Lazy<Regex> = Lazy::new(|| {
 /// Result type for patching operations
 pub type PatchResult<T> = std::result::Result<T, PatchError>;
 
-/// Find a toolchain binary in PATH, with LLVM-19 prioritization
+/// Find a toolchain binary (2-Tier LLVM-Only Strategy)
 ///
-/// Searches for the binary in this order:
-/// 1. LLVM-19 variant (e.g., llvm-19-strip for strip) - HIGHEST PRIORITY
-/// 2. LLVM variant without version (e.g., llvm-strip for strip)
-/// 3. Standard location (e.g., /usr/bin/strip)
-/// 4. Just the command name (let PATH search)
+/// LLVM-ONLY environment: searches for binaries in strict priority order
+/// Tier 1: Explicit Toolchain Path (LLVM variants - llvm-19-X, llvm-X)
+/// Tier 2: System PATH discovery
 ///
 /// Returns the resolved command name to use
 fn find_toolchain_binary(name: &str) -> String {
-    // STEP 1: Try LLVM-19 variant first (highest priority for consistency)
+    // TIER 1: Explicit Toolchain Path - Try LLVM variants in priority order
+    // PRIORITY 1A: LLVM-19 variant (e.g., llvm-19-strip)
     let llvm19_variant = format!("llvm-19-{}", name);
     if Command::new(&llvm19_variant)
         .arg("--version")
@@ -229,36 +224,29 @@ fn find_toolchain_binary(name: &str) -> String {
         .is_ok()
     {
         eprintln!(
-            "[Patcher] [TOOLCHAIN] Found LLVM-19 variant: {}",
+            "[Patcher] [TOOLCHAIN] TIER-1 (Explicit Path): Using LLVM-19 variant: {}",
             llvm19_variant
         );
         return llvm19_variant;
     }
 
-    // STEP 2: Try generic LLVM variant (fallback for latest LLVM)
+    // PRIORITY 1B: Generic LLVM variant (e.g., llvm-strip) - fallback for latest LLVM
     let llvm_variant = format!("llvm-{}", name);
     if Command::new(&llvm_variant)
         .arg("--version")
         .output()
         .is_ok()
     {
-        eprintln!("[Patcher] [TOOLCHAIN] Found LLVM variant: {}", llvm_variant);
+        eprintln!(
+            "[Patcher] [TOOLCHAIN] TIER-1 (Explicit Path): Using LLVM variant: {}",
+            llvm_variant
+        );
         return llvm_variant;
     }
 
-    // STEP 3: Try standard /usr/bin location
-    let standard_path = format!("/usr/bin/{}", name);
-    if std::path::Path::new(&standard_path).exists() {
-        eprintln!(
-            "[Patcher] [TOOLCHAIN] Found at standard location: {}",
-            standard_path
-        );
-        return standard_path;
-    }
-
-    // STEP 4: Fallback to just the command name (rely on PATH)
+    // TIER 2: System PATH - fallback to just the command name (rely on PATH discovery)
     eprintln!(
-        "[Patcher] [TOOLCHAIN] Using {} from PATH (final fallback)",
+        "[Patcher] [TOOLCHAIN] TIER-2 (System PATH): Using {} from PATH",
         name
     );
     name.to_string()

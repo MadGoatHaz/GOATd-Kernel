@@ -337,9 +337,10 @@ pub fn inject_clang_into_pkgbuild(src_dir: &Path) -> PatchResult<()> {
     }
 
     // STEP 1: Aggressively replace GCC variable assignments with regex
+    // Legacy Purge: Remove any GNU compiler references, enforce Clang-only
     let substitutions = [
         (
-            r"(?m)^\s*(?:export\s+)?CC\s*=\s*(?:gcc|cc)[^\n]*",
+            r"(?m)^\s*(?:export\s+)?CC\s*=\s*(?:gcc|cc|g\+\+)[^\n]*",
             "export CC=clang",
         ),
         (

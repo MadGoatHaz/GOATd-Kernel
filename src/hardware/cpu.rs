@@ -90,6 +90,60 @@ pub fn detect_cpu_vendor() -> Result<String, HardwareError> {
     }
 }
 
+/// Determine optimal LLVM -march flag from CPU data for kernel compilation
+///
+/// Extracts CPU flags and model information to suggest appropriate LLVM march architecture.
+/// This function is compiler-agnostic but provides high-quality data for LLVM optimizations.
+///
+/// # Returns
+/// Suggested march value suitable for `clang -march=...` kernel compilation
+pub fn get_llvm_march_for_cpu() -> Result<String, HardwareError> {
+    let model = detect_cpu_model()?;
+    let vendor = detect_cpu_vendor()?;
+    
+    // Parse flags from /proc/cpuinfo for feature detection
+    let output = std::process::Command::new("grep")
+        .args(&["flags", "/proc/cpuinfo"])
+        .output()
+        .map_err(|e| HardwareError::SystemInfoUnavailable(format!("Failed to read CPU flags: {}", e)))?;
+    
+    let flags_str = String::from_utf8_lossy(&output.stdout);
+    
+    // Detect march based on vendor and model
+    let march = if vendor.contains("Intel") {
+        if model.contains("Skylake") || model.contains("Kaby Lake") || model.contains("Coffee Lake") {
+            "skylake"
+        } else if model.contains("Zen") {
+            "znver1"
+        } else if model.contains("Haswell") || model.contains("Broadwell") {
+            "broadwell"
+        } else if flags_str.contains("avx512") {
+            "skylake-avx512"
+        } else if flags_str.contains("avx2") {
+            "haswell"
+        } else {
+            "generic"
+        }
+    } else if vendor.contains("AMD") {
+        if model.contains("Zen 3") {
+            "znver3"
+        } else if model.contains("Zen 2") {
+            "znver2"
+        } else if model.contains("Zen") || model.contains("Ryzen") {
+            "znver1"
+        } else if flags_str.contains("avx2") {
+            "bdver4"
+        } else {
+            "generic"
+        }
+    } else {
+        "generic"
+    };
+    
+    eprintln!("[CPU] Determined LLVM march='{}' from CPU model '{}'", march, model);
+    Ok(march.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +181,26 @@ mod tests {
         let cores = detect_cpu_cores().unwrap();
         let threads = detect_cpu_threads().unwrap();
         assert!(cores <= threads);
+    }
+
+    #[test]
+    fn test_get_llvm_march_for_cpu_returns_result() {
+        let result = get_llvm_march_for_cpu();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_llvm_march_for_cpu_returns_valid_march() {
+        let march = get_llvm_march_for_cpu().unwrap();
+        assert!(!march.is_empty());
+        // Valid march values include: generic, skylake, haswell, znver1, znver2, znver3, etc.
+        let valid_marches = [
+            "generic", "skylake", "skylake-avx512", "haswell", "broadwell",
+            "znver1", "znver2", "znver3", "bdver4"
+        ];
+        assert!(
+            valid_marches.contains(&march.as_str()),
+            "march '{}' is not in recognized set", march
+        );
     }
 }

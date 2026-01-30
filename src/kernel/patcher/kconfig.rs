@@ -364,17 +364,18 @@ impl crate::kernel::patcher::KernelPatcher {
             );
         }
 
-        // STEP 1: Remove ALL GCC-related config lines to prevent conflicts
-        let gcc_config_patterns = vec![
-            "CONFIG_CC_IS_GCC=",
-            "CONFIG_GCC_VERSION=",
-            "CONFIG_CC_VERSION_TEXT=",
+        // LEGACY PURGE: Remove ALL GCC-related config lines (unified cleanup for LLVM-only environment)
+        // These patterns ensure no GNU-centric configuration survives
+        let legacy_gcc_patterns = vec![
+            "CONFIG_CC_IS_GCC=",      // Primary GCC compiler selector
+            "CONFIG_GCC_VERSION=",    // GCC version text
+            "CONFIG_CC_VERSION_TEXT=\"gcc",  // GCC version identifier
         ];
 
-        for pattern in gcc_config_patterns {
+        for pattern in legacy_gcc_patterns {
             content = content
                 .lines()
-                .filter(|line| !line.starts_with(pattern))
+                .filter(|line| !line.starts_with(pattern) && !line.contains("CONFIG_CC_VERSION_TEXT=\"gcc"))
                 .collect::<Vec<_>>()
                 .join("\n");
             if !content.is_empty() && !content.ends_with('\n') {
@@ -444,9 +445,10 @@ impl crate::kernel::patcher::KernelPatcher {
         // NOTE: CONFIG_LOCALVERSION is set dynamically based on variant + profile
         // to ensure collision-free kernel version strings across all builds
         let mut clang_configs = vec![
-            ("CONFIG_CC_IS_CLANG", "y"),
-            ("CONFIG_CLANG_VERSION", "190106"), // LLVM 19.0.1 release
-            ("CONFIG_CC_IS_GCC", "n"),
+            // Unified LLVM-only environment enforcement
+            ("CONFIG_CC_IS_CLANG", "y"),           // Enforce Clang compiler detection
+            ("CONFIG_CLANG_VERSION", "190106"),    // LLVM 19.0.1 release (matches LLVM_IAS)
+            ("CONFIG_CC_IS_GCC", "n"),             // Disable GCC detection (Legacy Purge)
         ];
 
         // Add LTO configs based on lto_type parameter

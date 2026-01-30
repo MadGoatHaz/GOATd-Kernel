@@ -3659,13 +3659,11 @@ fi
                 {
                     let config_str = String::from_utf8_lossy(&output.stdout);
                     if config_str.contains("CONFIG_LTO_CLANG_FULL=y") {
-                        "CLANG Full".to_string()
+                        "LLVM/Clang Full".to_string()
                     } else if config_str.contains("CONFIG_LTO_CLANG_THIN=y") {
-                        "CLANG Thin".to_string()
+                        "LLVM/Clang Thin".to_string()
                     } else if config_str.contains("CONFIG_LTO_CLANG=y") {
-                        "CLANG".to_string()
-                    } else if config_str.contains("CONFIG_LTO_GCC=y") {
-                        "GCC".to_string()
+                        "LLVM/Clang".to_string()
                     } else {
                         "None".to_string()
                     }
@@ -3677,13 +3675,11 @@ fi
                             let boot_config_path = format!("/boot/config-{}", kernel_version);
                             if let Ok(config_str) = std::fs::read_to_string(&boot_config_path) {
                                 if config_str.contains("CONFIG_LTO_CLANG_FULL=y") {
-                                    "CLANG Full".to_string()
+                                    "LLVM/Clang Full".to_string()
                                 } else if config_str.contains("CONFIG_LTO_CLANG_THIN=y") {
-                                    "CLANG Thin".to_string()
+                                    "LLVM/Clang Thin".to_string()
                                 } else if config_str.contains("CONFIG_LTO_CLANG=y") {
-                                    "CLANG".to_string()
-                                } else if config_str.contains("CONFIG_LTO_GCC=y") {
-                                    "GCC".to_string()
+                                    "LLVM/Clang".to_string()
                                 } else {
                                     "None".to_string()
                                 }

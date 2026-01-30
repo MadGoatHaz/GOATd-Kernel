@@ -8,28 +8,25 @@
 //! 4. PATH purification to prevent GCC/legacy compiler interference
 //! 5. Dynamic toolchain discovery with LLVM-19 prioritization
 //!
-//! # LLVM-19 Prioritization
-//! All toolchain binaries are discovered using a 4-step fallback strategy:
-//! 1. LLVM-19 variant (e.g., llvm-19-strip) - HIGHEST PRIORITY
-//! 2. LLVM variant without version (e.g., llvm-strip)
-//! 3. Standard /usr/bin location (e.g., /usr/bin/strip)
-//! 4. Just the command name (rely on PATH)
+//! # LLVM-Only Environment (2-Tier Strategy)
+//! All toolchain binaries are discovered using a 2-step LLVM-only fallback strategy:
+//! Tier 1: Explicit Toolchain Path - LLVM variants (llvm-19-strip, llvm-strip) - HIGHEST PRIORITY
+//! Tier 2: System PATH discovery (rely on PATH)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Find a toolchain binary in PATH, with LLVM-19 prioritization
+/// Find a toolchain binary (2-Tier LLVM-Only Strategy)
 ///
-/// Searches for the binary in this order:
-/// 1. LLVM-19 variant (e.g., llvm-19-strip for strip) - HIGHEST PRIORITY
-/// 2. LLVM variant without version (e.g., llvm-strip for strip)
-/// 3. Standard location (e.g., /usr/bin/strip)
-/// 4. Just the command name (let PATH search)
+/// LLVM-ONLY environment: searches for binaries in strict priority order
+/// Tier 1: Explicit Toolchain Path (LLVM variants - llvm-19-X, llvm-X) - HIGHEST PRIORITY
+/// Tier 2: System PATH discovery
 ///
 /// Returns the resolved command name to use
 pub fn find_toolchain_binary(name: &str) -> String {
-    // STEP 1: Try LLVM-19 variant first (highest priority for consistency)
+    // TIER 1: Explicit Toolchain Path - Try LLVM variants in priority order
+    // PRIORITY 1A: LLVM-19 variant (e.g., llvm-19-strip)
     let llvm19_variant = format!("llvm-19-{}", name);
     if Command::new(&llvm19_variant)
         .arg("--version")
@@ -37,36 +34,29 @@ pub fn find_toolchain_binary(name: &str) -> String {
         .is_ok()
     {
         eprintln!(
-            "[Patcher] [TOOLCHAIN] Found LLVM-19 variant: {}",
+            "[Patcher] [TOOLCHAIN] TIER-1 (Explicit Path): Using LLVM-19 variant: {}",
             llvm19_variant
         );
         return llvm19_variant;
     }
 
-    // STEP 2: Try generic LLVM variant (fallback for latest LLVM)
+    // PRIORITY 1B: Generic LLVM variant (e.g., llvm-strip) - fallback for latest LLVM
     let llvm_variant = format!("llvm-{}", name);
     if Command::new(&llvm_variant)
         .arg("--version")
         .output()
         .is_ok()
     {
-        eprintln!("[Patcher] [TOOLCHAIN] Found LLVM variant: {}", llvm_variant);
+        eprintln!(
+            "[Patcher] [TOOLCHAIN] TIER-1 (Explicit Path): Using LLVM variant: {}",
+            llvm_variant
+        );
         return llvm_variant;
     }
 
-    // STEP 3: Try standard /usr/bin location
-    let standard_path = format!("/usr/bin/{}", name);
-    if Path::new(&standard_path).exists() {
-        eprintln!(
-            "[Patcher] [TOOLCHAIN] Found at standard location: {}",
-            standard_path
-        );
-        return standard_path;
-    }
-
-    // STEP 4: Fallback to just the command name (rely on PATH)
+    // TIER 2: System PATH - fallback to just the command name (rely on PATH discovery)
     eprintln!(
-        "[Patcher] [TOOLCHAIN] Using {} from PATH (final fallback)",
+        "[Patcher] [TOOLCHAIN] TIER-2 (System PATH): Using {} from PATH",
         name
     );
     name.to_string()

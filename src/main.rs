@@ -71,6 +71,30 @@ async fn main() -> goatd_kernel::Result<()> {
     log::info!("GOATd Kernel logging initialized");
 
     // =========================================================================
+    // LLVM TOOLCHAIN VERIFICATION - CRITICAL PRE-FLIGHT CHECK
+    // =========================================================================
+    eprintln!("[Main] ▶ Verifying full LLVM toolchain availability...");
+    match goatd_kernel::system::verification::verify_llvm_toolchain() {
+        Ok(true) => {
+            eprintln!("[Main] ✓ Full LLVM toolchain verified and available");
+            log::info!("Full LLVM toolchain verification: PASSED");
+        }
+        Ok(false) => {
+            // Function always returns Ok(true) on success per verify_llvm_toolchain contract
+            // This branch is unreachable but required for exhaustive matching
+            eprintln!("[Main] ⚠ Unexpected LLVM verification result (should not occur)");
+        }
+        Err(diagnostic) => {
+            eprintln!("[Main] ⚠ LLVM toolchain verification FAILED - CRITICAL ISSUE:");
+            eprintln!("{}", diagnostic);
+            log::error!("LLVM toolchain verification failed: {}", diagnostic);
+            // IMPORTANT: This is a soft warning for now. Full LLVM mode requires proper toolchain,
+            // but we continue to allow graceful fallback or user intervention in UI
+            eprintln!("[Main] Application continuing with degraded LLVM support");
+        }
+    }
+
+    // =========================================================================
     // CONTROLLER AND CHANNELS SETUP
     // =========================================================================
     let (build_tx, build_rx) = tokio::sync::mpsc::channel::<BuildEvent>(65536);

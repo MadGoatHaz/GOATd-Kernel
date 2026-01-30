@@ -130,6 +130,25 @@ impl HealthManager {
 
         let aur_pkgs = Self::aur_packages();
 
+        // LLVM TOOLCHAIN VERIFICATION - CRITICAL FOR KERNEL BUILDS
+        // Check if the full LLVM toolchain is available for kernel compilation
+        match crate::system::verification::verify_llvm_toolchain() {
+            Ok(true) => {
+                eprintln!("[Health] ✓ Full LLVM toolchain available (clang, clang++, ld.lld, llvm-ar, llvm-nm, etc.)");
+                report.message = "System is healthy with full LLVM toolchain support".to_string();
+            }
+            Ok(false) => {
+                // This case should not occur based on verify_llvm_toolchain logic, but handle for exhaustiveness
+                eprintln!("[Health] ⚠ LLVM toolchain returned unexpected Ok(false)");
+            }
+            Err(diagnostic) => {
+                eprintln!("[Health] ⚠ LLVM toolchain health check logged: {}", diagnostic);
+                log::warn!("LLVM toolchain diagnostics: {}", diagnostic);
+                // Don't fail health - LLVM may be optional depending on build configuration
+                // but document the diagnostic for user awareness
+            }
+        }
+
         // Check critical packages
         for pkg in critical_packages {
             if !Self::is_package_installed(pkg) {
