@@ -108,41 +108,58 @@ pub const RESTORE_GOATD_WHITELIST_FUNCTION: &str = r#"
 # =====================================================================
 # Call this after olddefconfig to re-inject whitelisted modules
 # CRITICAL: Filesystem drivers and NLS codepages are FORCE-BUILT-IN (=y)
+# NEW LOGIC: Explicitly DELETE any existing =m or "is not set" before adding =y/=m
+# This ensures an upgrade from modular to built-in for critical drivers
 restore_goatd_whitelist() {
     local config_file=".config"
     [ ! -f "$config_file" ] && return 1
     
     printf "[GLOBAL-ENFORCER] Synchronizing Safe List: %s\n" "$ENFORCER_SAFE_LIST" >&2
     
-    # 1. Create Safe Pattern Regex
-    local safe_pattern="^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))(=[ym]$)"
+    # 1. Define FORCE-BUILTIN list (filesystem drivers and NLS codepages)
+    # These MUST be =y (not =m) for system viability
+    local force_y_list="FAT_FS VFAT_FS EXFAT_FS ISO9660 CIFS UDF_FS NTFS3_FS NLS_UTF8 NLS_ISO8859_1 NLS_CP437 NLS_ASCII BLK_DEV_LOOP EFIVAR_FS CHR_DEV_SG INPUT_EVDEV HID_GENERIC USBHID USB USB_STORAGE USB_COMMON"
     
-    # 2. Define FORCE-BUILTIN list (filesystem drivers and NLS codepages)
-    local force_y_list="FAT_FS VFAT_FS EXFAT_FS NLS_UTF8 NLS_ISO8859_1 NLS_CP437 NLS_ASCII"
-    
-    # 3. Extract whitelisted entries from backup if available, else re-force
-    # Note: prepare() already has .config.pre_g2, build() may need to re-verify
+    # 2. Process each whitelisted module: DELETE-THEN-ADD logic
     for module in $ENFORCER_SAFE_LIST; do
         local config_name="CONFIG_$(echo $module | tr '[:lower:]' '[:upper:]')"
         local config_value="=m"  # Default to module
         
-        # Check if this module should be FORCE-BUILTIN
+        # Determine if this module should be FORCE-BUILTIN (=y)
         for force_y_item in $force_y_list; do
             if [[ "$config_name" == "CONFIG_$force_y_item" ]]; then
-                config_value="=y"  # Force built-in for critical filesystem drivers
+                config_value="=y"  # Force built-in for critical drivers
                 break
             fi
         done
         
-        if ! grep -q "^${config_name}=" "$config_file"; then
-             printf "[GLOBAL-ENFORCER] Re-injecting whitelisted module: %s (value: %s)\n" "$module" "$config_value" >&2
-             echo "${config_name}${config_value}" >> "$config_file"
+        # CRITICAL: DELETE-THEN-ADD logic to upgrade =m to =y
+        # Step 1: Remove any existing CONFIG_... lines (both =m and =y)
+        if grep -q "^${config_name}=" "$config_file"; then
+            printf "[GLOBAL-ENFORCER] DELETING existing entry: %s\n" "$config_name" >&2
+            sed -i "/^${config_name}=/d" "$config_file"
         fi
+        
+        # Step 2: Remove any "is not set" lines for this config
+        if grep -q "^# ${config_name} is not set" "$config_file"; then
+            printf "[GLOBAL-ENFORCER] DELETING disabled entry: # %s is not set\n" "$config_name" >&2
+            sed -i "/^# ${config_name} is not set/d" "$config_file"
+        fi
+        
+        # Step 3: Add the new enforced value
+        printf "[GLOBAL-ENFORCER] ADDING whitelisted module: %s (value: %s)\n" "$module" "$config_value" >&2
+        echo "${config_name}${config_value}" >> "$config_file"
     done
     
     # 4. Final Verification
     local verify_count=$(grep -E "^CONFIG_($(echo "$ENFORCER_SAFE_LIST" | sed 's/ /|/g' | tr '[:lower:]' '[:upper:]'))=" "$config_file" | wc -l)
-    printf "[GLOBAL-ENFORCER] Verification: %d/%d modules secured.\n" "$verify_count" "$(echo $ENFORCER_SAFE_LIST | wc -w)" >&2
+    local expected_count=$(echo $ENFORCER_SAFE_LIST | wc -w)
+    printf "[GLOBAL-ENFORCER] Verification: %d/%d modules secured.\n" "$verify_count" "$expected_count" >&2
+    
+    if [ "$verify_count" -ne "$expected_count" ]; then
+        printf "[GLOBAL-ENFORCER] WARNING: Module count mismatch! Expected %d, got %d\n" "$expected_count" "$verify_count" >&2
+        return 1
+    fi
 }
 "#;
 
@@ -1219,7 +1236,7 @@ pub const CLANG_EXPORTS: &str = r#"    # =======================================
           export LD=ld.lld
           export AR=llvm-ar
           export NM=llvm-nm
-          export STRIP=/usr/bin/strip
+          export STRIP=llvm-strip
           export OBJCOPY=llvm-objcopy
           export OBJDUMP=llvm-objdump
           export READELF=llvm-readelf

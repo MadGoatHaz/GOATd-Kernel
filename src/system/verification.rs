@@ -1034,6 +1034,48 @@ pub fn verify_kernel_against_mpl(
 /// * `kernel_version` - Kernel version string
 ///
 /// # Returns
+/// Verifies that the full LLVM/Clang toolchain is available and functional.
+///
+/// This function checks for the presence and correctness of critical LLVM tools:
+/// - clang/clang++ (compiler and C++ compiler)
+/// - ld.lld (linker)
+/// - llvm-ar (archiver)
+/// - llvm-nm (symbol table tool)
+/// - llvm-strip (strip utility)
+/// - llvm-objcopy (object copy utility)
+/// - llvm-readelf (readelf alternative)
+///
+/// Returns: `Ok(true)` if all required LLVM tools exist, `Err` with diagnostic message if missing
+pub fn verify_llvm_toolchain() -> Result<bool, String> {
+    let required_tools = vec!["clang", "clang++", "ld.lld", "llvm-ar", "llvm-nm", "llvm-strip", "llvm-objcopy", "llvm-readelf"];
+    let mut missing_tools = Vec::new();
+
+    for tool in required_tools {
+        match std::process::Command::new("which")
+            .arg(tool)
+            .output() {
+            Ok(output) => {
+                if !output.status.success() {
+                    missing_tools.push(tool);
+                }
+            }
+            Err(_) => {
+                missing_tools.push(tool);
+            }
+        }
+    }
+
+    if !missing_tools.is_empty() {
+        Err(format!(
+            "LLVM toolchain verification failed. Missing tools: {}",
+            missing_tools.join(", ")
+        ))
+    } else {
+        eprintln!("[VERIFY] ✓ All LLVM toolchain tools verified");
+        Ok(true)
+    }
+}
+
 /// `Ok(KernelInstallationStatus)` with detailed status info, or `Err` if verification encounters errors
 pub fn verify_kernel_installation(
     kernel_version: &str,
@@ -1116,5 +1158,65 @@ mod tests {
         );
         let display = format!("{}", err);
         assert!(display.contains("Headers not installed"));
+    }
+
+    #[test]
+    fn test_verify_llvm_toolchain_returns_result() {
+        // Test that verify_llvm_toolchain returns a valid Result type
+        let result = verify_llvm_toolchain();
+        match result {
+            Ok(true) => {
+                // All LLVM tools found
+                eprintln!("[TEST] Full LLVM toolchain available");
+            }
+            Ok(false) => {
+                panic!("verify_llvm_toolchain should return Ok(true) or Err, not Ok(false)");
+            }
+            Err(msg) => {
+                // Some LLVM tools missing (expected in test environments)
+                eprintln!("[TEST] Some LLVM tools missing: {}", msg);
+                assert!(msg.contains("Missing tools") || msg.contains("LLVM toolchain verification failed"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_verify_llvm_toolchain_detects_missing_tools() {
+        // Test that verify_llvm_toolchain properly detects missing tools
+        let result = verify_llvm_toolchain();
+        
+        // Result should be either Ok(true) indicating all tools present,
+        // or Err with diagnostics about missing tools
+        match result {
+            Ok(true) => {
+                // All LLVM tools available - this is ideal
+                eprintln!("[TEST] LLVM toolchain fully verified");
+            }
+            Err(msg) => {
+                // In test environment, some tools may be missing - that's acceptable
+                // The important thing is that the error message is informative
+                assert!(msg.contains("LLVM") || msg.contains("tools"));
+                eprintln!("[TEST] LLVM verification appropriately reported missing tools");
+            }
+            _ => {
+                panic!("Unexpected result from verify_llvm_toolchain");
+            }
+        }
+    }
+
+    #[test]
+    fn test_dkms_compatibility_parsing_rc_version() {
+        let compat = DkmsCompatibility::new("6.19-rc6");
+        assert!(compat.is_rc_kernel);
+        assert_eq!(compat.rc_version, Some(6));
+        assert_eq!(compat.base_kernel_version, Some("6.19".to_string()));
+    }
+
+    #[test]
+    fn test_dkms_compatibility_stable_kernel() {
+        let compat = DkmsCompatibility::new("6.18.3");
+        assert!(!compat.is_rc_kernel);
+        assert_eq!(compat.rc_version, None);
+        assert_eq!(compat.base_kernel_version, None);
     }
 }

@@ -11,10 +11,10 @@
 //! failures on systems with undetected hardware, a minimal whitelist of
 //! essential drivers is always included:
 //!
-//! - **HID**: evdev, hid, hid-generic, usbhid
+//! - **HID**: input_evdev, hid, hid_generic, usbhid
 //! - **Storage**: nvme, ahci, libata, scsi
 //! - **Filesystems**: ext4, btrfs, vfat, exfat, nls_cp437, nls_iso8859_1, nls_utf8
-//! - **USB**: usb_core, usb_storage, usb-common, xhci_hcd, ehci_hcd, ohci_hcd
+//! - **USB**: usb, usb_storage, usb_common, xhci_hcd, ehci_hcd, ohci_hcd
 //!
 //! # CRITICAL DEPENDENCY: Auto-Discovery Integration
 //!
@@ -102,18 +102,18 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
     "nls_utf8",      // UTF-8 codepage for ExFAT support (modern filesystems) [FORCE-Y]
     "nls_ascii",     // ASCII codepage for basic filesystem support [FORCE-Y]
     // Input Devices (CRITICAL: keyboard/mouse functionality)
-    "evdev",       // Input event device handler (base for all input)
-    "hid",         // Human Interface Device base (required before hid-generic)
-    "hid-generic", // Generic HID driver (keyboards, mice, USB input)
-    "hid-apple",   // Apple HID devices (MacBook compatibility)
-    "hid-logitech-hidpp", // Logitech HID++ devices (mouse/keyboard)
+    "input_evdev",       // Input event device handler (base for all input)
+    "hid",         // Human Interface Device base (required before hid_generic)
+    "hid_generic", // Generic HID driver (keyboards, mice, USB input)
+    "hid_apple",   // Apple HID devices (MacBook compatibility)
+    "hid_logitech_hidpp", // Logitech HID++ devices (mouse/keyboard)
     "usbhid",      // USB HID protocol (USB keyboard/mouse support)
     "uinput",      // User input device (virtual input for tools)
     "joydev",      // Joystick/gamepad device support (game controllers)
     // USB Subsystem (CRITICAL: USB storage and devices)
-    "usb_core",    // USB core framework (dependency for all USB)
+    "usb",    // USB core framework (dependency for all USB)
     "usb_storage", // USB mass storage (USB drives/external drives)
-    "usb-common",  // USB common code
+    "usb_common",  // USB common code
     "xhci_hcd",    // USB 3.0 host controller (modern standard)
     "ehci_hcd",    // USB 2.0 host controller (fallback)
     "ohci_hcd",    // USB 1.1 host controller (legacy fallback)
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_get_essential_drivers_contains_input() {
         let drivers = get_essential_drivers();
-        assert!(drivers.contains(&"evdev"));
+        assert!(drivers.contains(&"input_evdev"));
         assert!(drivers.contains(&"hid"));
         assert!(drivers.contains(&"usbhid"));
     }
@@ -350,8 +350,8 @@ mod tests {
     fn test_get_essential_drivers_contains_expanded_hid_devices() {
         let drivers = get_essential_drivers();
         // New HID devices for peripheral support
-        assert!(drivers.contains(&"hid-apple"), "Missing hid-apple (Apple keyboards/mice)");
-        assert!(drivers.contains(&"hid-logitech-hidpp"), "Missing hid-logitech-hidpp (Logitech devices)");
+        assert!(drivers.contains(&"hid_apple"), "Missing hid_apple (Apple keyboards/mice)");
+        assert!(drivers.contains(&"hid_logitech_hidpp"), "Missing hid_logitech_hidpp (Logitech devices)");
         assert!(drivers.contains(&"uinput"), "Missing uinput (virtual input)");
         assert!(drivers.contains(&"joydev"), "Missing joydev (game controllers)");
     }
@@ -368,18 +368,18 @@ mod tests {
     #[test]
     fn test_is_essential_driver_exact_match() {
         assert!(is_essential_driver("ext4"));
-        assert!(is_essential_driver("hid-generic"));
-        assert!(is_essential_driver("usb_core"));
+        assert!(is_essential_driver("hid_generic"));
+        assert!(is_essential_driver("usb"));
     }
 
     #[test]
     fn test_is_essential_driver_case_insensitive() {
         assert!(is_essential_driver("EXT4"));
         assert!(is_essential_driver("Ext4"));
-        assert!(is_essential_driver("HID-GENERIC"));
-        assert!(is_essential_driver("hid-generic"));
-        assert!(is_essential_driver("USB_CORE"));
-        assert!(is_essential_driver("Usb_Core"));
+        assert!(is_essential_driver("HID_GENERIC"));
+        assert!(is_essential_driver("hid_generic"));
+        assert!(is_essential_driver("USB"));
+        assert!(is_essential_driver("Usb"));
     }
 
     #[test]
@@ -393,7 +393,7 @@ mod tests {
     fn test_apply_whitelist_removes_essential() {
         let mut config = KernelConfig {
             version: "6.6.0".to_string(),
-            driver_exclusions: vec!["ext4".to_string(), "hid-generic".to_string()],
+            driver_exclusions: vec!["ext4".to_string(), "hid_generic".to_string()],
             ..KernelConfig::default()
         };
 
@@ -423,7 +423,7 @@ mod tests {
         let mut config = KernelConfig {
             version: "6.6.0".to_string(),
             driver_exclusions: vec![
-                "hid-generic".to_string(),
+                "hid_generic".to_string(),
                 "fake_driver".to_string(),
                 "ext4".to_string(),
                 "another_fake".to_string(),
@@ -447,7 +447,7 @@ mod tests {
     fn test_apply_whitelist_case_insensitive() {
         let mut config = KernelConfig {
             version: "6.6.0".to_string(),
-            driver_exclusions: vec!["HID-GENERIC".to_string(), "EXT4".to_string()],
+            driver_exclusions: vec!["HID_GENERIC".to_string(), "EXT4".to_string()],
             ..KernelConfig::default()
         };
 
@@ -487,19 +487,19 @@ mod tests {
         let config = KernelConfig {
             version: "6.6.0".to_string(),
             driver_exclusions: vec![
-                "hid-generic".to_string(),
+                "hid_generic".to_string(),
                 "ext4".to_string(),
                 "fake".to_string(),
-                "usb_core".to_string(),
+                "usb".to_string(),
             ],
             ..KernelConfig::default()
         };
 
         let violations = get_whitelist_violations(&config);
         assert_eq!(violations.len(), 3);
-        assert!(violations.contains(&"hid-generic".to_string()));
+        assert!(violations.contains(&"hid_generic".to_string()));
         assert!(violations.contains(&"ext4".to_string()));
-        assert!(violations.contains(&"usb_core".to_string()));
+        assert!(violations.contains(&"usb".to_string()));
         assert!(!violations.contains(&"fake".to_string()));
     }
 
@@ -551,7 +551,7 @@ mod tests {
     fn test_validate_whitelist_multiple_violations() {
         let config = KernelConfig {
             version: "6.6.0".to_string(),
-            driver_exclusions: vec!["hid-generic".to_string(), "ext4".to_string()],
+            driver_exclusions: vec!["hid_generic".to_string(), "ext4".to_string()],
             ..KernelConfig::default()
         };
 
@@ -560,7 +560,7 @@ mod tests {
 
         if let Err(e) = result {
             let msg = e.to_string();
-            assert!(msg.contains("hid-generic"));
+            assert!(msg.contains("hid_generic"));
             assert!(msg.contains("ext4"));
         }
     }
@@ -609,11 +609,11 @@ mod tests {
     fn test_whitelist_coverage_input() {
         // Verify essential input drivers are in whitelist (Canonical Truth: HID category)
         // Input event device handler
-        assert!(is_essential_driver("evdev"));
-        // Human Interface Device base (required before hid-generic loads)
+        assert!(is_essential_driver("input_evdev"));
+        // Human Interface Device base (required before hid_generic loads)
         assert!(is_essential_driver("hid"));
         // Generic HID driver (keyboards, mice, USB input)
-        assert!(is_essential_driver("hid-generic"));
+        assert!(is_essential_driver("hid_generic"));
         // USB HID protocol
         assert!(is_essential_driver("usbhid"));
     }
@@ -621,9 +621,9 @@ mod tests {
     #[test]
     fn test_whitelist_coverage_usb() {
         // Verify USB drivers are in whitelist (Canonical Truth: USB category)
-        assert!(is_essential_driver("usb_core"));
+        assert!(is_essential_driver("usb"));
         assert!(is_essential_driver("usb_storage"));
-        assert!(is_essential_driver("usb-common"));
+        assert!(is_essential_driver("usb_common"));
         // USB host controller drivers (support all USB versions)
         assert!(is_essential_driver("xhci_hcd")); // USB 3.0
         assert!(is_essential_driver("ehci_hcd")); // USB 2.0

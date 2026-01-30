@@ -134,6 +134,7 @@ fn create_base_config() -> KernelConfig {
         hz: 300,
         preemption: "Voluntary".to_string(),
         force_clang: true,
+        full_llvm_mode: true,
         lto_shield_modules: Vec::new(),
         scx_available: Vec::new(),
         scx_active_scheduler: None,

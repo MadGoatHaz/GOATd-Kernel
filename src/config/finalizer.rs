@@ -384,6 +384,7 @@ mod tests {
             profile: "Gaming".to_string(),
             use_mglru: true,
             use_modprobed: true,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -411,6 +412,7 @@ mod tests {
             profile: "Laptop".to_string(),
             use_mglru: true,
             use_modprobed: true,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -449,6 +451,7 @@ mod tests {
             profile: "Server".to_string(),
             use_mglru: true,
             use_modprobed: true,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -471,6 +474,7 @@ mod tests {
             profile: "Gaming".to_string(),
             use_mglru: false, // MGLRU explicitly disabled
             use_modprobed: true,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -495,6 +499,7 @@ mod tests {
             profile: "Generic".to_string(),
             use_mglru: true,
             use_modprobed: false, // Will be respected for Generic profile
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -517,6 +522,7 @@ mod tests {
             profile: "Generic".to_string(),
             use_mglru: true,
             use_modprobed: true,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -540,6 +546,7 @@ mod tests {
             profile: "Gaming".to_string(),
             hz: 1000,
             preemption: "Full".to_string(),
+            full_llvm_mode: true,
             force_clang: true,
             use_bore: true,
             use_polly: true,
@@ -583,6 +590,7 @@ mod tests {
         let mut config = KernelConfig {
             profile: "Gaming".to_string(),
             lto_type: LtoType::Thin,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -600,6 +608,7 @@ mod tests {
         let mut config = KernelConfig {
             profile: "Gaming".to_string(),
             lto_type: LtoType::Full,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 
@@ -618,6 +627,7 @@ mod tests {
         let mut config = KernelConfig {
             profile: "Generic".to_string(),
             lto_type: LtoType::None,
+            full_llvm_mode: true,
             ..KernelConfig::default()
         };
 

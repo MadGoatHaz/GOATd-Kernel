@@ -1200,19 +1200,32 @@ fn get_force_builtin_config_map() -> std::collections::HashMap<&'static str, (&'
     map.insert("efivarfs", ("CONFIG_EFIVAR_FS", true));
     map.insert("sg", ("CONFIG_CHR_DEV_SG", true));
     
+    // FORCE-BUILTIN (=y) entries - critical input and USB subsystem
+    // These are essential for keyboard/mouse/USB device detection at boot
+    map.insert("input_evdev", ("CONFIG_INPUT_EVDEV", true));
+    map.insert("hid", ("CONFIG_HID", true));
+    map.insert("hid_generic", ("CONFIG_HID_GENERIC", true));
+    map.insert("usbhid", ("CONFIG_USB_HID", true));
+    map.insert("usb", ("CONFIG_USB", true));
+    map.insert("usb_storage", ("CONFIG_USB_STORAGE", true));
+    map.insert("usb_common", ("CONFIG_USB_COMMON", true));
+    map.insert("xhci_hcd", ("CONFIG_USB_XHCI_HCD", true));
+    map.insert("ehci_hcd", ("CONFIG_USB_EHCI_HCD", true));
+    map.insert("ohci_hcd", ("CONFIG_USB_OHCI_HCD", true));
+    
+    // Optional modules (=m) - peripheral HID devices with modular drivers
+    map.insert("hid_apple", ("CONFIG_HID_APPLE", false));
+    map.insert("hid_logitech_hidpp", ("CONFIG_HID_LOGITECH_HIDPP", false));
+    
     // Optional modules (=m) - handled by modprobed discovery
     map.insert("nvme", ("CONFIG_NVME", false));
     map.insert("ahci", ("CONFIG_AHCI", false));
     map.insert("ext4", ("CONFIG_EXT4_FS", false));
     map.insert("btrfs", ("CONFIG_BTRFS_FS", false));
-    map.insert("usb", ("CONFIG_USB", false));
-    map.insert("usb_storage", ("CONFIG_USB_STORAGE", false));
     map.insert("virtio_net", ("CONFIG_VIRTIO_NET", false));
     map.insert("e1000e", ("CONFIG_E1000E", false));
     map.insert("r8169", ("CONFIG_R8169", false));
     map.insert("tun", ("CONFIG_TUN", false));
-    map.insert("hid-apple", ("CONFIG_HID_APPLE", false));
-    map.insert("hid-logitech-hidpp", ("CONFIG_HID_LOGITECH_HIDPP", false));
     map.insert("uinput", ("CONFIG_INPUT_UINPUT", false));
     map.insert("joydev", ("CONFIG_INPUT_JOYDEV", false));
     

@@ -282,6 +282,7 @@ pub struct KernelConfig {
     pub hz: u32,                                 // HZ (timer frequency from profile)
     pub preemption: String,                      // Preemption model from profile
     pub force_clang: bool,                       // Force Clang compiler
+    pub full_llvm_mode: bool,                    // Full LLVM ecosystem (no GNU toolchain)
     pub lto_shield_modules: Vec<String>,         // Modules to shield from LTO
     pub use_bore: bool,                          // Use BORE scheduler
     pub user_toggled_bore: bool,                 // User manually toggled BORE
@@ -317,6 +318,7 @@ impl Default for KernelConfig {
             hz: 300,                                  // Default: 300 HZ
             preemption: "Voluntary".to_string(),      // Default: Voluntary preemption
             force_clang: true,                        // Default: use Clang
+            full_llvm_mode: true,                     // Default: enforce full LLVM ecosystem
             lto_shield_modules: Vec::new(),           // No modules shielded by default
             scx_available: Vec::new(),                // No SCX schedulers available by default
             scx_active_scheduler: None,               // No active SCX scheduler by default
@@ -720,6 +722,7 @@ mod tests {
             hz: 300,
             preemption: "Voluntary".to_string(),
             force_clang: true,
+            full_llvm_mode: true,
             lto_shield_modules: Vec::new(),
             scx_available: vec!["scx_bpfland".to_string()],
             scx_active_scheduler: None,
@@ -742,6 +745,7 @@ mod tests {
         assert_eq!(config.hz, 300);
         assert_eq!(config.preemption, "Voluntary");
         assert_eq!(config.force_clang, true);
+        assert_eq!(config.full_llvm_mode, true);
         assert!(config.lto_shield_modules.is_empty());
         assert!(config.native_optimizations);
     }

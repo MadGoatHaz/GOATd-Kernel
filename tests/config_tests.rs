@@ -49,6 +49,7 @@ fn create_test_config() -> KernelConfig {
         hz: 300,
         preemption: "Voluntary".to_string(),
         force_clang: true,
+        full_llvm_mode: true,
         lto_shield_modules: Vec::new(),
         user_toggled_lto: false,
         scx_available: Vec::new(),
