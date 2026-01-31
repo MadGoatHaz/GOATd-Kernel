@@ -512,6 +512,34 @@ pub fn prepare_kernel_build(config: &KernelConfig) -> Result<(), BuildError> {
 /// 3. [%] percentage patterns
 /// 4. Compilation line counter for pseudo-progress
 fn parse_build_progress(line: &str) -> Option<u32> {
+    // PHASE 22: Sphinx/Documentation build progress detection
+    if line.contains("[PHASE-22]") || line.contains("[DOCS-ISOLATION]") {
+        if line.contains("Isolating build") {
+            return Some(72); // Documentation isolation phase starting
+        }
+    }
+    
+    // Sphinx-specific progress patterns
+    if line.contains("sphinx-build") {
+        if line.contains("building") && line.contains("targets") {
+            return Some(73); // Sphinx source processing
+        }
+        if line.contains("writing") || line.contains("writing output") {
+            return Some(78); // Writing documentation output
+        }
+    }
+    
+    // Sphinx milestone patterns
+    if line.contains("generating indices") {
+        return Some(75); // Sphinx generating search indices
+    }
+    if line.contains("copying images") || line.contains("copying static files") {
+        return Some(76); // Copying assets
+    }
+    if line.contains("build succeeded") || line.contains("build finished") {
+        return Some(80); // Documentation build complete
+    }
+    
     // PRIORITY 1: Match makepkg milestone messages for incremental progress
     // These appear as major phase transitions during package build
     if line.contains("==> Retrieving sources") {

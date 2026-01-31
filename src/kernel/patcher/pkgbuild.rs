@@ -1574,6 +1574,40 @@ fn inject_prebuild_lto_hard_enforcer(
     Ok(())
 }
 
+/// Phase 22: Isolate Sphinx/documentation builds from LLVM toolchain enforcement
+fn inject_docs_isolation(src_dir: &Path) -> PatchResult<()> {
+    let (path, mut content) = read_pkgbuild(src_dir)?;
+
+    // Check if docs isolation already exists (idempotent)
+    if content.contains("PHASE 22: DOCUMENTATION BUILD ISOLATION") {
+        return Ok(());
+    }
+
+    // Inject the isolate_docs_build() function into the global scope (after variable declarations)
+    let docs_isolation = format!("{}\n", templates::DOCS_ISOLATION_WRAPPER);
+    
+    // Find a safe insertion point: after pkgrel or pkgname declarations
+    if let Some(pos) = content.find("pkgdesc=") {
+        // Insert before pkgdesc
+        content.insert_str(pos, &docs_isolation);
+    } else if let Some(pos) = content.find("arch=(") {
+        // Insert before arch declaration
+        content.insert_str(pos, &docs_isolation);
+    } else {
+        // Fallback: insert after the first 20 lines (past comments and headers)
+        let lines: Vec<&str> = content.lines().collect();
+        let insert_line = lines.iter().position(|l| l.starts_with("pkgver=")).unwrap_or(10);
+        let insert_pos = content.lines().take(insert_line).map(|l| l.len() + 1).sum();
+        content.insert_str(insert_pos, &docs_isolation);
+    }
+
+    fs::write(path, content).map_err(|e| PatchError::PatchFailed(e.to_string()))?;
+    eprintln!("[Patcher] [PKGBUILD] [PHASE-22] Injected documentation isolation wrapper");
+    eprintln!("[Patcher] [PKGBUILD] [PHASE-22] Sphinx builds will run with clean environment");
+
+    Ok(())
+}
+
 // ============================================================================
 // Extension Methods on KernelPatcher (as required by the facade)
 // ============================================================================
@@ -2073,6 +2107,12 @@ impl super::KernelPatcher {
         lto_type: crate::models::LtoType,
     ) -> PatchResult<()> {
         inject_prebuild_lto_hard_enforcer(self.src_dir(), lto_type)
+    }
+
+    /// Phase 22: Isolate documentation builds (Sphinx, doxygen, etc.)
+    /// Wraps make htmldocs / latexdocs in isolated subshell environment
+    pub fn inject_docs_isolation(&self) -> PatchResult<()> {
+        inject_docs_isolation(self.src_dir())
     }
 
     /// Inject global enforcement scope (ENFORCER_SAFE_LIST export and restore helper)

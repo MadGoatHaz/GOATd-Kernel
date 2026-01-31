@@ -77,18 +77,44 @@ log_json() {
 /// Also includes explicit tool overrides (CC, CXX, LD, HOSTCC, HOSTCXX) to forcefully
 /// enforce Clang/LLVM toolchain for both native and host-side compilation.
 pub const ROOT_MAKEFILE_ENFORCEMENT: &str = r#"# GOATd Toolchain Enforcement
-LLVM := 1
-LLVM_IAS := 1
-export LLVM LLVM_IAS
+# CRITICAL: Skip LLVM enforcement for documentation targets (Sphinx, doxygen)
+# This prevents conflicts with doc build systems that have their own toolchain requirements
+ifeq (,$(filter htmldocs latexdocs pdfdocs epubdocs mandocs infodocs,$(MAKECMDGOALS)))
+  LLVM := 1
+  LLVM_IAS := 1
+  export LLVM LLVM_IAS
 
-# Explicit tool overrides for forceful Clang/LLVM enforcement
-CC := clang
-CXX := clang++
-LD := ld.lld
-HOSTCC := clang
-HOSTCXX := clang++
-export CC CXX LD HOSTCC HOSTCXX
+  # Explicit tool overrides for forceful Clang/LLVM enforcement
+  CC := clang
+  CXX := clang++
+  LD := ld.lld
+  HOSTCC := clang
+  HOSTCXX := clang++
+  export CC CXX LD HOSTCC HOSTCXX
+endif
 
+"#;
+
+/// Phase 22: Documentation Build Isolation
+/// Wraps documentation targets in a subshell that unsets LLVM/CFLAGS/etc.
+pub const DOCS_ISOLATION_WRAPPER: &str = r#"
+# =====================================================================
+# PHASE 22: DOCUMENTATION BUILD ISOLATION
+# =====================================================================
+# Sphinx and other doc tools require clean environment
+# Isolate documentation builds from LLVM/Clang enforcement
+# =====================================================================
+isolate_docs_build() {
+    local target="$1"
+    shift  # Remove target from args
+    
+    # Execute in subshell with isolated environment
+    (
+        unset LLVM LLVM_IAS CFLAGS CXXFLAGS LDFLAGS CC CXX LD HOSTCC HOSTCXX
+        printf "[PHASE-22] [DOCS-ISOLATION] Isolating build for: %s\n" "$target" >&2
+        make "$target" "$@"
+    )
+}
 "#;
 
 /// Rust .rmeta and .so installation fix using find instead of glob expansion

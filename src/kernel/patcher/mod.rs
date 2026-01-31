@@ -1995,6 +1995,10 @@ export READELF=llvm-readelf
             }
         }
 
+        // PHASE 22: Documentation build isolation (Sphinx/doxygen)
+        eprintln!("[Patcher] [ORCHESTRATION] PHASE 22: Injecting documentation build isolation");
+        self.inject_docs_isolation()?;
+
         eprintln!("[Patcher] [ORCHESTRATION] PHASE 1: PKGBUILD surgical injections complete");
 
         // ====================================================================
