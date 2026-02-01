@@ -1,5 +1,5 @@
 # Maintainer: Your Name <your.email@example.com>
-pkgname=goatdkernel-bin
+pkgname=goatd-kernel-bin
 pkgver=0.2.1
 pkgrel=2
 pkgdesc="GOATd Kernel Builder - Pure Rust + egui UI for building and managing kernels (binary release)"
@@ -15,8 +15,10 @@ optdepends=('modprobed-db: For modprobed-db integration support'
 # The binary tarball should be named: goatdkernel-${pkgver}-x86_64.tar.gz
 # Extract URL from: https://github.com/MadGoatHaz/GOATd-Kernel/releases/download/v${pkgver}/
 source=("goatdkernel-${pkgver}-x86_64.tar.gz::https://github.com/MadGoatHaz/GOATd-Kernel/releases/download/v${pkgver}/goatdkernel-${pkgver}-x86_64.tar.gz"
-        "git+https://github.com/MadGoatHaz/GOATd-Kernel.git#tag=v${pkgver}")
-sha256sums=('2fa276fcf9e8cd62989f2d6838b11b55a79e8c166af9b332c7ccdc6378cf9ccd'
+        "git+https://github.com/MadGoatHaz/GOATd-Kernel.git#tag=v${pkgver}"
+        "https://github.com/MadGoatHaz/GOATd-Kernel/releases/download/v${pkgver}/goatdkernel.png")
+sha256sums=('b915145b72f49533b4248119eeda979878cb1fc7e10871c0c76347915c3a58c7'
+            'SKIP'
             'SKIP')
 
 package() {
@@ -28,14 +30,13 @@ package() {
     install -Dm 644 assets/goatdkernel.desktop "${pkgdir}/usr/share/applications/goatdkernel.desktop"
     
     # Install icon
-    install -Dm 644 assets/goatdkernel.png "${pkgdir}/usr/share/pixmaps/goatdkernel.png"
+    install -Dm644 "${srcdir}/goatdkernel.png" "${pkgdir}/usr/share/pixmaps/goatdkernel.png"
     
     # Install polkit policy
     install -Dm 644 assets/com.goatd.kernel.policy "${pkgdir}/usr/share/polkit-1/actions/com.goatd.kernel.policy"
     
     # Install documentation
     install -Dm 644 README.md "${pkgdir}/usr/share/doc/goatdkernel/README.md"
-    install -Dm644 "$srcdir/assets/goatdkernel.png" "$pkgdir/usr/share/pixmaps/goatdkernel.png"
 }
 
 # Post-install message

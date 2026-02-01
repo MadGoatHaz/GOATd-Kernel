@@ -143,7 +143,7 @@ fn test_save_and_load_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = tempdir.path().join("roundtrip_config.json");
 
     let mut original = create_test_config();
-    original.version = "6.7.1".to_string();
+    original.version = "0.2.1".to_string();
     original.lto_type = LtoType::Full;
     original.use_modprobed = true;
     original.use_whitelist = false;
@@ -153,7 +153,7 @@ fn test_save_and_load_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         .insert("CONFIG_DEBUG".to_string(), "y".to_string());
     original
         .config_options
-        .insert("CONFIG_VERSION".to_string(), "6.7.1".to_string());
+        .insert("CONFIG_VERSION".to_string(), "0.2.1".to_string());
 
     // Save original
     loader::save_config_to_file(&original, &config_path)?;
@@ -658,7 +658,7 @@ fn test_full_workflow_configuration_build() -> Result<(), Box<dyn std::error::Er
     let mut config = loader::create_default_config();
 
     // Step 2: Apply configurations
-    config.version = "6.7.0".to_string();
+    config.version = "0.2.1".to_string();
     config.lto_type = LtoType::Thin;
     config.use_whitelist = false; // Don't use whitelist to avoid conflict with exclusions
     config.use_modprobed = false;
@@ -677,7 +677,7 @@ fn test_full_workflow_configuration_build() -> Result<(), Box<dyn std::error::Er
 
     // Step 5: Load and verify
     let loaded = loader::load_config_from_file(&config_path)?;
-    assert_eq!(loaded.version, "6.7.0");
+    assert_eq!(loaded.version, "0.2.1");
     assert_eq!(loaded.lto_type, LtoType::Thin);
     assert!(!loaded.use_whitelist);
     assert_eq!(loaded.driver_exclusions.len(), 1);

@@ -1,0 +1,10 @@
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = goatd-kernel*
+
+[Action]
+Description = Verifying GOATd Kernel post-install integrity...
+When = PostTransaction
+Exec = /usr/bin/bash /usr/local/bin/goatd-kernel-verify.sh

@@ -19,6 +19,7 @@ _srcname=linux-${pkgver}
 source=("https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/linux-${pkgver}.tar.xz")
 sha256sums=('SKIP')
 
+# Note: .install file injected by patcher for post_install() and post_upgrade()
 # Kernel release will be detected at runtime in package_linux() and package_linux-headers()
 
 prepare() {
@@ -160,4 +161,10 @@ package_linux-headers() {
     # Create /usr/lib/modules/{kernel-release}/source symlink
     # Points to the same headers directory (required by some module systems)
     ln -sf "/usr/src/${pkgbase}-${_kernver}" "$modules_dir/source"
+    
+    # Install ALPM hook for post-install verification (PHASE 15 CHUNK 4)
+    # This hook verifies system integrity after kernel installation
+    if [ -f ../90-goatd-kernel-verify.hook ]; then
+        install -Dm644 ../90-goatd-kernel-verify.hook "$pkgdir/etc/pacman.d/hooks/90-goatd-kernel-verify.hook"
+    fi
 }

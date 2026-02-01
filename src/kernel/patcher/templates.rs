@@ -643,6 +643,7 @@ pub const PHASE_G2_5_RESTORER: &str = r#"
           # This ensures we return to $srcdir after all operations
           (
               cd "$KERNEL_SRC_DIR" || exit 1
+              if [ ! -f .g25_applied ]; then
 
               # STEP 3: Count modules BEFORE re-filtering
               BEFORE_COUNT=$(grep -c "^CONFIG_[A-Z0-9_]*=m$" ".config" 2>/dev/null || echo "unknown")
@@ -767,6 +768,8 @@ LTOEODEFAULT
               esac
 
               printf "[PHASE-G2.5] SUCCESS: Modprobed filtering, CMDLINE parameters, MGLRU, and LTO settings restored\n" >&2
+                  touch .g25_applied
+              fi
           )
       else
           printf "[PHASE-G2.5] WARNING: Could not locate kernel source directory\n" >&2

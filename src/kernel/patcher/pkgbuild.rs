@@ -550,6 +550,11 @@ pub fn inject_variable_preservation(
         preservation_snippet.push_str(&format!("    export GOATD_KERNELRELEASE='{}'\n", kr));
     }
 
+    // PHASE 14: Add absolute path validation check
+    preservation_snippet.push_str(
+        "    # CHUNK 3: Absolute path validation for deterministic symlink creation\n    if [ -z \"$GOATD_WORKSPACE_ROOT\" ] || [ ! -d \"$GOATD_WORKSPACE_ROOT\" ]; then echo \"ERROR: GOATD_WORKSPACE_ROOT invalid or unset\" >&2; return 1; fi\n"
+    );
+
     // PHASE 14: Add dynamic resolver call to ensure cross-mount path resolution
     preservation_snippet.push_str(&format!(
         "    # Attempt dynamic resolution if workspace root not set\n    if [ -z \"$GOATD_WORKSPACE_ROOT\" ]; then resolve_goatd_root || true; fi\n"
@@ -691,6 +696,9 @@ fn synchronize_pkgbuild_version(src_dir: &Path, actual_version: Option<&str>) ->
     // Example: "6.18.6-arch1" → "6.18.6.arch1"
     let new_pkgver = new_pkgver_unsanitized.replace('-', ".");
 
+    // HARDCODED SYNC: Inject _localversion designation
+    let _localversion = "-goatd-gaming";
+    eprintln!("[Patcher] [PKGBUILD-SYNC]   _localversion:  {}", _localversion);
     eprintln!("[Patcher] [PKGBUILD-SYNC] Synchronizing PKGBUILD version:");
     eprintln!(
         "[Patcher] [PKGBUILD-SYNC]   actual_version: {}",
@@ -750,6 +758,23 @@ fn synchronize_pkgbuild_version(src_dir: &Path, actual_version: Option<&str>) ->
     }
 
     // Write back to PKGBUILD
+    // Sync _localversion for kernel designation
+    if let Ok(localversion_regex) = Regex::new(r"(?m)^_localversion=.*$") {
+        if localversion_regex.is_match(&updated_content) {
+            updated_content = localversion_regex
+                .replace(&updated_content, format!("_localversion={}", _localversion))
+                .to_string();
+            eprintln!("[Patcher] [PKGBUILD-SYNC] ✓ Updated _localversion");
+        } else {
+            if let Some(pkgrel_line_end) = updated_content.find("pkgrel=") {
+                if let Some(newline) = updated_content[pkgrel_line_end..].find('\n') {
+                    let insert_pos = pkgrel_line_end + newline + 1;
+                    updated_content.insert_str(insert_pos, &format!("_localversion={}\n", _localversion));
+                    eprintln!("[Patcher] [PKGBUILD-SYNC] ✓ Added _localversion");
+                }
+            }
+        }
+    }
     fs::write(&path, updated_content)
         .map_err(|e| PatchError::PatchFailed(format!("Failed to write PKGBUILD: {}", e)))?;
 

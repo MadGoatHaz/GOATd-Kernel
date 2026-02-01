@@ -46,7 +46,7 @@ fn create_pkgbuild_for_variant(variant: &str) -> String {
 # PKGBUILD for {} kernel
 pkgbase='{}'
 pkgname=('{} {}')
-pkgver=6.1.0
+pkgver=0.2.1
 pkgdesc="Test kernel package"
 arch=(x86_64)
 url="https://kernel.org"

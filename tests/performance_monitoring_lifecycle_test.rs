@@ -162,7 +162,7 @@ fn test_session_summary_initialization() {
     };
 
     let kernel_context = KernelContext {
-        version: "6.18.0".to_string(),
+        version: "0.2.1".to_string(),
         scx_profile: "gaming".to_string(),
         lto_config: "thin".to_string(),
         governor: "performance".to_string(),
@@ -210,7 +210,7 @@ fn test_session_summary_sample_capture() {
 
     let metrics = PerformanceMetrics::default();
     let kernel_context = KernelContext {
-        version: "6.18.0".to_string(),
+        version: "0.2.1".to_string(),
         scx_profile: "default".to_string(),
         lto_config: "none".to_string(),
         governor: "performance".to_string(),

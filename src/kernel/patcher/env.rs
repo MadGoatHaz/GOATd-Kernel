@@ -365,8 +365,8 @@ pub fn prepare_build_environment(
     // GOATD_LTO_FLAGS: Dynamically set based on LTO type from config
     if !env_vars.contains_key("GOATD_LTO_FLAGS") {
         let lto_flags = match config.lto_type {
-            crate::models::LtoType::Full => "-flto=full".to_string(),
-            crate::models::LtoType::Thin => "-flto=thin".to_string(),
+            crate::models::LtoType::Full => "-flto=full -fvisibility=hidden".to_string(),
+            crate::models::LtoType::Thin => "-flto=thin -fvisibility=hidden".to_string(),
             crate::models::LtoType::None => "".to_string(),
         };
         env_vars.insert("GOATD_LTO_FLAGS".to_string(), lto_flags.clone());

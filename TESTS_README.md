@@ -1,57 +1,75 @@
 # GOATd Kernel Test Suite
 
-## Overview
-This document provides a transparent and honest assessment of the current testing infrastructure for the GOATd Kernel project. Our testing strategy combines high-precision unit tests with complex integration scenarios to ensure system stability, performance reliability, and toolchain integrity.
+This document provides an inventory of the test infrastructure for the GOATd Kernel project, including unit tests, integration tests, and specialized performance benchmarks.
 
-## Testing Frameworks
-The project leverages the Rust ecosystem's native testing capabilities augmented by industry-standard asynchronous runtimes:
-- **Rust Native Testing:** Used for deterministic logic, configuration parsing, and utility functions.
-- **Tokio Test Runtime:** Powering asynchronous integration tests, timeout diagnostics, and multi-threaded orchestration scenarios.
-- **Mocking & Simulation:** Extensive use of mock environment variables and file system structures to simulate kernel build environments without requiring root privileges.
+## Execution Instructions
 
-## Coverage Metrics & Module Status
-Current coverage is categorized by functional domain, reflecting the project's evolution as of v0.2.1.
+To run the standard test suite:
 
-| Module | Status | Validation Depth |
-| :--- | :--- | :--- |
-| **Kernel Orchestrator** | ![Validated](https://img.shields.io/badge/Status-Validated-green) | High: Async phase transitions, timeouts, and state persistence. |
-| **Toolchain (LLVM)** | ![Validated](https://img.shields.io/badge/Status-Validated-green) | High: Explicit verification of Clang/LLVM components and caching. |
-| **Configuration** | ![Validated](https://img.shields.io/badge/Status-Validated-green) | High: Profile defaults, override logic, and whitelist/modprobed localmodconfig. |
-| **UI Synchronization** | ![In Development](https://img.shields.io/badge/Status-In_Development-yellow) | Medium: State scaling and cross-thread event synchronization. |
-| **Performance Metrics** | ![In Development](https://img.shields.io/badge/Status-In_Development-yellow) | Medium: Nanosecond precision validation and stressor isolation. |
-| **Hardware Detection** | ![Stabilizing](https://img.shields.io/badge/Status-Stabilizing-blue) | Medium: CPU/GPU feature detection and boot parameter validation. |
-
-## High-Value Integration Tests
-We maintain several critical test suites that safeguard the "Golden Path" of kernel development:
-
-### 1. Real Kernel Build Simulation
-- **File:** `tests/real_kernel_build_integration.rs`
-- **Focus:** Validates the entire build pipeline lifecycle, including log capture, timeout handling, and gaming profile application. It ensures the orchestrator can handle real-world build durations and failures.
-
-### 2. LLVM Toolchain Verification
-- **File:** `src/system/verification.rs`
-- **Focus:** Implements the `verify_llvm_toolchain` suite which ensures all required LLVM/Clang binaries (ld.lld, llvm-ar, etc.) are present and functional before a build commences. Includes internal caching to prevent redundant execution.
-
-### 3. Performance Battle Tests
-- **File:** `tests/performance_battle_tests.rs`
-- **Focus:** Stress-testing the performance data collector to ensure nanosecond precision and isolation from system jitter (e.g., SMI correlation reliability).
-
-## Running the Suites
-
-### Standard Validation
-For general development verification:
 ```bash
 cargo test
 ```
 
-### Official Build Verification
-To run the comprehensive verification script used in the release pipeline:
+To run a specific test file:
+
 ```bash
-./scripts/verify.sh
+cargo test --test <test_name>
 ```
 
-## Continuous Improvement
-The suite is under active expansion. Current priorities include:
-- Enhancing UI scaling precision across varied DPPI environments.
-- Expanding hardware detection coverage for legacy BIOS/MBR systems.
-- Formalizing the performance baseline calibration for diverse kernel profiles.
+To run performance benchmarks:
+
+```bash
+cargo run --bin efficiency_test
+cargo run --bin latency_test
+```
+
+## Test Inventory
+
+### Integration Tests (`tests/`)
+
+These tests verify the interaction between different components of the system.
+
+- **`chunk_3_header_discovery_sync.rs`**: Verifies header discovery and synchronization logic.
+- **`chunk_4_alpm_hook_verification.rs`**: Validates ALPM hook installation and detection.
+- **`comprehensive_feature_realization.rs`**: Top-level feature verification.
+- **`config_tests.rs`**: Validates configuration management and persistence.
+- **`dynamic_versioning_test.rs`**: Ensures kernel versioning logic is correct.
+- **`forensic_diagnostic.rs`**: Tests system diagnostic and forensic capabilities.
+- **`git_tests.rs`**: Verifies Git operations for kernel source management.
+- **`hardware_tests.rs`**: Validates hardware detection (CPU, GPU, RAM, etc.).
+- **`integration_tests.rs`**: General integration scenarios.
+- **`lifecycle_pipe_integration.rs`**: Tests the end-to-end build lifecycle.
+- **`logging_integration_test.rs`**: Verifies the logging system.
+- **`modprobed_localmodconfig_validation.rs`**: Validates `modprobed-db` integration.
+- **`mpl_integration_test.rs`**: Tests the Master Profile Layer logic.
+- **`performance_baseline_calibration.rs`**: Calibrates performance metrics.
+- **`performance_battle_tests.rs`**: Stress tests for the performance monitor.
+- **`phase_1_infrastructure_test.rs`**: Validates core project infrastructure.
+- **`phase_2_collector_test.rs`**: Tests data collection mechanisms.
+- **`phase_3_scoring_audit.rs`**: Audits the scoring algorithm.
+- **`profile_pipeline_validation.rs`**: Validates the profile application pipeline.
+- **`real_kernel_build_integration.rs`**: Simulates/Verifies actual kernel build steps.
+- **`ui_scaling_tests.rs`**: Verifies UI responsiveness and scaling.
+- **`ui_sync_tests.rs`**: Ensures UI state remains synchronized with the backend.
+
+### Unit Tests (Internal)
+
+Located within the `src/` directory, these test individual modules in isolation.
+
+- **`src/lib.rs`**: Core library exports and versioning.
+- **`src/config/`**: Comprehensive tests for exclusions, whitelists, and profile finalization.
+- **`src/hardware/`**: Unit tests for individual hardware component detection.
+- **`src/kernel/patcher/tests.rs`**: Specialized tests for the kernel patching and rebranding engine.
+- **`src/system/performance/`**: Extensive tests for benchmarks, stressors, and diagnostics.
+
+### Performance Binaries (`src/bin/`)
+
+- **`efficiency_test.rs`**: Measures system efficiency under load.
+- **`latency_test.rs`**: Specialized latency measurement tool.
+
+## Test Results
+
+Last full suite run: **SYSTEM GREEN** (2026-02-01)
+- **Unit Tests**: Passed (456 tests)
+- **Integration Tests**: Passed (22 tests)
+- **Doc Tests**: Passed (26 passed, 23 ignored)

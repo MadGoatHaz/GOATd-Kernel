@@ -456,7 +456,7 @@ pub async fn resolve_dynamic_version(
     log::warn!("[ORCHESTRATOR] [VERSION] WARNING: Using baseline version (all resolution attempts failed): '{}'", baseline_version);
 
     eprintln!("[ORCHESTRATOR] [VERSION] ========== DYNAMIC VERSION RESOLUTION SUCCESS (FALLBACK) ==========");
-    Ok(baseline_version.to_string())
+    Ok(format!("{}-goatd-gaming", baseline_version))
 }
 
 /// Validates and returns config, resolving dynamic versions if needed.
@@ -1633,6 +1633,9 @@ fn update_mpl_version(workspace_root: &Path, kernelrelease: &str) -> Result<(), 
     mpl.kernel_release = kernelrelease.to_string();
     mpl.build_timestamp = chrono::Utc::now().to_rfc3339();
     mpl.source_dir = workspace_root.to_path_buf();
+    // Export GOATD_TARGET_KVER for cross-mount metadata sourcing
+    mpl.kernel_version = kernelrelease.to_string();
+    eprintln!("[Build] [MPL] Exporting GOATD_TARGET_KVER: {}", kernelrelease);
 
     let temp_path = mpl_path.with_extension("tmp");
     mpl.write_to_file(&temp_path).map_err(|e| {

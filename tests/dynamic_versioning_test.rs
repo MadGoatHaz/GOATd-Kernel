@@ -62,7 +62,7 @@ fn test_dynamic_version_sentinel_detection() {
 /// Test that concrete versions are not flagged as dynamic
 #[test]
 fn test_concrete_version_detection() {
-    let config = create_concrete_config("6.12.0", "linux");
+    let config = create_concrete_config("0.2.1", "linux");
     assert!(!config.is_dynamic_version());
     assert!(config.is_concrete_version());
 }

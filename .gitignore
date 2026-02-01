@@ -134,8 +134,8 @@ plans/
 # ============================================================================
 # Repository Hygiene - Phase 3, Chunk 1
 # ============================================================================
-/goatd-kernel-bin/GOATd-Kernel/
+/pkgbuilds/binary/GOATd-Kernel/
 *.tar.gz
 *.sha256
-goatd-kernel-bin/src/
-goatd-kernel-bin/pkg/
+pkgbuilds/binary/src/
+pkgbuilds/binary/pkg/

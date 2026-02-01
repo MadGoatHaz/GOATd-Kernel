@@ -52,7 +52,7 @@ fn create_test_config() -> KernelConfig {
         hardening: HardeningLevel::Standard,
         secure_boot: false,
         profile: "generic".to_string(),
-        version: "6.6.0".to_string(),
+        version: "0.2.1".to_string(),
         user_toggled_bore: false,
         user_toggled_polly: false,
         user_toggled_mglru: false,

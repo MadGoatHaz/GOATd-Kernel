@@ -134,6 +134,58 @@ else
 fi
 
 # ========================================================================
+# POST-INSTALL SYSTEM INTEGRITY CHECKS (PHASE 15 CHUNK 4)
+# ========================================================================
+echo -e "${YELLOW}[POST-INSTALL] System Integrity Verification${NC}"
+echo "  - Kernel version parity (uname -r)"
+echo "  - Module symlink validity (/usr/lib/modules/[KVER]/build)"
+echo "  - LTO Configuration (CONFIG_LTO_CLANG_FULL=y)"
+echo ""
+
+# Check 1: Kernel version parity
+KVER=$(uname -r)
+if [ -n "$KVER" ]; then
+    echo "✓ Kernel version detected: $KVER"
+else
+    echo -e "${RED}✗ Failed to detect kernel version${NC}"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Check 2: Module symlink validity
+if [ -d "/usr/lib/modules/$KVER/build" ]; then
+    if [ -L "/usr/lib/modules/$KVER/build" ] && [ -e "/usr/lib/modules/$KVER/build" ]; then
+        echo "✓ Module symlink valid: /usr/lib/modules/$KVER/build"
+    else
+        echo -e "${RED}✗ Module symlink broken: /usr/lib/modules/$KVER/build${NC}"
+        FAILURES=$((FAILURES + 1))
+    fi
+else
+    echo "⚠ Module directory not yet installed (post-reboot required)"
+fi
+
+# Check 3: CONFIG_LTO_CLANG_FULL verification
+CONFIG_FOUND=0
+if [ -f "/proc/config.gz" ]; then
+    if zgrep -q "CONFIG_LTO_CLANG_FULL=y" /proc/config.gz 2>/dev/null; then
+        echo "✓ CONFIG_LTO_CLANG_FULL=y detected in /proc/config.gz"
+        CONFIG_FOUND=1
+    fi
+fi
+
+if [ $CONFIG_FOUND -eq 0 ] && [ -f "/boot/config-$KVER" ]; then
+    if grep -q "CONFIG_LTO_CLANG_FULL=y" "/boot/config-$KVER" 2>/dev/null; then
+        echo "✓ CONFIG_LTO_CLANG_FULL=y detected in /boot/config-$KVER"
+        CONFIG_FOUND=1
+    fi
+fi
+
+if [ $CONFIG_FOUND -eq 0 ]; then
+    echo "⚠ CONFIG_LTO_CLANG_FULL status unverified (may require reboot)"
+fi
+
+echo ""
+
+# ========================================================================
 # FINAL REPORT
 # ========================================================================
 echo "================================================================"

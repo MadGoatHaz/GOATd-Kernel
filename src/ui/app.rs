@@ -363,13 +363,14 @@ impl AppUI {
 
     /// Process all pending build events from the channel
     /// Sets dirty flag when data changes (adaptive repaint trigger)
-    fn process_build_events(&mut self) {
+    fn process_build_events(&mut self, ctx: &egui::Context) {
         if let Some(ref mut rx) = self.build_rx {
             while let Ok(event) = rx.try_recv() {
                 match event {
                     crate::ui::controller::BuildEvent::Progress(progress) => {
                         self.ui_state.build_progress = (progress * 100.0) as i32;
                         self.ui_state.needs_repaint = true;
+                        ctx.request_repaint();
                     }
                     crate::ui::controller::BuildEvent::StatusUpdate(status) => {
                         self.ui_state.build_status = status.clone();
@@ -432,6 +433,7 @@ impl AppUI {
                                 Some("Build failed. Check the log for details.".to_string());
                         }
                         self.ui_state.needs_repaint = true;
+                        ctx.request_repaint();
                     }
                     crate::ui::controller::BuildEvent::TimerUpdate(seconds) => {
                         self.ui_state.build_elapsed_seconds = seconds;
@@ -465,6 +467,7 @@ impl AppUI {
                             );
                         }
                         self.ui_state.needs_repaint = true;
+                        ctx.request_repaint();
                     }
                     crate::ui::controller::BuildEvent::KernelUninstalled => {
                         self.ui_state.ui_state_initialized = false;
@@ -472,6 +475,7 @@ impl AppUI {
                             Some("Kernel uninstalled successfully!".to_string());
                         log::debug!("[UI] Kernel uninstalled event received, refreshing Installed Kernels list");
                         self.ui_state.needs_repaint = true;
+                        ctx.request_repaint();
                     }
                     crate::ui::controller::BuildEvent::LatestVersionUpdate(variant, version) => {
                         // Update the latest version for this variant and remove from polling set
@@ -750,7 +754,7 @@ impl eframe::App for AppUI {
         self.apply_theme_from_state(ctx);
 
         // Process all pending async events (sets needs_repaint flag on data changes)
-        self.process_build_events();
+        self.process_build_events(ctx);
 
         // =====================================================================
         // GLOBAL REPAINT STABILITY: Unified Polling with Activity-Based Intervals

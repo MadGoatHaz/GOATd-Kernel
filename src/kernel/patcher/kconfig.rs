@@ -456,7 +456,8 @@ impl crate::kernel::patcher::KernelPatcher {
             LtoType::Full => {
                 clang_configs.push(("CONFIG_LTO_CLANG_FULL", "y"));
                 clang_configs.push(("CONFIG_LTO_CLANG", "y"));
-                eprintln!("[Patcher] [KCONFIG] LTO Type: FULL - Setting CONFIG_LTO_CLANG_FULL=y");
+                clang_configs.push(("CONFIG_LTO_NONE", "n"));
+                eprintln!("[Patcher] [KCONFIG] LTO Type: FULL - Setting CONFIG_LTO_CLANG_FULL=y and CONFIG_LTO_NONE=n");
             }
             LtoType::Thin => {
                 clang_configs.push(("CONFIG_LTO_CLANG_THIN", "y"));
@@ -709,17 +710,18 @@ impl crate::kernel::patcher::KernelPatcher {
 
         let final_lto_configs = match lto_type {
             LtoType::Full => {
-                eprintln!("[Patcher] [PHASE-5] Enforcing CONFIG_LTO_CLANG_FULL=y (FULL LTO)");
+                eprintln!("[Patcher] [PHASE-5] Enforcing CONFIG_LTO_CLANG_FULL=y and CONFIG_LTO_NONE=n (FULL LTO)");
                 vec![
                     "# ======================================================================",
                     "# PHASE 5 HARD ENFORCER: LTO CLANG FULL (SURGICAL, ATOMIC, FINAL)",
                     "# ======================================================================",
                     "# These lines are SURGICALLY injected after ALL LTO entries are removed.",
-                    "# CONFIG_LTO_NONE is COMPLETELY ABSENT from this file.",
+                    "# CONFIG_LTO_NONE is FORCEFULLY DISABLED via explicit =n setting.",
                     "# Full LTO provides maximum optimizations at the cost of compile time.",
                     "# Order is critical: CONFIG_LTO_CLANG must come before CONFIG_LTO_CLANG_FULL.",
                     "CONFIG_LTO_CLANG=y",
                     "CONFIG_LTO_CLANG_FULL=y",
+                    "CONFIG_LTO_NONE=n",
                     "CONFIG_HAS_LTO_CLANG=y",
                 ]
             }

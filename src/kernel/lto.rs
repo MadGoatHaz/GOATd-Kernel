@@ -194,6 +194,7 @@ pub fn shield_amd_gpu_from_lto(makefile: &str) -> String {
     // Append shielding rules for each AMD directory
     let mut shield_lines = vec![String::new()];
     shield_lines.push("# Phase A Fix 3: AMD GPU LTO Shielding (direct source patch)".to_string());
+    shield_lines.push("# CRITICAL: Filter out LTO flags AND visibility flags to prevent GPU driver breakage".to_string());
 
     for dir in AMD_SHIELD_DIRS {
         let module = get_module_name(dir);
@@ -207,6 +208,10 @@ pub fn shield_amd_gpu_from_lto(makefile: &str) -> String {
         ));
         shield_lines.push(format!(
             "CFLAGS_{} := $(filter-out -flto,$(CFLAGS_{}))",
+            module, module
+        ));
+        shield_lines.push(format!(
+            "CFLAGS_{} := $(filter-out -fvisibility$(comma)hidden,$(CFLAGS_{}))",
             module, module
         ));
     }

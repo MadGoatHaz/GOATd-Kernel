@@ -290,7 +290,7 @@ mod performance_battle_tests {
         let record_json_full = r#"{
             "timestamp": "2026-01-11T01:00:00Z",
             "kernel_context": {
-                "version": "6.7.0",
+                "version": "0.2.1",
                 "scx_profile": "scx_bpfland",
                 "lto_config": "thin",
                 "governor": "schedutil"
@@ -339,7 +339,7 @@ mod performance_battle_tests {
         let record_json_missing_lto = r#"{
             "timestamp": "2026-01-11T01:00:00Z",
             "kernel_context": {
-                "version": "6.7.0",
+                "version": "0.2.1",
                 "scx_profile": "scx_bpfland"
             },
             "metrics": {
@@ -381,7 +381,7 @@ mod performance_battle_tests {
         let record_json_missing_governor = r#"{
             "timestamp": "2026-01-11T01:00:00Z",
             "kernel_context": {
-                "version": "6.7.0",
+                "version": "0.2.1",
                 "scx_profile": "scx_bpfland",
                 "lto_config": "thin"
             },
