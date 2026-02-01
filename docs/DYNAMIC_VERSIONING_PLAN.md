@@ -1,88 +1,39 @@
-# Dynamic Versioning Strategy: Transitioning to "Latest" Kernel Versions
+# Dynamic Versioning Plan (`v0.2.1`)
 
-## 1. Core Concept
-The goal is to move from pinned kernel versions (e.g., "6.12.1") to a dynamic "Always Latest" model. This ensures users always build the most recent stable or variant-specific kernel without manual version selection.
+GOATd Kernel uses a dynamic versioning strategy to ensure that kernel builds are uniquely identifiable by their profile, date, and source lineage.
 
-## 2. Model Changes ([`src/models.rs`](src/models.rs))
+## Versioning Strategy
 
-### `KernelConfig` Enhancement
-We will use `"latest"` as a special sentinel value for the `version` field in [`KernelConfig`](src/models.rs:237).
+The current overarching project version is `v0.2.1`. However, the kernels produced match the upstream Linux versioning with GOATd-specific injections.
 
-```rust
-impl KernelConfig {
-    /// Returns true if the config is set to track the latest version
-    pub fn is_dynamic_version(&self) -> bool {
-        self.version == "latest"
-    }
-}
-```
+### 1. Kernel Version String Injection
 
-- **Default Value**: The `Default` implementation for [`KernelConfig`](src/models.rs:268) will be updated to use `"latest"` instead of `"6.6.0"`.
-- **UI State**: When `"latest"` is selected, the UI will display a "Checking for latest..." status until resolved.
+The versioning logic injects metadata into the kernel's local version.
 
-## 3. Orchestration Workflow ([`src/orchestrator/executor.rs`](src/orchestrator/executor.rs))
+- **Profile Injection**: The active profile name (e.g., `gaming`, `efficiency`) is appended to the version.
+- **Date/Build ID**: Build timestamps or sequence counters are used to distinguish between different builds of the same kernel version.
+- **Scheme**: `pkgver-pkgrel-goatd-{profile}`.
 
-Version resolution should happen as early as possible in the build pipeline, specifically during the **Preparation** phase.
+### 2. RC (Release Candidate) Tag Handling
 
-### Polling Implementation
-The `prepare_build_environment` or a dedicated `resolve_dynamic_version` function in [`executor.rs`](src/orchestrator/executor.rs) will handle the translation of `"latest"` to a concrete version string.
+Handling of upstream pre-releases (RCs) is critical for early testers. This is managed in [`src/kernel/git.rs`](src/kernel/git.rs).
 
-```rust
-pub async fn resolve_dynamic_version(config: &mut KernelConfig) -> Result<String, BuildError> {
-    if !config.is_dynamic_version() {
-        return Ok(config.version.clone());
-    }
+- **Lower Precedence**: RC versions are internally treated as having lower precedence than the final releases (e.g., `6.13-rc7` < `6.13.0`).
+- **Tag Extraction**: The `libgit2` wrapper extracts tags like `v6.13-rc7`.
+- **Normalization**: The system normalizes these tags to ensure compatibility with Arch Linux's `pkgver` requirements (e.g., replacing hyphens with dots if necessary).
 
-    log::info!("[ORCHESTRATOR] Resolving latest version for variant: {}", config.kernel_variant);
-    
-    match get_latest_version_by_variant(&config.kernel_variant).await {
-        Ok(version) => {
-            log::info!("[ORCHESTRATOR] Resolved 'latest' to: {}", version);
-            config.version = version.clone();
-            Ok(version)
-        }
-        Err(e) => {
-            // Fallback strategy (see Section 5)
-            Err(BuildError::PreparationFailed(format!("Failed to resolve latest version: {}", e)))
-        }
-    }
-}
-```
+### 3. Source Version Validation
 
-## 4. UI Feedback & Interaction ([`src/ui/kernels.rs`](src/ui/kernels.rs) & [`src/ui/controller.rs`](src/ui/controller.rs))
+Before building, the system validates that the source code matches the expected version.
+- **`validate_source_version`**: Located in `src/kernel/git.rs`, this function reads the `PKGBUILD` and compares the `pkgver` against the intended target.
+- **`synchronize_pkgbuild_version`**: If the source version is correct but the `PKGBUILD` metadata is stale, [`src/kernel/patcher/pkgbuild.rs`](src/kernel/patcher/pkgbuild.rs) updates the file in-place.
 
-### Build Events
-A new [`BuildEvent`](src/ui/controller.rs:67) variant or an update to `StatusUpdate` will communicate the resolution progress.
+## Workflow
 
-```rust
-pub enum BuildEvent {
-    // ... existing variants
-    VersionResolved(String), // Concrete version resolved from 'latest'
-}
-```
+1. **Discovery**: Orchestrator identifies target version (e.g., `6.18.3` or `6.19-rc6`).
+2. **Tag Verification**: `src/kernel/git.rs` confirms the tag exists in the upstream repo.
+3. **Localversion Patching**: The patcher modifies the `Kconfig` or `PKGBUILD` variable to include the GOATd suffix.
+4. **Final String**: The resulting kernel reports its version via `uname -r` as something like `6.18.3-arch1-1-goatd-gaming`.
 
-### UI Indicators
-- **Dashboard/Build Tab**: If `version == "latest"`, show a loading spinner or "⟳ Resolving version..." text.
-- **Console Log**: Output `[ORCHESTRATOR] Resolving 'latest' variant 'linux-zen' -> 6.13.1-zen1-1`.
-
-## 5. Offline Scenarios & Failure Handling
-
-Dynamic polling depends on network availability. We must ensure the app remains functional when offline.
-
-### Fallback Hierarchy
-1. **Successful Poll**: Use the fetched version from PKGBUILD/Git.
-2. **Cached Version**: If polling fails, check if we have a previously resolved version for this variant in [`SettingsManager`](src/config/loader.rs) or a dedicated cache file.
-3. **Local PKGBUILD Parse**: Search the local workspace for an existing `PKGBUILD` and extract the version using regex (already implemented in [`src/kernel/pkgbuild.rs`](src/kernel/pkgbuild.rs)).
-4. **Hardcoded Baseline**: If all else fails, use a safe baseline version defined in [`models.rs`](src/models.rs).
-
-### Error Reporting
-If no version can be resolved (offline + no cache + no local source), the build should fail gracefully with a clear error:
-> "Unable to resolve 'latest' version. Please check your internet connection or specify a concrete version."
-
-## 6. Implementation Checklist
-- [ ] Add `is_dynamic_version` method to [`KernelConfig`](src/models.rs).
-- [ ] Implement `resolve_dynamic_version` in [`executor.rs`](src/orchestrator/executor.rs).
-- [ ] Update `AsyncOrchestrator::run` to call version resolution at the start of Phase 1.
-- [ ] Add `VersionResolved` to `BuildEvent` in [`controller.rs`](src/ui/controller.rs).
-- [ ] Update [`src/ui/build.rs`](src/ui/build.rs) to handle the resolution state.
-- [ ] Implement local cache for resolved versions to support offline fallback.
+---
+*This versioning plan ensures that users can always identify exactly which GOATd profile they are running and whether it is a stable or RC-based build.*

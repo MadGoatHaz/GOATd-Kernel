@@ -42,7 +42,7 @@ static PACKAGE_FUNCTION_REGEX: Lazy<Regex> = Lazy::new(|| {
 ///   - pkgbase="linux-goatd-custom" -> 'linux'
 /// CRITICAL FIX: Uses [^\n'"]+ to prevent multi-line capture
 static PKGBASE_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?m)^\s*pkgbase=['"]?(linux(?:-[a-zA-Z0-9]+)?-goatd-[a-zA-Z0-9]+)['"]?\s*$"#)
+    Regex::new(r#"(?m)^\s*pkgbase=['"]?(linux(?:-[a-zA-Z0-9]+)*)['"]?\s*$"#)
         .expect("Invalid pkgbase regex")
 });
 

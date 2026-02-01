@@ -140,6 +140,7 @@ fn create_base_config() -> KernelConfig {
         scx_active_scheduler: None,
         native_optimizations: true,
         user_toggled_native_optimizations: false,
+        pkgbase: "linux-goatd-generic".to_string(),
         kernel_variant: String::new(),
     }
 }

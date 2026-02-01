@@ -2035,6 +2035,7 @@ mod tests {
 
     fn create_test_config() -> KernelConfig {
         KernelConfig {
+            pkgbase: "linux-goatd-generic".to_string(),
             version: "6.6.0".to_string(),
             lto_type: LtoType::Thin,
             use_modprobed: true,

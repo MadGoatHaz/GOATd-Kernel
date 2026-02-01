@@ -1320,6 +1320,7 @@ mod tests {
             all_drives: Vec::new(),
         };
         let config = crate::models::KernelConfig {
+            pkgbase: "linux-goatd-generic".to_string(),
             version: "6.6.0".to_string(),
             lto_type: crate::models::LtoType::Thin,
             use_modprobed: true,
@@ -1395,6 +1396,7 @@ mod tests {
             all_drives: Vec::new(),
         };
         let config = crate::models::KernelConfig {
+            pkgbase: "linux-goatd-generic".to_string(),
             version: "6.6.0".to_string(),
             lto_type: crate::models::LtoType::Thin,
             use_modprobed: true,
@@ -1472,6 +1474,7 @@ mod tests {
             all_drives: Vec::new(),
         };
         let config = crate::models::KernelConfig {
+            pkgbase: "linux-goatd-generic".to_string(),
             version: "6.6.0".to_string(),
             lto_type: crate::models::LtoType::Thin,
             use_modprobed: true,

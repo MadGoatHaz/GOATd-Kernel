@@ -1,74 +1,44 @@
-# Build Pipe Testing & Diagnostics
+# Build Pipeline & Testing
 
-This document covers the automated build pipe testing infrastructure, including the timeout mechanisms, diagnostic logging, and the 10-phase implementation plan.
+This document details the modular build pipeline and the testing strategies used to ensure reliability during kernel compilation and deployment.
 
-## Orchestrator Timeouts
+## Build Pipeline Phases
 
-The `AsyncOrchestrator` includes a `test_timeout` field of type `Option<Duration>`. This is primarily used in automated tests to prevent hanging builds and to trigger diagnostic output when a build exceeds expected time limits.
+The build process is managed by [`src/orchestrator/executor.rs`](src/orchestrator/executor.rs) and is divided into several logical phases to ensure safety and reproducibility.
 
-### How it Works
-1. When creating an `AsyncOrchestrator` via `new()`, a `test_timeout` can be provided.
-2. This timeout is passed down to the `executor::run_kernel_build` function.
-3. If the build process (typically `makepkg`) exceeds this duration, the orchestrator terminates the process and returns a timeout error.
+### 1. Audit Phase (Preparation)
+- **Validation**: Performs hardware capability checks (CPU features, RAM capacity) and validates the target workspace.
+- **Environment Setup**: Ensures the build directory is initialized and the `.goatd_anchor` file is present to prevent out-of-bounds filesystem operations.
+- **Reference**: `validate_hardware`, `prepare_kernel_build`.
 
-### Example Usage in Tests
-```rust
-let timeout = Duration::from_secs(300); // 5 minute timeout
-let orch = AsyncOrchestrator::new(
-    hardware, 
-    config, 
-    checkpoint_dir, 
-    kernel_path, 
-    None, 
-    cancel_rx, 
-    Some(log_collector), 
-    Some(timeout)
-).await?;
-```
+### 2. Config Phase (Resolution)
+- **Version Resolution**: Resolves "latest" version strings to concrete kernel versions via Git or local source inspection.
+- **Parity Check**: Verifies SHA256 checksums between templates and the workspace to detect stale or corrupted PKGBUILDs.
+- **Reference**: `resolve_kernel_version`, `validate_kernel_config`.
 
----
+### 3. Build Phase (Execution)
+- **Compilation**: Executes the actual kernel build using the configured toolchain (LLVM/Clang by default).
+- **Real-time Monitoring**: Captures stdout/stderr via callbacks for UI integration and log collection.
+- **Timeout Protection**: Wraps the build process in a configurable timeout to prevent indefinite hangs.
+- **Reference**: `execute_kernel_build`.
 
-## LogCollector Diagnostics
+### 4. Export Phase (Finalization)
+- **Kernelrelease Discovery**: Discover the exact `kernelrelease` string from the build artifacts.
+- **Cross-Mount Propagation**: Propagates the `.kernelrelease` file across the workspace, including parent directories and subdirectories, to ensure consistency across different mount points or container boundaries.
+- **Reference**: `propagate_kernelrelease`, `discover_kernelrelease_robust`.
 
-To aid in debugging timed-out or failed builds, the `LogCollector` captures the most recent output lines in a sliding window buffer.
+## Dry-Run Mode & Hooks
 
-### Diagnostic Methods
-- `get_last_output_lines(n: usize)`: Returns the last `n` lines of build output.
-- `format_last_output_lines()`: Returns a pre-formatted string containing the last 10 lines, prefixed with `[LOG-CAPTURE]` for easy identification in test logs.
+To facilitate testing without the cost of a full kernel compilation, the executor supports a "Dry-Run" mode triggered by environment variables.
 
-### Why it Matters
-When a build times out in a headless CI environment, knowing the last few lines of output is critical for determining if the build was genuinely stuck, or just taking longer than expected (e.g., during a slow link step).
+- **`GOATD_DRY_RUN_HOOK`**: When set, the executor halts immediately before the expensive compilation step. It dumps the resolved configuration and environment state to stderr for verification.
+- **Usage**:
+  ```bash
+  GOATD_DRY_RUN_HOOK=1 cargo test --test real_kernel_build_integration
+  ```
 
----
+## Testing Strategy
 
-## 10-Phase Implementation Summary
-
-The "Full Build Pipe" test features were implemented across 10 distinct phases to ensure system stability and modularity.
-
-| Phase | Focus | Outcome |
-|-------|-------|---------|
-| 1 | Baseline Integration | Established the core async orchestration loop. |
-| 2 | Diagnostic Buffer | Implemented the `last_output_lines` buffer in `LogCollector`. |
-| 3 | Timeout Logic | Wired `test_timeout` through the Orchestrator to the Executor. |
-| 4 | Cancellation Safety | Refined `cancel_rx` handling during long-running builds. |
-| 5 | Resource Monitoring | Integration of thermal and CPU metrics during build. |
-| 6 | Failure Recovery | Checkpoint system validation for resumed builds. |
-| 7 | Mock Environment | Created lightweight mock kernel sources for rapid testing. |
-| 8 | Build Pipe Verifier | Implemented comprehensive `tests/real_kernel_build_integration.rs`. |
-| 9 | Stress Testing | Validated orchestrator behavior under heavy system load. |
-| 10 | Contextual Logging | Finalized `format_last_output_lines` for automated reports. |
-
-### Outcomes
-- **Zero-Hang CI**: Automated tests now reliably fail with context rather than timing out the CI runner.
-- **Forensic Capability**: Failures include the exact tail of the build log, even if the main log file is locked or incomplete.
-- **Verification Velocity**: The mock kernel environment allows testing the *logic* of the 5-phase pipeline in seconds rather than hours.
-
----
-
-## Extending Tests
-
-To add a new build pipe test:
-1. Create a new test file in `tests/`.
-2. Use the `AsyncOrchestrator` with a short `test_timeout`.
-3. If the test fails, call `log_collector.format_last_output_lines()` to display the failure context.
-4. Reference `tests/real_kernel_build_integration.rs` for a template of a full-pipe test.
+- **Unit Tests**: Found within source files (e.g., `src/kernel/patcher/tests.rs`) for localized logic.
+- **Integration Tests**: Comprehensive end-to-end flows located in the `tests/` directory.
+- **Mocking**: Hardware and filesystem interactions are abstracted to allow testing on non-target environments.

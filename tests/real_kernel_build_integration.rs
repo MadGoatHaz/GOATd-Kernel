@@ -97,6 +97,7 @@ async fn test_async_orchestrator_timeout_with_log_capture() {
         scx_available: vec![],
         scx_active_scheduler: None,
         native_optimizations: true,
+        pkgbase: "linux-goatd-Generic".to_string(),
         user_toggled_native_optimizations: false,
         kernel_variant: "linux".to_string(),
     };
@@ -496,6 +497,7 @@ async fn test_build_pipe_lifecycle_gaming() {
         lto_shield_modules: vec![],
         scx_available: vec![],
         scx_active_scheduler: None,
+        pkgbase: "linux-goatd-Gaming".to_string(),
         native_optimizations: true,
         user_toggled_native_optimizations: false,
         kernel_variant: "linux-mainline".to_string(),

@@ -39,6 +39,7 @@ fn create_dynamic_config(variant: &str) -> KernelConfig {
         scx_available: Vec::new(),
         scx_active_scheduler: None,
         native_optimizations: true,
+        pkgbase: format!("linux-goatd-{variant}"),
         user_toggled_native_optimizations: false,
     }
 }

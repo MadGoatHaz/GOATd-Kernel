@@ -1,6 +1,6 @@
-# GOATd Kernel Builder: Developer Guide
+# GOATd Kernel Builder: Developer Guide (v0.2.1)
 
-This guide provides architectural overview, code organization, testing standards, and contribution guidelines for developers working on GOATd Kernel Builder.
+This guide provides the architectural overview, code organization, testing standards, and implementation details for GOATd Kernel Builder.
 
 ---
 
@@ -14,14 +14,13 @@ This guide provides architectural overview, code organization, testing standards
 6. [Core Concepts](#core-concepts)
 7. [Testing & Quality Assurance](#testing--quality-assurance)
 8. [Building & Deployment](#building--deployment)
-9. [Contributing](#contributing)
-10. [Debugging Tips](#debugging-tips)
+9. [Debugging Tips](#debugging-tips)
 
 ---
 
 ## Architecture Overview
 
-GOATd Kernel Builder is built on a **pure Rust core** with an **egui immediate-mode reactive UI** and a **tokio async runtime** for non-blocking I/O orchestration.
+I've built GOATd Kernel Builder on a **pure Rust core** with an **egui immediate-mode reactive UI** and a **tokio async runtime** for non-blocking I/O orchestration.
 
 ### High-Level Layers
 
@@ -62,7 +61,7 @@ GOATd Kernel Builder is built on a **pure Rust core** with an **egui immediate-m
 
 5. **Modular Responsibility**: Each layer has a single, clear purpose.
 
-6. **Non-Blocking Async**: egui UI remains responsive via `tokio::spawn_blocking` for expensive operations.
+6. **Non-Blocking Async**: the egui UI remains responsive via `tokio::spawn_blocking` for expensive operations.
 
 ---
 
@@ -90,625 +89,148 @@ src/
 │   ├── loader.rs              # Configuration persistence (JSON)
 │   ├── profiles.rs            # 4-profile system (Gaming, WS, Server, Laptop)
 │   ├── finalizer.rs           # Finalizer (rule engine, Hardware > Override > Profile)
+│   ├── validator.rs           # AppState validation logic
+│   ├── exclusions.rs          # GPU driver auto-exclusion logic
 │   ├── modprobed.rs           # Modprobed-DB integration
-│   ├── whitelist.rs           # 22-driver safety-net whitelist
-│   ├── exclusions.rs          # Hardware-aware driver exclusion policies
-│   ├── validator.rs           # Configuration validation contracts
-│   └── mod.rs                 # Config module exports
+│   └── whitelist.rs           # Desktop Experience Whitelist (22 critical drivers)
 │
 ├── kernel/
-│   ├── patcher.rs             # KernelPatcher (5-phase enforcement)
-│   ├── manager.rs             # Kernel package & lifecycle management
-│   ├── audit.rs               # Deep-dive kernel introspection
-│   ├── git.rs                 # Git source management via git2
-│   ├── lto.rs                 # LTO type enums & validation
-│   ├── pkgbuild.rs            # PKGBUILD parsing & manipulation
-│   ├── sources.rs             # Kernel source detection & validation
-│   ├── parser.rs              # Config file parser
-│   ├── validator.rs           # Kernel config validation
+│   ├── manager.rs             # Kernel lifecycle (build, install, remove)
+│   ├── sources.rs             # KernelSourceDB (git/PKGBUILD URLs)
+│   ├── pkgbuild.rs            # PKGBUILD parsing and versioning
+│   ├── parser.rs              # .config parsing
+│   ├── patcher/               # Surgical config/PKGBUILD modification
 │   └── mod.rs                 # Kernel module exports
 │
-├── orchestrator/
-│   ├── mod.rs                 # AsyncOrchestrator (build phase coordinator)
-│   ├── executor.rs            # Executor (pure runner, makepkg invocation)
-│   ├── state.rs               # BuildPhaseState (state machine)
-│   ├── checkpoint.rs          # Build resumption & recovery
-│   └── mod.rs                 # Orchestrator module exports
-│
 ├── hardware/
-│   ├── init.rs                # Hardware detection initialization
-│   ├── cpu.rs                 # CPU feature detection, -march optimization
-│   ├── gpu.rs                 # GPU vendor detection (NVIDIA, AMD, Intel)
-│   ├── ram.rs                 # System RAM sizing
-│   ├── storage.rs             # Storage type detection (NVMe, SATA, etc.)
-│   ├── boot.rs                # Bootloader detection (GRUB, systemd-boot, rEFInd)
-│   └── mod.rs                 # Hardware module exports
+│   ├── cpu.rs                 # CPU feature detection (AVX-512, etc.)
+│   ├── gpu.rs                 # GPU vendor detection (NVIDIA/AMD/Intel)
+│   ├── storage.rs             # Drive & FS detection
+│   ├── boot.rs                # Bootloader detection (GRUB/systemd-boot)
+│   └── mod.rs                 # Hardware detection engine
 │
 ├── system/
-│   ├── mod.rs                 # System OS abstractions
-│   ├── scx.rs                 # SCX scheduler service integration
-│   └── performance/
-│       ├── collector.rs       # Lock-free latency collection (rtrb ring buffer)
-│       ├── scoring.rs         # 7-metric spectrum scoring (Latency, Consistency, Jitter, etc.)
-│       ├── diagnostic.rs      # MSR-based SMI detection
-│       ├── thermal.rs         # Per-core thermal monitoring
-│       ├── context_switch.rs  # Context-switch efficiency measurement
-│       ├── jitter.rs          # Jitter analysis & detection
-│       ├── stressor.rs        # Stress test stressor (CPU, Memory, Scheduler)
-│       ├── history.rs         # Performance result persistence (JSON/CSV)
-│       ├── tuner.rs           # Sysctl optimization
-│       ├── watchdog.rs        # Background monitoring & alerts
-│       └── mod.rs             # Performance module exports
+│   ├── performance/           # Gauntlet benchmark & live telemetry
+│   ├── scx.rs                 # Sched_ext (SCX) BPF management
+│   ├── verification.rs        # GPG & SHA256 verification
+│   ├── paths.rs               # Global path management
+│   └── mod.rs                 # System-level OS wrappers
 │
-├── models.rs                  # Shared data structures (Profile, LtoType, etc.)
-├── error.rs                   # AppError (unified error type)
-├── policy.rs                  # Global policies (debug logging, etc.)
-└── log_collector.rs           # Privileged dual-write logging (file + UI ring buffer)
-
-tests/
-├── integration_tests.rs       # End-to-end workflow tests
-├── config_tests.rs            # Config loading & validation
-├── hardware_tests.rs          # Hardware detection tests
-├── profile_pipeline_validation.rs  # Profile application verification
-├── build_pipeline_tests.rs    # Build orchestration tests
-├── real_kernel_build_integration.rs # Full-pipe automated tests
-├── performance_*.rs           # Performance diagnostic tests
-└── modprobed_*.rs             # Modprobed-DB integration tests
+├── orchestrator/
+│   ├── executor.rs            # Async build pipeline orchestrator
+│   ├── state.rs               # Orchestrator-specific state machine
+│   └── mod.rs                 # Orchestration module
+│
+├── models.rs                  # Shared data structures (KernelConfig, Profile)
+├── log_collector.rs           # Centralized logging subsystem
+└── error.rs                   # Unified error handling (AppError)
 ```
 
 ---
 
-## Toolchain Requirements
+## AppState Lifecycle (`src/config/mod.rs`)
 
-### Host Development System
+The `AppState` struct is the central source of truth for the entire application. It is held in an `Arc<RwLock<AppState>>` to allow thread-safe access from both the UI and background workers.
 
-- **Rust**: 2021 Edition (1.70+)
-- **Cargo**: Latest stable channel
-- **Git**: For version control and git2 library
+### Core Fields (v0.2.1)
 
-### Kernel Build System
+```rust
+pub struct AppState {
+    // Build Settings
+    pub selected_variant: String,
+    pub selected_profile: String,
+    pub selected_lto: String,
+    pub selected_scx_profile: String,
+    pub selected_scx_mode: String,
+    pub kernel_hardening: HardeningLevel,
+    pub secure_boot: bool,
+    pub use_modprobed: bool,
+    pub use_whitelist: bool,
+    pub use_polly: bool,
+    pub use_mglru: bool,
 
-- **Clang**: 16.0.0+ (enforced globally via `_FORCE_CLANG=1`)
-- **LLVM Tools**: llvm-ar, llvm-nm, llvm-objcopy, etc.
-- **Pacman**: Arch package manager (for dependency resolution)
-- **makepkg**: Arch kernel packaging tool
+    // Override Tracking Flags (Persist user intent)
+    pub user_toggled_lto: bool,
+    pub user_toggled_polly: bool,
+    pub user_toggled_mglru: bool,
+    pub user_toggled_bore: bool,
+    pub user_toggled_hardening: bool,
 
-### Optional (for Performance Diagnostics)
+    // Global Settings
+    pub theme_mode: String,
+    pub theme_idx: usize,
+    pub ui_font_size: f32,
+    pub check_for_updates: bool,
+    pub verify_signatures: bool,
+    pub startup_audit: bool,
+    pub audit_on_startup: bool, // Deprecated/Alias sync
+    pub native_optimizations: bool,
 
-- **sysfs**: For thermal and SMI monitoring
-- **MSR-Tools**: For SMI/TSC introspection
-- **stress-ng**: For synthetic workload generation
+    // Performance & Monitoring
+    pub perf_background_enabled: bool,
+    pub perf_alert_threshold_us: f32,
+    pub debug_logging: bool,
+    pub tokio_tracing: bool,
+    pub auto_scroll_logs: bool,
+    pub show_fps: bool,
 
----
+    // Paths
+    pub workspace_path: String,
+    pub kernel_source_path: String,
 
-## Dependency Management
-
-### Overview
-
-GOATd implements **automatic out-of-the-box dependency resolution** via the launcher script [`goatdkernel.sh`](goatdkernel.sh) and carefully pinned versions in [`Cargo.toml`](../Cargo.toml) for critical system dependencies.
-
-### Zero-Touch Dependency Installation (Arch Linux)
-
-The `goatdkernel.sh` script handles all system-level dependency detection and installation for Arch-based systems:
-
-**File**: [`goatdkernel.sh`](../goatdkernel.sh) lines 313–404
-
-**Key Functions**:
-
-1. **`detect_arch_linux()`** (lines 292–310)
-   - Detects Arch Linux via `/etc/os-release` or `pacman` existence
-   - Permissive detection supports Arch variants (EndeavourOS, Manjaro, etc.)
-
-2. **`check_and_install_arch_deps()`** (lines 313–404)
-   - **Step 1**: Verifies pacman is available; skips gracefully on non-Arch systems
-   - **Step 2**: Installs all required packages with `sudo pacman -S --needed --noconfirm`
-   - **Step 3**: Refreshes `PATH` for newly installed binaries
-   - **Step 4**: Verifies all packages are installed (re-checks each one)
-   - **Step 5**: Confirms cargo is in PATH with version info
-   - **Step 6**: Special handling for **modprobed-db** (AUR optional dependency):
-     - Attempts to initialize database with `modprobed-db store`
-     - Provides helpful guidance if not installed
-     - Not required but recommended for 70%+ faster builds
-
-3. **`check_dependencies()`** (lines 406–483)
-   - **Step 1**: Calls `check_and_install_arch_deps()` for Arch systems
-   - **Step 2**: Verifies cargo is in PATH (explicit path search with fallback)
-   - **Step 3**: Logs Rust version and cargo path
-   - **Step 4**: Calls `setup_kernel_gpg_keys()` on Arch systems
-
-4. **`setup_kernel_gpg_keys()`** (lines 489–563)
-   - Automatically imports kernel signing keys:
-     - **38DBBDC86092693E**: Greg Kroah-Hartman (Linux kernel stable)
-     - **B8AC08600F108CDF**: Jan Alexander Steffens/heftig (Arch kernel)
-   - Multi-keyserver failover: Ubuntu keyserver → OpenPGP.org → MIT
-   - Fingerprint verification after import to ensure security
-   - Tolerant of already-imported keys (idempotent)
-
-### Critical Dependency Pinning in Cargo.toml
-
-**`rfd = "0.13"` (line 46 in Cargo.toml)**
-
-**What it does**: File/folder dialog selection abstraction used by the GUI for kernel source selection.
-
-**Why pinned to exactly 0.13**:
-- rfd 0.14+ increased dependencies on internal `ashpd` library (for Wayland support)
-- System-installed `ashpd` versions may conflict with bundled versions
-- Pinning 0.13 ensures compatibility with common system `ashpd` installations across distributions
-
-**Risk if unpinned**: Breaking GUI dialog on systems with incompatible `ashpd` versions, particularly on non-Arch distributions where version mismatches are common.
-
-**LLVM Toolchain Pins**:
-- No hard pins on llvm/clang versions in Cargo.toml (system-installed)
-- Enforced at runtime via global `_FORCE_CLANG=1` environment variable in kernel build process
-- Minimum Clang 16.0.0+ verified during `check_dependencies()`
-
-### Automatic GPG Key Verification Flow
-
-```
-./goatdkernel.sh (default)
-  ↓
-check_dependencies()
-  ↓
-detect_arch_linux()
-  ↓
-setup_kernel_gpg_keys()
-  │
-  ├─ For each key (Greg, Arch maintainer):
-  │  ├─ Check if already imported with valid fingerprint
-  │  └─ If missing/invalid, retry with keyserver failover
-  │
-  └─ Log fingerprints for transparency + security verification
+    // ... and others
+}
 ```
 
-**Failover Strategy**: Attempts each keyserver with 10-second timeout (prevents hanging on unreachable servers). If all keyservers fail, warns user but continues (kernel build may still work with pre-cached keys).
+### Intent Persistence Logic
+
+When a user manually changes a setting in the UI (e.g., toggles LTO), the corresponding `user_toggled_*` flag is set to `true`. The `Finalizer` (in `src/config/finalizer.rs`) checks these flags before applying profile defaults. If a toggle flag is active, the user's choice is preserved regardless of what the selected Profile (Gaming, Server, etc.) recommends.
 
 ---
 
 ## Development Setup
 
-### 1. Clone the Repository
+### 1. Toolchain
+- **Rust**: `rustup default stable`
+- **LLVM/Clang**: `sudo pacman -S llvm clang lld polly` (on Arch)
 
+### 2. Running in Development Mode
 ```bash
-git clone <repo-url>
-cd GOATd\ Kernel
+cargo run
 ```
 
-### 2. Verify Rust Toolchain
-
+### 3. Running Tests
 ```bash
-rustc --version
-cargo --version
+# Unit tests
+cargo test
+
+# Integration tests (requires privileged access for some)
+cargo test --test '*'
 ```
-
-Update if needed:
-```bash
-rustup update
-```
-
-### 3. Install Clang 16+ (Host System)
-
-For Arch Linux:
-```bash
-sudo pacman -S clang llvm lld
-clang --version  # Verify 16.0.0 or later
-```
-
-### 4. Build in Debug Mode
-
-```bash
-cargo build
-```
-
-Output: `target/debug/goatd_kernel`
-
-### 5. Build Release Binary
-
-```bash
-cargo build --release
-```
-
-Output: `target/release/goatd_kernel`
-
-### 6. Run Tests
-
-```bash
-cargo test --all-targets
-```
-
-Full test suite: 465+ tests covering all critical paths.
-
----
-
-## Core Concepts
-
-### AppState: The Source of Truth
-
-**File**: [`src/config/mod.rs`](../src/config/mod.rs)
-
-Stores all application state in a single `Arc<RwLock<AppState>>` struct:
-
-```rust
-pub struct AppState {
-    // Hardware detection
-    pub hardware: HardwareInfo,
-    
-    // User selections
-    pub selected_kernel_variant: String,
-    pub selected_profile: String,
-    
-    // Profile customizations (user overrides)
-    pub use_modprobed: bool,
-    pub use_whitelist: bool,
-    pub lto_type: LtoType,
-    
-    // User intent flags (prevent profile re-forcing)
-    pub user_toggled_bore: bool,
-    pub user_toggled_mglru: bool,
-    pub user_toggled_polly: bool,
-    pub user_toggled_lto: bool,
-    
-    // Build progress
-    pub build_phase: BuildPhaseState,
-    pub build_progress: f32,
-    
-    // Performance diagnostics
-    pub perf_metrics: PerformanceMetrics,
-}
-```
-
-**Key Pattern**: `RwLock<T>` allows many readers concurrently, exclusive writer when mutations occur. This is critical for the egui event loop and async tasks to synchronize state without blocking.
-
-### Finalizer: The Rule Engine
-
-**File**: [`src/config/finalizer.rs`](../src/config/finalizer.rs)
-
-Implements the hierarchical configuration resolution:
-
-```
-Hardware Truth (detected CPU, GPU, RAM)
-  ↓
-User Overrides (user_toggled_* flags)
-  ↓
-Profile Presets (Gaming, Workstation, Server, Laptop defaults)
-  ↓
-Final KernelConfig (passed to KernelPatcher)
-```
-
-**Method**: `Finalizer::finalize_kernel_config(state: &AppState) -> KernelConfig`
-
-### KernelPatcher: The Surgical Engine
-
-**File**: [`src/kernel/patcher.rs`](../src/kernel/patcher.rs)
-
-ONLY module permitted to modify `PKGBUILD` and `.config`. Implements 5-phase hard enforcement:
-
-#### Phase 5 (Orchestrator)
-- **When**: During `AsyncOrchestrator::patch()` phase
-- **What**: Regex-based removal of ALL GCC/LTO variants + atomic Clang/LTO injection
-- **Why**: Establishes clean baseline before PKGBUILD scripts start
-
-#### Phase G1 (Prebuild LTO Hard Enforcer)
-- **When**: Injected into PKGBUILD `build()`, runs immediately before `make bzImage`
-- **What**: Final surgical removal + atomic injection of LTO settings
-- **Why**: Last gate before kernel compilation; locks in LTO after all config steps complete
-
-#### Phase G2 (Post-Modprobed Hard Enforcer)
-- **When**: After `make localmodconfig` filters modules to ~170
-- **What**: Extracts filtered modules, runs olddefconfig, hard-restores original 170 modules
-- **Why**: Prevents Kconfig dependency re-expansion from un-filtering modules
-
-#### Phase G2.5 (Post-Setting-Config Restorer)
-- **When**: After Arch's `cp ../config .config` overwrites filtered config with unfiltered
-- **What**: Detects overwrite, re-applies modprobed filtering, restores BORE/MGLRU/Polly settings
-- **Why**: Recovers from destructive cp operation that overwrites all customizations
-
-#### Phase E1 (Post-Oldconfig LTO Re-Enforcement)
-- **When**: After any `make oldconfig` / `make syncconfig` in prepare/build phases
-- **What**: Re-applies LTO enforcement if Kconfig reverts to CONFIG_LTO_NONE=y
-- **Why**: Kernel's Kconfig system may revert LTO during reconfig; this prevents it
-
-### AsyncOrchestrator: The Conductor
-
-**File**: [`src/orchestrator/mod.rs`](../src/orchestrator/mod.rs)
-
-Coordinates build phases via state machine:
-
-```
-Preparation → Configuration → Patching → Building → Validation → Completed
-```
-
-Each phase delegates to specialized modules (Executor, KernelPatcher, etc.) but NEVER edits files directly.
-
-**Key Method**: `AsyncOrchestrator::run_async()` spawns a tokio task that coordinates all phases.
-
----
-
-## Testing & Quality Assurance
-
-### Test Suite Overview
-
-**465+ tests** covering:
-
-1. **Unit Tests** (307): Individual function/module behavior
-2. **Integration Tests** (122): Cross-module interaction
-3. **Doc Tests** (36): Documentation code examples
-
-### Running Tests
-
-```bash
-# All tests
-cargo test --all-targets
-
-# Specific test file
-cargo test --test integration_tests
-
-# Specific test
-cargo test test_phase_h1_triple_lock_lto_enforcer -- --nocapture
-
-# Show test output (useful for debugging)
-cargo test -- --nocapture --test-threads=1
-```
-
-### Key Test Files
-
-1. **`build_pipeline_tests.rs`**: Build Pipeline Verification test (dry-run validation)
-2. **`real_kernel_build_integration.rs`**: Full-pipe automated verification with mock sources
-3. **`profile_pipeline_validation.rs`**: Profile application & LTO enforcement
-4. **`config_tests.rs`**: Configuration loading, whitelist validation
-5. **`performance_battle_tests.rs`**: GOAT Score calculation verification
-6. **`modprobed_localmodconfig_validation.rs`**: Modprobed-DB integration
-
-### Deep Pipe Verification Test
-
-**Pattern**: Use `GOATD_DRY_RUN_HOOK` to halt build at specific phases for testing without 45-minute compilation:
-
-```rust
-#[test]
-fn test_phase_h1_triple_lock_lto_enforcer() {
-    // Create mock kernel environment
-    // Initialize AsyncOrchestrator with production code (zero mocking)
-    // Run complete pipeline: Prep → Config → Patch → Build (halted)
-    // Validate 7 critical assertions
-    
-    assert!(config_has_lto_clang_thin);
-    assert!(bore_scheduler_present);
-    assert!(mglru_enabled);
-    // ... etc
-}
-```
-
-This test **replaces manual `makepkg` runs** for configuration testing—no 45-minute compilation needed.
-
-### Quality Gates
-
-Before submitting a PR:
-
-1. ✅ **All tests pass**: `cargo test --all-targets`
-2. ✅ **No compiler warnings**: `cargo check --all-targets`
-3. ✅ **Clippy clean**: `cargo clippy -- -D warnings`
-4. ✅ **Format verified**: `cargo fmt --check`
-5. ✅ **Documentation**: Inline code comments for non-obvious logic
-
----
-
-## Building & Deployment
-
-### Building the Release Binary
-
-```bash
-cargo build --release
-```
-
-Binary location: `target/release/goatd_kernel`
-
-### Running the Application
-
-```bash
-./target/release/goatd_kernel
-```
-
-The egui window will launch. Application will request sudo credentials for kernel build and installation operations.
-
-### Installing as System Binary
-
-To make available system-wide:
-
-```bash
-sudo cp target/release/goatd_kernel /usr/local/bin/
-```
-
-Then run from anywhere:
-```bash
-goatd_kernel
-```
-
----
-
-## Contributing
-
-### Code Style
-
-- **Rust Edition**: 2021
-- **Formatting**: Use `cargo fmt` (automatic)
-- **Linting**: Pass `cargo clippy -- -D warnings`
-- **Comments**: Non-obvious logic must be documented
-- **Error Handling**: Use `Result<T, AppError>` consistently
-
-### Adding a New Optimization Profile
-
-1. **Define Profile** in [`src/config/profiles.rs`](../src/config/profiles.rs):
-   ```rust
-   Profile {
-       name: "Custom",
-       lto_type: LtoType::Thin,
-       default_scheduler: "eevdf",
-       // ... other settings
-   }
-   ```
-
-2. **Add UI Control** in [`src/ui/build.rs`](../src/ui/build.rs):
-   ```rust
-   ComboBox::from_label("Profile")
-       .selected_text(state.selected_profile.as_str())
-       .show_ui(ui, |ui| {
-           ui.selectable_value(&mut state.selected_profile, "Custom", "Custom");
-       });
-   ```
-
-3. **Add Tests** in [`tests/profile_pipeline_validation.rs`](../tests/profile_pipeline_validation.rs):
-   ```rust
-   #[test]
-   fn test_custom_profile_application() {
-       // Verify profile defaults apply correctly
-   }
-   ```
-
-4. **Update Documentation** in [`docs/USER_GUIDE.md`](USER_GUIDE.md):
-   - Add profile description to "Optimization Profiles" section
-
-### Adding a Performance Metric
-
-1. **Define Metric** in [`src/system/performance/scoring.rs`](../src/system/performance/scoring.rs):
-   ```rust
-   pub struct PerformanceMetric {
-       pub name: &'static str,
-       pub value: f64,
-       pub weight: f64, // 0.0–1.0, sum of all weights = 1.0
-   }
-   ```
-
-2. **Implement Collection** in appropriate module:
-   - Latency: [`src/system/performance/collector.rs`](../src/system/performance/collector.rs)
-   - Thermal: [`src/system/performance/thermal.rs`](../src/system/performance/thermal.rs)
-   - Jitter: [`src/system/performance/jitter.rs`](../src/system/performance/jitter.rs)
-
-3. **Add Scoring Formula** in `scoring.rs`:
-   ```rust
-   fn normalize_latency(p99_us: f64) -> f64 {
-       1.0 - ((p99_us - 10.0) / 490.0).clamp(0.001, 1.0)
-   }
-   ```
-
-4. **Test Normalization** in test suite
-
-5. **Update GOAT Score** calculation in `scoring.rs`:
-   ```rust
-   let goat_score = (
-       latency_norm * 0.27 +
-       consistency_norm * 0.18 +
-       // ... other metrics
-   ) * 1000.0;
-   ```
 
 ---
 
 ## Debugging Tips
 
 ### Enabling Debug Logging
-
 Set environment variable:
 ```bash
 RUST_LOG=debug cargo run
 ```
 
-Logs appear in build console and persistent log at: `logs/full/<timestamp>_full.log`
-
-### Inspecting Kernel Config
-
-After build, inspect `.config` in `/tmp/goatd-build-*/` directory:
-
-```bash
-# Find the build directory
-ls -la /tmp/goatd-build-*/
-
-# View .config
-cat /tmp/goatd-build-*/linux-*/linux-*/.config | grep CONFIG_LTO
-```
-
-### Testing LTO Enforcement
-
-Use Deep Pipe verification test:
-
-```bash
-cargo test test_phase_h1_triple_lock_lto_enforcer -- --nocapture
-```
-
-### Checking Modprobed-DB Filtering
-
-```bash
-# Check if modprobed.db exists
-ls -la ~/.config/modprobed.db
-
-# View contents (list of detected drivers)
-cat ~/.config/modprobed.db | head -20
-```
-
-### Debugging Profile Application
-
-Add temporary debug logging in [`src/config/finalizer.rs`](../src/config/finalizer.rs):
-
-```rust
-eprintln!("[DEBUG] Applying profile: {}", profile_name);
-eprintln!("[DEBUG] User overrides: BORE={}", state.user_toggled_bore);
-eprintln!("[DEBUG] Final config: LTO={:?}", final_config.lto_type);
-```
-
 ### Inspecting AppState
-
-In UI code, print to stderr:
-
+In UI code, I often print to stderr for quick checks:
 ```rust
 eprintln!("[APP_STATE] Profile: {:?}", state.selected_profile);
-eprintln!("[APP_STATE] Hardware GPU: {:?}", state.hardware.gpu_vendor);
-eprintln!("[APP_STATE] Build phase: {:?}", state.build_phase);
+eprintln!("[APP_STATE] User overrides: LTO={}", state.user_toggled_lto);
 ```
 
----
-
-## Architecture Decision Records (ADRs)
-
-### ADR 1: Why Pure Rust + egui?
-
-**Decision**: Replace Slint→CXX-Qt→Slint journey with pure Rust + egui.
-
-**Rationale**:
-- Single language eliminates FFI complexity
-- No C++ runtime dependencies
-- Immediate-mode UI paradigm suits reactive state management
-- `eframe` handles platform abstraction
-
-### ADR 2: Why Multi-Phase Hard Enforcer?
-
-**Decision**: Implement 5-phase enforcement pipeline (G1, G2, G2.5, E1, Phase 5).
-
-**Rationale**:
-- Kernel's Kconfig system is adversarial—actively reverts settings
-- Single enforcement gate insufficient; multiple degradation vectors
-- Each phase targets specific Kconfig regeneration point
-- Surgical approach (remove + inject) prevents conflicts
-
-### ADR 3: Why Whitelist Instead of Default Include?
-
-**Decision**: Whitelist critical 22 drivers instead of including all by default.
-
-**Rationale**:
-- Modprobed-DB goal is aggressive filtering for speed
-- Default-include undermines filtering effectiveness
-- Whitelist + modprobed = best of both worlds
-- Users understand why each driver is present
+### Inspecting Kernel Config
+After a build attempt, you can inspect the generated `.config` in the `/tmp/goatd-build-*/` directory to verify that your optimizations were correctly injected by the enforcer pipeline.
 
 ---
 
 ## References
-
-- **Main Documentation**: [`BLUEPRINT_V2.md`](../BLUEPRINT_V2.md) (canonical technical spec)
-- **Development History**: [`DEVLOG.md`](../DEVLOG.md) (42+ phases of development)
-- **Project Scope**: [`PROJECTSCOPE.md`](../PROJECTSCOPE.md) (architectural scope)
-- **User Guide**: [`docs/USER_GUIDE.md`](USER_GUIDE.md) (end-user documentation)
-- **Build Pipe Testing**: [`docs/BUILD_PIPE_TESTING.md`](BUILD_PIPE_TESTING.md) (automated test guide)
-
----
-
-## Support & Discussion
-
-For architectural questions or implementation clarifications, refer to the corresponding Phase entry in [`DEVLOG.md`](../DEVLOG.md) where the feature was originally designed and implemented.
+- **User Guide**: [`docs/USER_GUIDE.md`](USER_GUIDE.md)
+- **Technical Spec**: [`BLUEPRINT_V2.md`](../BLUEPRINT_V2.md)
+- **History**: [`DEVLOG.md`](../DEVLOG.md)
