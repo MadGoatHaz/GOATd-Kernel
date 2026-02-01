@@ -1,4 +1,4 @@
-<img src="docs/Img/GOATd-Kernel.jpg" width="100%" alt="GOATd Kernel Banner">
+<img src="docs/Img/GOATd-Kernel.jpg" width="100%" alt="GOATd Kernel Banner"> 
 
 ```
 
