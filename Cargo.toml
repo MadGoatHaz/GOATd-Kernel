@@ -54,9 +54,3 @@ dirs = "5.0"
 criterion = "0.5"
 proptest = "1.4"
 mockito = "1.2"
-
-[patch.crates-io]
-# ashpd patch: Required for compatibility with xdg-portal file picker in rfd
-# This patch resolves future-incompatibility warnings and ensures stable portal integration.
-# Do not remove until rfd officially updates its ashpd dependency to 0.13.0+.
-ashpd = { git = "https://github.com/bilelmoussaoui/ashpd.git", branch = "main" }

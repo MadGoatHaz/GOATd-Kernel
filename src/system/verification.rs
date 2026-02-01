@@ -370,7 +370,7 @@ pub fn discover_kernel_headers(kernel_version: &str, workspace_path: Option<&Pat
     // STRATEGY 0.5: Try new deterministic variant-aware naming (pkgbase-version)
     // Pattern: /usr/src/{variant}-goatd-{profile}-{version}
     if let Some(pos) = kernel_version.find("-goatd-") {
-        let variant = "linux"; // Default variant, but ideally we would detect this
+        let _variant = "linux"; // Default variant, but ideally we would detect this
         let profile_part = &kernel_version[pos + 7..];
         let base_ver = &kernel_version[..pos];
 
