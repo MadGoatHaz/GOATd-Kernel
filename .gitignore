@@ -130,3 +130,12 @@ run_*.json
 # Internal Planning & Development
 # ============================================================================
 plans/
+
+# ============================================================================
+# Repository Hygiene - Phase 3, Chunk 1
+# ============================================================================
+/goatd-kernel-bin/GOATd-Kernel/
+*.tar.gz
+*.sha256
+goatd-kernel-bin/src/
+goatd-kernel-bin/pkg/
