@@ -467,9 +467,15 @@ git_tag_and_push() {
     # This handles cases where the deletion in preflight didn't fully complete
     git -C "$REPO_ROOT" tag -a "v$version" -m "Release v$version" --force || die "Failed to create tag v$version"
     
+    log_info "Syncing tag cache with remote..."
+    # Fetch tags from remote with --force to ensure local cache is current and not stale
+    # This prevents "stale info" errors when pushing tags that may have been recreated
+    git -C "$REPO_ROOT" fetch --tags --force || log_warn "Failed to fetch tags, proceeding with push attempt"
+    
     log_info "Pushing tag to GitHub..."
-    # Use --force-with-lease for safer force push of tag (respects remote state)
-    git -C "$REPO_ROOT" push origin "v$version" --force-with-lease || die "Failed to push tag v$version"
+    # Use --force for tag push (tags are atomic, safer than --force-with-lease)
+    # This handles the case where remote tag has been recreated and local tracking is stale
+    git -C "$REPO_ROOT" push origin "v$version" --force || die "Failed to push tag v$version"
     
     log_success "Tag v$version created and pushed"
 }
