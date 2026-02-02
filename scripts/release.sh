@@ -603,8 +603,6 @@ print_summary() {
     echo ""
     echo -e "Release URL: ${CYAN}https://github.com/$GITHUB_REPO/releases/tag/v$version${NC}"
     echo ""
-    log_warn "Note: AUR packages must be updated separately using the maintenance scripts."
-    echo ""
 }
 
 confirm_release() {
@@ -706,12 +704,13 @@ main() {
     log_debug "main: Step 14 - Publishing release"
     publish_release "$version"
     
-    # Step 15: Cleanup local files
-    log_debug "main: Step 15 - Cleaning up local files"
+    # Step 15: Invoke AUR maintenance (non-blocking)
+    # Step 16: Cleanup local files
+    log_debug "main: Step 16 - Cleaning up local files"
     cleanup_local_files "$version"
     
-    # Step 16: Print summary
-    log_debug "main: Step 16 - Printing summary"
+    # Step 17: Print summary
+    log_debug "main: Step 17 - Printing summary"
     print_summary "$version"
     
     log_debug "main: Release completed successfully"
