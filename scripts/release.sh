@@ -203,11 +203,16 @@ check_github_release() {
     local version="$1"
     
     log_progress "Checking GitHub release existence for v$version (gh release view)"
-    if gh release view "v$version" --repo "$GITHUB_REPO" &>/dev/null; then
+    if timeout 10 gh release view "v$version" --repo "$GITHUB_REPO" &>/dev/null; then
         log_progress "GitHub release v$version found"
         return 0  # Release exists
     else
-        log_progress "GitHub release v$version does not exist"
+        local exit_code=$?
+        if [ $exit_code -eq 124 ]; then
+            log_warn "GitHub release check timed out after 10 seconds (network may be unreachable)"
+        else
+            log_progress "GitHub release v$version does not exist"
+        fi
         return 1  # Release does not exist
     fi
 }
@@ -223,7 +228,14 @@ _check_git_tag_local() {
 _check_git_tag_remote() {
     local version="$1"
     log_progress "Checking remote git tag v$version (git ls-remote)"
-    git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/v$version" 2>/dev/null | grep -q "v$version"
+    if ! timeout 10 git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/v$version" 2>/dev/null | grep -q "v$version"; then
+        local exit_code=$?
+        if [ $exit_code -eq 124 ]; then
+            log_warn "Git ls-remote check timed out after 10 seconds (network may be unreachable)"
+        fi
+        return 1
+    fi
+    return 0
 }
 
 # Check tag existence and return status
