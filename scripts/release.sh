@@ -333,16 +333,25 @@ preflight_safety_check() {
         fi
         
         # Handle tag deletion based on status
+        # Always attempt both local and remote deletion to ensure robust cleanup
+        # even if status detection was incomplete or had sync issues
         case "$tag_status" in
             "both"|"local")
                 log_info "Deleting local tag v$version..."
-                git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || log_warn "Failed to delete local tag"
+                git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || log_warn "Failed to delete local tag (may not exist locally)"
                 ;;&
             "both"|"remote")
                 log_info "Deleting remote tag v$version..."
-                git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || log_warn "Failed to delete remote tag"
+                git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || log_warn "Failed to delete remote tag (may not exist remotely)"
                 ;;
         esac
+        
+        # Ensure local tag is always deleted as fallback for "remote"-only case
+        # This handles situations where local tag exists but wasn't detected
+        if [[ "$tag_status" == "remote" ]]; then
+            log_info "Force-deleting local tag v$version (safety fallback)..."
+            git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || true
+        fi
         
         log_success "Existing release and tags cleaned up"
     else
