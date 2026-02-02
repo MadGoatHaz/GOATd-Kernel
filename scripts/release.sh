@@ -41,6 +41,9 @@ fi
 
 GITHUB_REPO="MadGoatHaz/GOATd-Kernel"
 
+# Global variable for version (set by prompt_version, used throughout)
+RELEASE_VERSION=""
+
 # Helper functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $*"
@@ -62,28 +65,10 @@ log_prompt() {
     echo -e "${CYAN}[?]${NC} $*"
 }
 
-# AUTO_APPROVE mode for automated testing
-# Set AUTO_APPROVE=yes to automatically answer "y" to all prompts
-read_input() {
-    # If AUTO_APPROVE is set, return "y" for yes/no prompts
-    if [[ "${AUTO_APPROVE:-}" == "yes" ]]; then
-        echo "y"
-        return 0
+log_debug() {
+    if [[ "${DEBUG_RELEASE:-}" == "1" ]]; then
+        echo -e "${BLUE}[DEBUG]${NC} $*"
     fi
-    
-    # Otherwise, try to read from /dev/tty or stdin
-    local response
-    if [ -e /dev/tty ] && [ -r /dev/tty ]; then
-        if ! read -r response < /dev/tty; then
-            return 1
-        fi
-    else
-        if ! read -r response; then
-            return 1
-        fi
-    fi
-    
-    echo "$response"
 }
 
 die() {
@@ -93,35 +78,41 @@ die() {
 
 check_requirements() {
     log_info "Checking requirements..."
+    log_debug "check_requirements: Starting requirement checks"
     
     # Check for git
     if ! command -v git &> /dev/null; then
         die "Missing required command: git. Please install Git first."
     fi
+    log_debug "check_requirements: git found"
     
     # Check for gh
     if ! command -v gh &> /dev/null; then
         die "Missing required command: gh (GitHub CLI). Please install GitHub CLI first."
     fi
+    log_debug "check_requirements: gh found"
     
     # Check for cargo
     if ! command -v cargo &> /dev/null; then
         die "Missing required command: cargo. Please install Rust/Cargo first."
     fi
+    log_debug "check_requirements: cargo found"
     
-    # Check gh authentication (with timeout to prevent hanging)
-    log_info "Checking GitHub CLI authentication (timeout: 10s)..."
-    if ! timeout 10 gh auth status &>/dev/null; then
-        die "GitHub CLI (gh) is not authenticated or auth check timed out. Please run 'gh auth login' first."
+    # Check gh authentication
+    log_info "Checking GitHub CLI authentication..."
+    log_debug "check_requirements: Running gh auth status"
+    if ! gh auth status &>/dev/null; then
+        die "GitHub CLI (gh) is not authenticated. Please run 'gh auth login' first."
     fi
+    log_debug "check_requirements: gh auth status succeeded"
     
     log_success "All requirements met (git, gh, cargo)"
 }
 
 validate_version() {
     local version="$1"
-    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        die "Invalid version format: $version (expected: X.Y.Z, e.g., 0.2.1)"
+    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+        die "Invalid version format: $version (format: X.Y.Z[.A], e.g., 0.2.1 or 0.2.1.2)"
     fi
 }
 
@@ -130,6 +121,7 @@ interactive_commit_prompt() {
     local version="$1"
     
     log_info "Checking for uncommitted changes in $REPO_ROOT..."
+    log_debug "interactive_commit_prompt: Checking git status"
     
     # Check for uncommitted changes using git -C for repository targeting
     if [ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]; then
@@ -144,9 +136,8 @@ interactive_commit_prompt() {
     echo ""
     
     # Prompt user for action
-    log_prompt "Found uncommitted changes. Would you like to commit them to GitHub master before releasing? (y/N): "
-    local response
-    response=$(read_input) || die "Failed to read user input"
+    log_prompt "Found uncommitted changes. Commit them before releasing? (y/N): " 
+    read -p "" response
     
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         log_info "Skipping automatic commit of uncommitted changes"
@@ -158,8 +149,7 @@ interactive_commit_prompt() {
     local default_message="chore: pre-release preparations for v${version}"
     echo ""
     log_prompt "Enter commit message (default: \"${default_message}\"): "
-    local user_message
-    user_message=$(read_input) || die "Failed to read user input"
+    read -p "" user_message
     
     local commit_message="${user_message:-$default_message}"
     
@@ -180,6 +170,7 @@ interactive_commit_prompt() {
 
 check_git_status() {
     log_info "Checking Git status..."
+    log_debug "check_git_status: Starting git status checks"
     
     # Note: Uncommitted changes are now handled by interactive_commit_prompt
     # This function now primarily checks branch status
@@ -190,8 +181,7 @@ check_git_status() {
     if [[ "$branch" != "main" && "$branch" != "master" ]]; then
         log_warn "Not on main/master branch (currently on: $branch)"
         log_prompt "Continue anyway? (y/N): "
-        local response
-        response=$(read_input) || die "Failed to read user input"
+        read -p "" response
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             die "Aborted by user"
         fi
@@ -260,6 +250,7 @@ preflight_safety_check() {
     local tag_status
     
     log_info "Running pre-flight safety checks for v$version..."
+    log_debug "preflight_safety_check: Starting safety checks"
     echo ""
     
     # Check 1: GitHub Release
@@ -301,9 +292,8 @@ preflight_safety_check() {
         echo ""
         
         # Unified prompt for handling all conflicts
-        log_prompt "Delete existing release/tag(s) and re-create for this commit? (y/N): "
-        local response
-        response=$(read_input) || die "Failed to read user input"
+        log_prompt "Delete existing release/tag(s) and re-create? (y/N): "
+        read -p "" response
         
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             log_info "Aborting release. Use a different version number."
@@ -337,30 +327,26 @@ preflight_safety_check() {
     echo "$tag_status"
 }
 
+# prompt_version sets the global RELEASE_VERSION variable
+# No command substitution is used - prevents stdout capture issues
 prompt_version() {
     # Check if version was provided as command-line argument (for automation)
     if [ $# -ge 1 ] && [ -n "$1" ]; then
         local version="$1"
         validate_version "$version"
-        echo "$version"
+        log_debug "prompt_version: Version provided as argument: $version"
+        RELEASE_VERSION="$version"
         return 0
     fi
     
-    # Use stderr for prompt to ensure it's visible
-    log_prompt "Enter version number (format: X.Y.Z, e.g., 0.2.1): "
+    log_debug "prompt_version: No version argument, prompting user"
     
-    # Read from /dev/tty if available, otherwise use stdin
+    # Prompt user for version input - simple read without any redirection
+    log_prompt "Enter version number (format: X.Y.Z[.A], e.g., 0.2.1 or 0.2.1.2): "
     local version
-    if [ -e /dev/tty ] && [ -r /dev/tty ]; then
-        if ! read -r version < /dev/tty; then
-            die "Failed to read version input from /dev/tty"
-        fi
-    else
-        # Fallback to standard input for non-interactive environments
-        if ! read -r version; then
-            die "Failed to read version input (hint: provide version as argument: ./release.sh X.Y.Z)"
-        fi
-    fi
+    read -r version || die "Failed to read version input. Hint: provide version as argument: ./release.sh X.Y.Z"
+    
+    log_debug "prompt_version: Got version input: '$version'"
     
     # Trim whitespace
     version=$(echo "$version" | xargs)
@@ -370,12 +356,13 @@ prompt_version() {
     fi
     
     validate_version "$version"
-    echo "$version"
+    RELEASE_VERSION="$version"
 }
 
 update_cargo_toml() {
     local version="$1"
     log_info "Updating Cargo.toml version to $version..."
+    log_debug "update_cargo_toml: Updating version in Cargo.toml"
     
     if [ ! -f "$REPO_ROOT/Cargo.toml" ]; then
         die "Cargo.toml not found at $REPO_ROOT/Cargo.toml"
@@ -388,6 +375,8 @@ update_cargo_toml() {
 
 commit_version_bump() {
     local version="$1"
+    
+    log_debug "commit_version_bump: Starting version bump commit"
     
     # Use -C flag for all git operations to ensure we're in the correct repository
     
@@ -408,6 +397,7 @@ commit_version_bump() {
 
 push_code() {
     log_info "Pushing code to GitHub..."
+    log_debug "push_code: Pushing to origin master"
     
     git -C "$REPO_ROOT" push origin master || die "Failed to push code to origin master"
     
@@ -419,6 +409,7 @@ git_tag_and_push() {
     local tag_status="${2:-none}"
     
     log_info "Creating Git tag v$version..."
+    log_debug "git_tag_and_push: Creating tag for version $version"
     
     # Double-check tag status if not provided (safety net)
     if [[ "$tag_status" == "none" ]]; then
@@ -448,6 +439,7 @@ git_tag_and_push() {
 
 build_release_binary() {
     log_info "Building release binary..."
+    log_debug "build_release_binary: Starting cargo build --release"
     
     cd "$REPO_ROOT"
     
@@ -461,6 +453,7 @@ create_tarball() {
     local version="$1"
     
     log_info "Creating release tarball..."
+    log_debug "create_tarball: Creating tarball for version $version"
     
     cd "$REPO_ROOT"
     
@@ -496,6 +489,7 @@ create_github_release() {
     local version="$1"
     
     log_info "Creating GitHub release (draft mode)..."
+    log_debug "create_github_release: Creating GitHub release for v$version"
     
     # Get the current commit message for release notes
     local commit_message
@@ -518,6 +512,7 @@ upload_release_assets() {
     local version="$1"
     
     log_info "Uploading release assets..."
+    log_debug "upload_release_assets: Uploading assets for v$version"
     
     cd "$REPO_ROOT"
     
@@ -541,6 +536,7 @@ publish_release() {
     local version="$1"
     
     log_info "Publishing release (removing draft status)..."
+    log_debug "publish_release: Publishing release v$version"
     
     gh release edit "v$version" --repo "$GITHUB_REPO" --draft=false
     
@@ -551,6 +547,7 @@ cleanup_local_files() {
     local version="$1"
     
     log_info "Cleaning up local files..."
+    log_debug "cleanup_local_files: Removing tarball and checksum files"
     
     cd "$REPO_ROOT"
     
@@ -599,8 +596,7 @@ confirm_release() {
     echo "Branch:      $current_branch"
     echo ""
     log_prompt "Proceed with release? (y/N): "
-    local response
-    response=$(read_input) || die "Failed to read user input"
+    read -p "" response
     
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         die "Release aborted by user"
@@ -615,26 +611,34 @@ main() {
     echo ""
     
     # Step 1: Check requirements (git and gh explicitly checked)
+    log_debug "main: Step 1 - Checking requirements"
     check_requirements
+    log_debug "main: Requirements check passed"
     
     # Step 2: Prompt for version early so we can use it in commit messages
-    local version
-    version=$(prompt_version "${1:-}")
+    log_debug "main: Step 2 - Prompting for version"
+    prompt_version "${1:-}"
+    local version="$RELEASE_VERSION"
+    log_debug "main: Got version: $version"
     echo ""
     log_info "Preparing release for version: v$version"
     echo ""
     
     # Step 3: Interactive commit prompt for any uncommitted changes
+    log_debug "main: Step 3 - Interactive commit prompt"
     interactive_commit_prompt "$version"
     
     # Step 4: Check git status (branch validation)
+    log_debug "main: Step 4 - Checking git status"
     check_git_status
     
     # Step 5: Unified pre-flight safety check (GitHub release + Git tags)
+    log_debug "main: Step 5 - Pre-flight safety checks"
     local tag_status
     tag_status=$(preflight_safety_check "$version")
     
     # Step 6: Confirm release
+    log_debug "main: Step 6 - Confirming release"
     confirm_release "$version"
     
     echo ""
@@ -642,35 +646,47 @@ main() {
     echo ""
     
     # Step 7: Update version in Cargo.toml
+    log_debug "main: Step 7 - Updating Cargo.toml"
     update_cargo_toml "$version"
     
     # Step 8: Commit and push version bump
+    log_debug "main: Step 8 - Committing and pushing version bump"
     commit_version_bump "$version"
     push_code
     
     # Step 9: Create and push Git tag (passing tag_status for safety)
+    log_debug "main: Step 9 - Creating git tag"
     git_tag_and_push "$version" "$tag_status"
     
     # Step 10: Build release binary
+    log_debug "main: Step 10 - Building release binary"
     build_release_binary
     
     # Step 11: Create tarball
+    log_debug "main: Step 11 - Creating tarball"
     create_tarball "$version"
     
     # Step 12: Create GitHub release
+    log_debug "main: Step 12 - Creating GitHub release"
     create_github_release "$version"
     
     # Step 13: Upload assets
+    log_debug "main: Step 13 - Uploading assets"
     upload_release_assets "$version"
     
     # Step 14: Publish release (remove draft status)
+    log_debug "main: Step 14 - Publishing release"
     publish_release "$version"
     
     # Step 15: Cleanup local files
+    log_debug "main: Step 15 - Cleaning up local files"
     cleanup_local_files "$version"
     
     # Step 16: Print summary
+    log_debug "main: Step 16 - Printing summary"
     print_summary "$version"
+    
+    log_debug "main: Release completed successfully"
 }
 
 main "$@"
