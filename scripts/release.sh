@@ -307,7 +307,7 @@ create_tarball() {
     
     cd "$REPO_ROOT"
     
-    local binary_name="goatdkernel"
+    local binary_name="goatd_kernel"
     local tarball_name="goatdkernel-${version}-x86_64.tar.gz"
     
     # Check if binary exists
