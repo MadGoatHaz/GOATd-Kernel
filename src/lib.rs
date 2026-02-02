@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_version_constant() {
-        assert_eq!(VERSION, "0.2.1.2");
+        assert_eq!(VERSION, "0.2.1");
     }
 
     #[test]

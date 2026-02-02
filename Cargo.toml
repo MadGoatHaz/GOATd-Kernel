@@ -1,6 +1,6 @@
 [package]
 name = "goatd_kernel"
-version = "0.2.1.2"
+version = "0.2.1"
 edition = "2021"
 description = "GOATd Kernel Builder - Pure Rust + egui UI"
 authors = ["GOATd Kernel Team"]
