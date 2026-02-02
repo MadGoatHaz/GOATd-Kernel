@@ -2,15 +2,15 @@
 #
 # GOATd Kernel GitHub Release Automation
 # 
-# Usage: ./scripts/release.sh
+# Usage: ./scripts/release.sh [VERSION]
 # 
 # This script automates GitHub releases with interactive prompts and safety checks:
-# 1. Prompts for version number
+# 1. Prompts for version number (or accepts as argument)
 # 2. Unified pre-flight safety check (GitHub release + Git tags)
 # 3. Detects uncommitted changes and offers to commit them
 # 4. Bumps version in Cargo.toml
 # 5. Commits and pushes code changes
-# 6. Creates Git tag and pushes to GitHub (with tag conflict handling)
+# 6. Creates Git tag and pushes to GitHub (with robust tag conflict handling)
 # 7. Creates GitHub Release
 # 8. Builds release binary and creates tarball
 # 9. Uploads tarball to GitHub Release
@@ -65,8 +65,6 @@ log_prompt() {
 # AUTO_APPROVE mode for automated testing
 # Set AUTO_APPROVE=yes to automatically answer "y" to all prompts
 read_input() {
-    local default_value="${1:-}"
-    
     # If AUTO_APPROVE is set, return "y" for yes/no prompts
     if [[ "${AUTO_APPROVE:-}" == "yes" ]]; then
         echo "y"
@@ -144,11 +142,11 @@ interactive_commit_prompt() {
     echo ""
     git -C "$REPO_ROOT" status --short
     echo ""
+    
     # Prompt user for action
     log_prompt "Found uncommitted changes. Would you like to commit them to GitHub master before releasing? (y/N): "
     local response
     response=$(read_input) || die "Failed to read user input"
-    
     
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         log_info "Skipping automatic commit of uncommitted changes"
@@ -235,11 +233,11 @@ check_git_tag_exists() {
     local tag_local=false
     local tag_remote=false
     
-    if _check_git_tag_local "$version"; then
+    if _check_git_tag_local "$version" 2>/dev/null; then
         tag_local=true
     fi
     
-    if _check_git_tag_remote "$version"; then
+    if _check_git_tag_remote "$version" 2>/dev/null; then
         tag_remote=true
     fi
     
@@ -265,33 +263,33 @@ preflight_safety_check() {
     echo ""
     
     # Check 1: GitHub Release
-    echo -e "  ${BLUE}Checking GitHub release...${NC}"
+    log_info "Checking GitHub for existing release v$version..."
     if check_github_release "$version"; then
-        echo -e "  ${YELLOW}  ⚠ GitHub release v$version exists${NC}"
+        log_warn "GitHub release v$version already exists"
         github_exists=true
         has_conflicts=true
     else
-        echo -e "  ${GREEN}  ✓ No GitHub release found${NC}"
+        log_success "No GitHub release found for v$version"
     fi
     
     # Check 2: Git Tags
-    echo -e "  ${BLUE}Checking Git tags...${NC}"
+    log_info "Checking for existing Git tags v$version..."
     tag_status=$(check_git_tag_exists "$version")
     case "$tag_status" in
         "both")
-            echo -e "  ${YELLOW}  ⚠ Git tag v$version exists locally AND remotely${NC}"
+            log_warn "Git tag v$version exists locally AND remotely"
             has_conflicts=true
             ;;
         "local")
-            echo -e "  ${YELLOW}  ⚠ Git tag v$version exists locally only${NC}"
+            log_warn "Git tag v$version exists locally only"
             has_conflicts=true
             ;;
         "remote")
-            echo -e "  ${YELLOW}  ⚠ Git tag v$version exists remotely only${NC}"
+            log_warn "Git tag v$version exists remotely only"
             has_conflicts=true
             ;;
         "none")
-            echo -e "  ${GREEN}  ✓ No Git tags found${NC}"
+            log_success "No Git tags found for v$version"
             ;;
     esac
     
@@ -339,24 +337,6 @@ preflight_safety_check() {
     echo "$tag_status"
 }
 
-# Legacy function - kept for compatibility but now integrated into preflight
-cleanup_conflicting_release_and_tag() {
-    local version="$1"
-    
-    log_warn "Cleaning up conflicting release and tags..."
-    
-    # Delete GitHub release
-    gh release delete "v$version" --repo "$GITHUB_REPO" --yes 2>/dev/null || true
-    
-    # Delete local tag
-    git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || true
-    
-    # Delete remote tag
-    git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || true
-    
-    log_success "Cleanup complete"
-}
-
 prompt_version() {
     # Check if version was provided as command-line argument (for automation)
     if [ $# -ge 1 ] && [ -n "$1" ]; then
@@ -366,8 +346,8 @@ prompt_version() {
         return 0
     fi
     
-    # Use stderr for prompt to ensure it's visible even in command substitution
-    echo -e "${CYAN}[?]${NC} Enter version number (format: X.Y.Z, e.g., 0.2.1): " >&2
+    # Use stderr for prompt to ensure it's visible
+    log_prompt "Enter version number (format: X.Y.Z, e.g., 0.2.1): "
     
     # Read from /dev/tty if available, otherwise use stdin
     local version
@@ -448,26 +428,12 @@ git_tag_and_push() {
     # Handle any remaining tag conflicts (should be none after preflight, but just in case)
     case "$tag_status" in
         "both"|"local")
-            log_warn "Local tag v$version still exists after preflight"
-            log_info "Attempting to delete local tag..."
-            git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || {
-                log_error "Failed to delete local tag v$version"
-                if [[ "${AUTO_APPROVE:-}" != "yes" ]]; then
-                    log_prompt "Delete local tag manually and press Enter to continue, or Ctrl+C to abort..."
-                    read_input > /dev/null || true
-                fi
-            }
+            log_warn "Local tag v$version still exists - attempting deletion..."
+            git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || die "Failed to delete local tag v$version"
             ;;&
         "both"|"remote")
-            log_warn "Remote tag v$version still exists after preflight"
-            log_info "Attempting to delete remote tag..."
-            git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || {
-                log_error "Failed to delete remote tag v$version"
-                if [[ "${AUTO_APPROVE:-}" != "yes" ]]; then
-                    log_prompt "Delete remote tag manually and press Enter to continue, or Ctrl+C to abort..."
-                    read_input > /dev/null || true
-                fi
-            }
+            log_warn "Remote tag v$version still exists - attempting deletion..."
+            git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || die "Failed to delete remote tag v$version"
             ;;
     esac
     
@@ -516,9 +482,11 @@ create_tarball() {
     # Generate SHA256 checksum
     sha256sum "$tarball_name" > "${tarball_name}.sha256"
     
-    # Move tarball and checksum to repo root for upload
-    mv "$tarball_name" "$REPO_ROOT/"
-    mv "${tarball_name}.sha256" "$REPO_ROOT/"
+    # Verify tarball doesn't already exist in root before moving
+    if [ -f "$tarball_name" ] && [ "$(pwd)/$tarball_name" != "$REPO_ROOT/$tarball_name" ]; then
+        mv "$tarball_name" "$REPO_ROOT/"
+        mv "${tarball_name}.sha256" "$REPO_ROOT/"
+    fi
     
     log_success "Tarball created: $tarball_name"
     log_success "SHA256 checksum: ${tarball_name}.sha256"
@@ -650,8 +618,6 @@ main() {
     check_requirements
     
     # Step 2: Prompt for version early so we can use it in commit messages
-    # CRITICAL FIX: Declare 'local' separately to avoid stdout capture issues
-    # with command substitution that hides the prompt from the user
     local version
     version=$(prompt_version "${1:-}")
     echo ""
@@ -665,7 +631,6 @@ main() {
     check_git_status
     
     # Step 5: Unified pre-flight safety check (GitHub release + Git tags)
-    # This replaces the separate check_github_release and handle_existing_release calls
     local tag_status
     tag_status=$(preflight_safety_check "$version")
     
