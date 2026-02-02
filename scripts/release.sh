@@ -455,19 +455,21 @@ git_tag_and_push() {
     case "$tag_status" in
         "both"|"local")
             log_warn "Local tag v$version still exists - attempting deletion..."
-            git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || die "Failed to delete local tag v$version"
+            git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || log_warn "Local tag deletion failed, will use --force to overwrite"
             ;;&
         "both"|"remote")
             log_warn "Remote tag v$version still exists - attempting deletion..."
-            git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || die "Failed to delete remote tag v$version"
+            git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || log_warn "Remote tag deletion failed, will force-push new tag"
             ;;
     esac
     
-    # Create annotated tag
-    git -C "$REPO_ROOT" tag -a "v$version" -m "Release v$version" || die "Failed to create tag v$version"
+    # Create annotated tag with --force flag to allow overwriting if it still exists locally
+    # This handles cases where the deletion in preflight didn't fully complete
+    git -C "$REPO_ROOT" tag -a "v$version" -m "Release v$version" --force || die "Failed to create tag v$version"
     
     log_info "Pushing tag to GitHub..."
-    git -C "$REPO_ROOT" push origin "v$version" || die "Failed to push tag v$version"
+    # Use --force-with-lease for safer force push of tag (respects remote state)
+    git -C "$REPO_ROOT" push origin "v$version" --force-with-lease || die "Failed to push tag v$version"
     
     log_success "Tag v$version created and pushed"
 }
