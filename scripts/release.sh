@@ -140,8 +140,8 @@ interactive_commit_prompt() {
     echo ""
     
     # Prompt user for action
-    log_prompt "Found uncommitted changes. Commit them before releasing? (y/N): " 
-    read -p "" response
+    log_prompt "Found uncommitted changes. Commit them before releasing? (y/N): "
+    read -p "" response </dev/tty
 
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         log_info "Skipping automatic commit of uncommitted changes"
@@ -153,7 +153,7 @@ interactive_commit_prompt() {
     local default_message="chore: pre-release preparations for v${version}"
     echo ""
     log_prompt "Enter commit message (default: \"${default_message}\"): "
-    read -p "" user_message
+    read -p "" user_message </dev/tty
     
     local commit_message="${user_message:-$default_message}"
     
@@ -185,7 +185,7 @@ check_git_status() {
     if [[ "$branch" != "main" && "$branch" != "master" ]]; then
         log_warn "Not on main/master branch (currently on: $branch)"
         log_prompt "Continue anyway? (y/N): "
-        read -p "" response
+        read -p "" response </dev/tty
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             die "Aborted by user"
         fi
@@ -319,7 +319,7 @@ preflight_safety_check() {
         
         # Unified prompt for handling all conflicts
         log_prompt "Delete existing release/tag(s) and re-create? (y/N): "
-        read -p "" response
+        read -p "" response </dev/tty
         
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             log_info "Aborting release. Use a different version number."
@@ -349,8 +349,8 @@ preflight_safety_check() {
         log_success "Pre-flight checks passed - no conflicts found"
     fi
     
-    # Return the tag status for git_tag_and_push to use
-    echo "$tag_status"
+    # Set global variable for tag status instead of echoing
+    TAG_STATUS="$tag_status"
 }
 
 # prompt_version sets the global RELEASE_VERSION variable
@@ -620,7 +620,7 @@ confirm_release() {
     echo "Branch:      $current_branch"
     echo ""
     log_prompt "Proceed with release? (y/N): "
-    read -p "" response
+    read -p "" response </dev/tty
     
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         die "Release aborted by user"
@@ -659,8 +659,9 @@ main() {
     # Step 5: Unified pre-flight safety check (GitHub release + Git tags)
     log_debug "main: Step 5 - Pre-flight safety checks"
     log_progress "MAIN STEP 5: About to call preflight_safety_check"
-    local tag_status
-    tag_status=$(preflight_safety_check "$version")
+    # Call directly without command substitution to allow interactive prompts on TTY
+    preflight_safety_check "$version"
+    local tag_status="$TAG_STATUS"
     log_progress "MAIN STEP 5: preflight_safety_check completed, tag_status=$tag_status"
     
     # Step 6: Confirm release
