@@ -111,8 +111,8 @@ check_requirements() {
 
 validate_version() {
     local version="$1"
-    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-        die "Invalid version format: $version (format: X.Y.Z[.A], e.g., 0.2.1 or 0.2.1.2)"
+    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        die "Invalid version format: $version (format: X.Y.Z, e.g., 0.2.1)"
     fi
 }
 
@@ -342,7 +342,7 @@ prompt_version() {
     log_debug "prompt_version: No version argument, prompting user"
     
     # Prompt user for version input - simple read without any redirection
-    log_prompt "Enter version number (format: X.Y.Z[.A], e.g., 0.2.1 or 0.2.1.2): "
+    log_prompt "Enter version number (format: X.Y.Z, e.g., 0.2.1): "
     local version
     read -r version || die "Failed to read version input. Hint: provide version as argument: ./release.sh X.Y.Z"
     
