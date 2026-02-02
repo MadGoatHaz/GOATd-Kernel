@@ -71,6 +71,10 @@ log_debug() {
     fi
 }
 
+log_progress() {
+    echo -e "${YELLOW}[PROGRESS]${NC} $*"
+}
+
 die() {
     log_error "$*"
     exit 1
@@ -138,7 +142,7 @@ interactive_commit_prompt() {
     # Prompt user for action
     log_prompt "Found uncommitted changes. Commit them before releasing? (y/N): " 
     read -p "" response
-    
+
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         log_info "Skipping automatic commit of uncommitted changes"
         log_info "Continuing with release process..."
@@ -198,9 +202,12 @@ check_git_status() {
 check_github_release() {
     local version="$1"
     
+    log_progress "Checking GitHub release existence for v$version (gh release view)"
     if gh release view "v$version" --repo "$GITHUB_REPO" &>/dev/null; then
+        log_progress "GitHub release v$version found"
         return 0  # Release exists
     else
+        log_progress "GitHub release v$version does not exist"
         return 1  # Release does not exist
     fi
 }
@@ -208,12 +215,14 @@ check_github_release() {
 # Check if Git tag exists locally
 _check_git_tag_local() {
     local version="$1"
+    log_progress "Checking local git tag v$version"
     git -C "$REPO_ROOT" tag -l "v$version" | grep -q "v$version"
 }
 
 # Check if Git tag exists remotely
 _check_git_tag_remote() {
     local version="$1"
+    log_progress "Checking remote git tag v$version (git ls-remote)"
     git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/v$version" 2>/dev/null | grep -q "v$version"
 }
 
@@ -255,6 +264,7 @@ preflight_safety_check() {
     
     # Check 1: GitHub Release
     log_info "Checking GitHub for existing release v$version..."
+    log_progress "BEFORE: gh release view (this may hang if GitHub is unreachable)"
     if check_github_release "$version"; then
         log_warn "GitHub release v$version already exists"
         github_exists=true
@@ -262,10 +272,14 @@ preflight_safety_check() {
     else
         log_success "No GitHub release found for v$version"
     fi
+    log_progress "AFTER: gh release view completed"
     
     # Check 2: Git Tags
     log_info "Checking for existing Git tags v$version..."
+    log_progress "BEFORE: git ls-remote (this may hang if remote is unreachable)"
     tag_status=$(check_git_tag_exists "$version")
+    log_progress "AFTER: git ls-remote completed"
+    
     case "$tag_status" in
         "both")
             log_warn "Git tag v$version exists locally AND remotely"
@@ -634,8 +648,10 @@ main() {
     
     # Step 5: Unified pre-flight safety check (GitHub release + Git tags)
     log_debug "main: Step 5 - Pre-flight safety checks"
+    log_progress "MAIN STEP 5: About to call preflight_safety_check"
     local tag_status
     tag_status=$(preflight_safety_check "$version")
+    log_progress "MAIN STEP 5: preflight_safety_check completed, tag_status=$tag_status"
     
     # Step 6: Confirm release
     log_debug "main: Step 6 - Confirming release"
