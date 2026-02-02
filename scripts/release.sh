@@ -6,11 +6,11 @@
 # 
 # This script automates GitHub releases with interactive prompts and safety checks:
 # 1. Prompts for version number
-# 2. Checks GitHub for existing release (with conflict protection)
+# 2. Unified pre-flight safety check (GitHub release + Git tags)
 # 3. Detects uncommitted changes and offers to commit them
 # 4. Bumps version in Cargo.toml
 # 5. Commits and pushes code changes
-# 6. Creates Git tag and pushes to GitHub
+# 6. Creates Git tag and pushes to GitHub (with tag conflict handling)
 # 7. Creates GitHub Release
 # 8. Builds release binary and creates tarball
 # 9. Uploads tarball to GitHub Release
@@ -60,6 +60,32 @@ log_error() {
 
 log_prompt() {
     echo -e "${CYAN}[?]${NC} $*"
+}
+
+# AUTO_APPROVE mode for automated testing
+# Set AUTO_APPROVE=yes to automatically answer "y" to all prompts
+read_input() {
+    local default_value="${1:-}"
+    
+    # If AUTO_APPROVE is set, return "y" for yes/no prompts
+    if [[ "${AUTO_APPROVE:-}" == "yes" ]]; then
+        echo "y"
+        return 0
+    fi
+    
+    # Otherwise, try to read from /dev/tty or stdin
+    local response
+    if [ -e /dev/tty ] && [ -r /dev/tty ]; then
+        if ! read -r response < /dev/tty; then
+            return 1
+        fi
+    else
+        if ! read -r response; then
+            return 1
+        fi
+    fi
+    
+    echo "$response"
 }
 
 die() {
@@ -118,11 +144,11 @@ interactive_commit_prompt() {
     echo ""
     git -C "$REPO_ROOT" status --short
     echo ""
-    
     # Prompt user for action
     log_prompt "Found uncommitted changes. Would you like to commit them to GitHub master before releasing? (y/N): "
     local response
-    read -r response < /dev/tty || die "Failed to read user input"
+    response=$(read_input) || die "Failed to read user input"
+    
     
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         log_info "Skipping automatic commit of uncommitted changes"
@@ -135,7 +161,7 @@ interactive_commit_prompt() {
     echo ""
     log_prompt "Enter commit message (default: \"${default_message}\"): "
     local user_message
-    read -r user_message < /dev/tty || die "Failed to read user input"
+    user_message=$(read_input) || die "Failed to read user input"
     
     local commit_message="${user_message:-$default_message}"
     
@@ -167,7 +193,7 @@ check_git_status() {
         log_warn "Not on main/master branch (currently on: $branch)"
         log_prompt "Continue anyway? (y/N): "
         local response
-        read -r response < /dev/tty || die "Failed to read user input"
+        response=$(read_input) || die "Failed to read user input"
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             die "Aborted by user"
         fi
@@ -176,10 +202,13 @@ check_git_status() {
     log_success "Git repository check complete"
 }
 
+# ============================================================================
+# UNIFIED PRE-FLIGHT SAFETY CHECKS
+# ============================================================================
+
+# Check if GitHub release exists
 check_github_release() {
     local version="$1"
-    
-    log_info "Checking GitHub for existing release v$version..."
     
     if gh release view "v$version" --repo "$GITHUB_REPO" &>/dev/null; then
         return 0  # Release exists
@@ -188,39 +217,169 @@ check_github_release() {
     fi
 }
 
-handle_existing_release() {
+# Check if Git tag exists locally
+_check_git_tag_local() {
     local version="$1"
+    git -C "$REPO_ROOT" tag -l "v$version" | grep -q "v$version"
+}
+
+# Check if Git tag exists remotely
+_check_git_tag_remote() {
+    local version="$1"
+    git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/v$version" 2>/dev/null | grep -q "v$version"
+}
+
+# Check tag existence and return status
+check_git_tag_exists() {
+    local version="$1"
+    local tag_local=false
+    local tag_remote=false
     
-    log_warn "Version v$version already exists on GitHub."
-    log_prompt "Replace it? This will delete the existing release and tag. (y/N): "
-    local response
-    read -r response < /dev/tty || die "Failed to read user input"
-    
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        log_info "Aborting release. Use a different version number."
-        exit 0
+    if _check_git_tag_local "$version"; then
+        tag_local=true
     fi
     
-    log_info "Deleting existing GitHub release v$version..."
-    gh release delete "v$version" --repo "$GITHUB_REPO" --yes || log_warn "Failed to delete release (may not exist)"
+    if _check_git_tag_remote "$version"; then
+        tag_remote=true
+    fi
     
-    log_info "Deleting local tag v$version..."
+    if [[ "$tag_local" == true && "$tag_remote" == true ]]; then
+        echo "both"
+    elif [[ "$tag_local" == true ]]; then
+        echo "local"
+    elif [[ "$tag_remote" == true ]]; then
+        echo "remote"
+    else
+        echo "none"
+    fi
+}
+
+# Unified pre-flight safety check
+preflight_safety_check() {
+    local version="$1"
+    local has_conflicts=false
+    local github_exists=false
+    local tag_status
+    
+    log_info "Running pre-flight safety checks for v$version..."
+    echo ""
+    
+    # Check 1: GitHub Release
+    echo -e "  ${BLUE}Checking GitHub release...${NC}"
+    if check_github_release "$version"; then
+        echo -e "  ${YELLOW}  ⚠ GitHub release v$version exists${NC}"
+        github_exists=true
+        has_conflicts=true
+    else
+        echo -e "  ${GREEN}  ✓ No GitHub release found${NC}"
+    fi
+    
+    # Check 2: Git Tags
+    echo -e "  ${BLUE}Checking Git tags...${NC}"
+    tag_status=$(check_git_tag_exists "$version")
+    case "$tag_status" in
+        "both")
+            echo -e "  ${YELLOW}  ⚠ Git tag v$version exists locally AND remotely${NC}"
+            has_conflicts=true
+            ;;
+        "local")
+            echo -e "  ${YELLOW}  ⚠ Git tag v$version exists locally only${NC}"
+            has_conflicts=true
+            ;;
+        "remote")
+            echo -e "  ${YELLOW}  ⚠ Git tag v$version exists remotely only${NC}"
+            has_conflicts=true
+            ;;
+        "none")
+            echo -e "  ${GREEN}  ✓ No Git tags found${NC}"
+            ;;
+    esac
+    
+    echo ""
+    
+    # Handle conflicts if any
+    if [[ "$has_conflicts" == true ]]; then
+        log_warn "One or more conflicts detected!"
+        echo ""
+        
+        # Unified prompt for handling all conflicts
+        log_prompt "Delete existing release/tag(s) and re-create for this commit? (y/N): "
+        local response
+        response=$(read_input) || die "Failed to read user input"
+        
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            log_info "Aborting release. Use a different version number."
+            exit 0
+        fi
+        
+        # Handle GitHub release deletion
+        if [[ "$github_exists" == true ]]; then
+            log_info "Deleting existing GitHub release v$version..."
+            gh release delete "v$version" --repo "$GITHUB_REPO" --yes 2>/dev/null || log_warn "Failed to delete release (may already be gone)"
+        fi
+        
+        # Handle tag deletion based on status
+        case "$tag_status" in
+            "both"|"local")
+                log_info "Deleting local tag v$version..."
+                git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || log_warn "Failed to delete local tag"
+                ;;&
+            "both"|"remote")
+                log_info "Deleting remote tag v$version..."
+                git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || log_warn "Failed to delete remote tag"
+                ;;
+        esac
+        
+        log_success "Existing release and tags cleaned up"
+    else
+        log_success "Pre-flight checks passed - no conflicts found"
+    fi
+    
+    # Return the tag status for git_tag_and_push to use
+    echo "$tag_status"
+}
+
+# Legacy function - kept for compatibility but now integrated into preflight
+cleanup_conflicting_release_and_tag() {
+    local version="$1"
+    
+    log_warn "Cleaning up conflicting release and tags..."
+    
+    # Delete GitHub release
+    gh release delete "v$version" --repo "$GITHUB_REPO" --yes 2>/dev/null || true
+    
+    # Delete local tag
     git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || true
     
-    log_info "Deleting remote tag v$version..."
+    # Delete remote tag
     git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || true
     
-    log_success "Existing release and tag cleaned up"
+    log_success "Cleanup complete"
 }
 
 prompt_version() {
+    # Check if version was provided as command-line argument (for automation)
+    if [ $# -ge 1 ] && [ -n "$1" ]; then
+        local version="$1"
+        validate_version "$version"
+        echo "$version"
+        return 0
+    fi
+    
     # Use stderr for prompt to ensure it's visible even in command substitution
     echo -e "${CYAN}[?]${NC} Enter version number (format: X.Y.Z, e.g., 0.2.1): " >&2
     
-    # Read from /dev/tty to ensure we get user input even in subshells
+    # Read from /dev/tty if available, otherwise use stdin
     local version
-    if ! read -r version < /dev/tty; then
-        die "Failed to read version input"
+    if [ -e /dev/tty ] && [ -r /dev/tty ]; then
+        if ! read -r version < /dev/tty; then
+            die "Failed to read version input from /dev/tty"
+        fi
+    else
+        # Fallback to standard input for non-interactive environments
+        if ! read -r version; then
+            die "Failed to read version input (hint: provide version as argument: ./release.sh X.Y.Z)"
+        fi
     fi
     
     # Trim whitespace
@@ -277,14 +436,46 @@ push_code() {
 
 git_tag_and_push() {
     local version="$1"
+    local tag_status="${2:-none}"
     
     log_info "Creating Git tag v$version..."
     
+    # Double-check tag status if not provided (safety net)
+    if [[ "$tag_status" == "none" ]]; then
+        tag_status=$(check_git_tag_exists "$version")
+    fi
+    
+    # Handle any remaining tag conflicts (should be none after preflight, but just in case)
+    case "$tag_status" in
+        "both"|"local")
+            log_warn "Local tag v$version still exists after preflight"
+            log_info "Attempting to delete local tag..."
+            git -C "$REPO_ROOT" tag -d "v$version" 2>/dev/null || {
+                log_error "Failed to delete local tag v$version"
+                if [[ "${AUTO_APPROVE:-}" != "yes" ]]; then
+                    log_prompt "Delete local tag manually and press Enter to continue, or Ctrl+C to abort..."
+                    read_input > /dev/null || true
+                fi
+            }
+            ;;&
+        "both"|"remote")
+            log_warn "Remote tag v$version still exists after preflight"
+            log_info "Attempting to delete remote tag..."
+            git -C "$REPO_ROOT" push origin --delete "v$version" 2>/dev/null || {
+                log_error "Failed to delete remote tag v$version"
+                if [[ "${AUTO_APPROVE:-}" != "yes" ]]; then
+                    log_prompt "Delete remote tag manually and press Enter to continue, or Ctrl+C to abort..."
+                    read_input > /dev/null || true
+                fi
+            }
+            ;;
+    esac
+    
     # Create annotated tag
-    git -C "$REPO_ROOT" tag -a "v$version" -m "Release v$version"
+    git -C "$REPO_ROOT" tag -a "v$version" -m "Release v$version" || die "Failed to create tag v$version"
     
     log_info "Pushing tag to GitHub..."
-    git -C "$REPO_ROOT" push origin "v$version"
+    git -C "$REPO_ROOT" push origin "v$version" || die "Failed to push tag v$version"
     
     log_success "Tag v$version created and pushed"
 }
@@ -312,33 +503,45 @@ create_tarball() {
     
     # Check if binary exists
     if [ ! -f "target/release/$binary_name" ]; then
-        die "Binary not found at target/release/$binary_name"
+        die "Release binary not found: target/release/$binary_name"
     fi
     
-    # Create tarball with binary and assets
+    # Create tarball with binary, wrapper script, and install script
     tar -czf "$tarball_name" \
         -C target/release "$binary_name" \
-        -C "$REPO_ROOT" assets/ LICENSE README.md \
-        2>/dev/null || tar -czf "$tarball_name" -C target/release "$binary_name"
+        -C "$REPO_ROOT" goatdkernel.sh \
+        -C "$REPO_ROOT/scripts" install.sh \
+        || die "Failed to create tarball"
     
     # Generate SHA256 checksum
     sha256sum "$tarball_name" > "${tarball_name}.sha256"
     
+    # Move tarball and checksum to repo root for upload
+    mv "$tarball_name" "$REPO_ROOT/"
+    mv "${tarball_name}.sha256" "$REPO_ROOT/"
+    
     log_success "Tarball created: $tarball_name"
-    log_success "SHA256 checksum created"
+    log_success "SHA256 checksum: ${tarball_name}.sha256"
 }
 
 create_github_release() {
     local version="$1"
     
-    log_info "Creating GitHub release..."
+    log_info "Creating GitHub release (draft mode)..."
     
-    # Create release in draft mode initially
+    # Get the current commit message for release notes
+    local commit_message
+    commit_message=$(git -C "$REPO_ROOT" log -1 --pretty=%B)
+    
+    # Create release in draft mode first
     gh release create "v$version" \
         --repo "$GITHUB_REPO" \
         --title "v$version" \
-        --notes "Release v$version" \
-        --draft
+        --notes "Release v$version
+
+$commit_message" \
+        --draft \
+        || die "Failed to create GitHub release"
     
     log_success "GitHub release created (draft)"
 }
@@ -353,13 +556,11 @@ upload_release_assets() {
     local tarball_name="goatdkernel-${version}-x86_64.tar.gz"
     local sha256_file="${tarball_name}.sha256"
     
-    if [ ! -f "$tarball_name" ]; then
-        die "Tarball not found: $tarball_name"
-    fi
-    
     # Upload tarball
-    gh release upload "v$version" "$tarball_name" --repo "$GITHUB_REPO"
-    log_success "Tarball uploaded"
+    if [ -f "$tarball_name" ]; then
+        gh release upload "v$version" "$tarball_name" --repo "$GITHUB_REPO"
+        log_success "Tarball uploaded"
+    fi
     
     # Upload SHA256 checksum
     if [ -f "$sha256_file" ]; then
@@ -431,7 +632,7 @@ confirm_release() {
     echo ""
     log_prompt "Proceed with release? (y/N): "
     local response
-    read -r response < /dev/tty || die "Failed to read user input"
+    response=$(read_input) || die "Failed to read user input"
     
     if [[ ! "$response" =~ ^[Yy]$ ]]; then
         die "Release aborted by user"
@@ -452,7 +653,7 @@ main() {
     # CRITICAL FIX: Declare 'local' separately to avoid stdout capture issues
     # with command substitution that hides the prompt from the user
     local version
-    version=$(prompt_version)
+    version=$(prompt_version "${1:-}")
     echo ""
     log_info "Preparing release for version: v$version"
     echo ""
@@ -463,12 +664,10 @@ main() {
     # Step 4: Check git status (branch validation)
     check_git_status
     
-    # Step 5: Check for existing release (conflict protection)
-    if check_github_release "$version"; then
-        handle_existing_release "$version"
-    else
-        log_info "No existing release found for v$version - proceeding with new release"
-    fi
+    # Step 5: Unified pre-flight safety check (GitHub release + Git tags)
+    # This replaces the separate check_github_release and handle_existing_release calls
+    local tag_status
+    tag_status=$(preflight_safety_check "$version")
     
     # Step 6: Confirm release
     confirm_release "$version"
@@ -484,8 +683,8 @@ main() {
     commit_version_bump "$version"
     push_code
     
-    # Step 9: Create and push Git tag
-    git_tag_and_push "$version"
+    # Step 9: Create and push Git tag (passing tag_status for safety)
+    git_tag_and_push "$version" "$tag_status"
     
     # Step 10: Build release binary
     build_release_binary
