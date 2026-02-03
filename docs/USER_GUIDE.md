@@ -27,6 +27,19 @@ Welcome to GOATd Kernel Builder—a comprehensive toolkit I've developed for bui
 - **Clang 16+** (for kernel compilation)
 - **sudo privileged access** (for kernel build and installation)
 
+
+### Installation: From AUR (Recommended - Fastest)
+
+The fastest and most straightforward installation method on Arch Linux is via the AUR:
+
+**From AUR repository:**
+```bash
+git clone https://aur.archlinux.org/goatd-kernel.git
+cd goatd-kernel
+makepkg -si
+```
+
+This automatically handles all dependencies, build configuration, and installation. Recommended for most users.
 ### Installation: Running GOATd Kernel Builder
 
 **Automatic Setup (Arch Linux - Recommended)**:

@@ -102,7 +102,7 @@ Hardened kernels enable every protection (KPTI, Retpolines, CFI):
 
 ## Performance Realities: Myth-Busting
 
-**Expectation**: Higher FPS ceiling.  
+**Expectation**: Focus on minimized 1% lows and higher minimum FPS while maintaining a MUCH higher security level.
 **Reality**: A system that *feels* as fast or faster than an "unprotected" kernel.
 
 **Why**: You're running hardened, optimized code. The security tax is real but measured. Background jitter is eliminated. Memory management is smarter. Scheduling is tailored to your workload.
@@ -122,7 +122,7 @@ When you build a GOATd Kernel, you get:
 
 * 🛠️ **Orchestrator Build Pipeline**: State-aware engine for automated dependency resolution and microarchitecture detection.
 * 📊 **Spectrum UI Telemetry**: Real-time monitoring of context switches, jitter, and syscall latency via native `egui`.
-* ⚙️ **LLVM-First Toolchain**: Advanced LTO and Bolt optimization passes for maximum binary efficiency.
+* ⚙️ **LLVM-First Toolchain**: Advanced LTO for maximum binary efficiency.
 * 🛡️ **Integrity Audit**: Automated verification of source signatures and build environment health.
 
 ---
@@ -139,6 +139,20 @@ When you build a GOATd Kernel, you get:
 ---
 
 ### Quick Start
+
+
+**For Arch Linux Users - AUR Installation (Fastest)**
+
+The latest release is now available on the AUR: ```goatdkernel```. Use the following to quickly download and install the pre-built binary without having to compile:
+```bash
+yay -S goatdkernel
+```
+or
+```bash
+paru -S goatdkernel
+```
+
+---
 
 **1. Prerequisites**
 Ensure you are on Arch Linux with base development tools:
