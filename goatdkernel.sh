@@ -41,7 +41,7 @@ LOGS_DIR="${PROJECT_ROOT}/logs"
 LOGS_FULL_DIR="${LOGS_DIR}/full"
 LOGS_PARSED_DIR="${LOGS_DIR}/parsed"
 CONFIG_DIR="${PROJECT_ROOT}/config"
-BINARY_PATH="${PROJECT_ROOT}/target/release/goatd_kernel"
+BINARY_PATH="${PROJECT_ROOT}/target/release/goatdkernel"
 
 # Ensure critical directories exist and are writable
 ensure_directories() {

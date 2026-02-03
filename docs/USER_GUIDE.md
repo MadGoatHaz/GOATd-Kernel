@@ -65,7 +65,7 @@ My launcher script will automatically:
    ```bash
    cd /path/to/GOATd\ Kernel
    ./goatdkernel.sh
-   # Or manually: cargo build --release && ./target/release/goatd_kernel
+   # Or manually: cargo build --release && ./target/release/goatdkernel
    ```
 
 4. The **egui** interface will launch in a native window. You'll be prompted for sudo credentials for administrative operations.

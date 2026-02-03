@@ -10,11 +10,11 @@
 //! - 2 Boot type detection tests (EFI, BIOS)
 //! - 1 integration test (detect_all aggregation)
 
-use goatd_kernel::hardware::{
+use goatdkernel::hardware::{
     detect_boot_manager, detect_boot_type, detect_cpu_model, detect_gpu_vendor, detect_init_system,
     detect_ram_gb, detect_storage_type, HardwareDetector,
 };
-use goatd_kernel::{BootType, GpuVendor, StorageType};
+use goatdkernel::{BootType, GpuVendor, StorageType};
 
 // ============================================================================
 // GPU DETECTION TESTS (8 tests)

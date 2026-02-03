@@ -69,7 +69,7 @@ fn get_module_name(dir: &str) -> &str {
 /// # Examples
 ///
 /// ```
-/// use goatd_kernel::kernel::lto::remove_icf_flags;
+/// use goatdkernel::kernel::lto::remove_icf_flags;
 ///
 /// // Simple case: single flag
 /// let makefile = "CFLAGS = -O2 -flto=thin --icf=safe";
@@ -177,7 +177,7 @@ pub fn remove_icf_flags(content: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use goatd_kernel::kernel::lto::shield_amd_gpu_from_lto;
+/// use goatdkernel::kernel::lto::shield_amd_gpu_from_lto;
 ///
 /// let makefile = "# Makefile\nobj-y += foo.o";
 /// let shielded = shield_amd_gpu_from_lto(makefile);

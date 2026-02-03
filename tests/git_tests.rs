@@ -1,4 +1,4 @@
-use goatd_kernel::kernel::git::GitManager;
+use goatdkernel::kernel::git::GitManager;
 use std::fs;
 use tempfile::tempdir;
 

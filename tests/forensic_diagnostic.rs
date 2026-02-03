@@ -13,8 +13,8 @@ mod forensic_diagnostic {
     use std::time::{Duration, Instant};
 
     // Re-export collector and processor from the main crate
-    use goatd_kernel::system::performance::collector::LatencyProcessor;
-    use goatd_kernel::system::performance::{
+    use goatdkernel::system::performance::collector::LatencyProcessor;
+    use goatdkernel::system::performance::{
         diagnostic_buffer, LatencyCollector, MonitoringState, SyscallSaturationCollector,
         SyscallSaturationConfig,
     };

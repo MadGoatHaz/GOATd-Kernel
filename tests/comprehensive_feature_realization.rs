@@ -6,7 +6,7 @@
 //! 3. POLLY (Polly optimization flags in PKGBUILD CFLAGS/CXXFLAGS)
 //! 4. BORE (CONFIG_SCHED_BORE=y for Gaming/Workstation profiles)
 
-use goatd_kernel::models::{HardwareContext, LtoType};
+use goatdkernel::models::{HardwareContext, LtoType};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -106,7 +106,7 @@ build() {
     // =========================================================================
     println!("[TEST] Step 3: Applying patcher with all features...");
 
-    let patcher = goatd_kernel::kernel::patcher::KernelPatcher::new(kernel_dir.clone());
+    let patcher = goatdkernel::kernel::patcher::KernelPatcher::new(kernel_dir.clone());
 
     // Apply kconfig which handles LTO, MGLRU, BORE
     match patcher.apply_kconfig(options.clone(), LtoType::Thin, HardwareContext::default()) {
@@ -291,7 +291,7 @@ build() {
     // =========================================================================
     println!("[TEST] Step 3: Applying patcher...");
 
-    let patcher = goatd_kernel::kernel::patcher::KernelPatcher::new(kernel_dir.clone());
+    let patcher = goatdkernel::kernel::patcher::KernelPatcher::new(kernel_dir.clone());
 
     match patcher.apply_kconfig(options.clone(), LtoType::Full, HardwareContext::default()) {
         Ok(_) => {

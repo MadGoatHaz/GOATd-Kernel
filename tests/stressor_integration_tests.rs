@@ -1,6 +1,6 @@
 /// Comprehensive integration tests for StressorManager
 /// Tests CPU affinity, priority management, Drop behavior, and thundering herd scenarios
-use goatd_kernel::system::performance::stressor::{Intensity, StressorManager, StressorType};
+use goatdkernel::system::performance::stressor::{Intensity, StressorManager, StressorType};
 use std::thread;
 use std::time::Duration;
 

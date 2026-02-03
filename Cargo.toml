@@ -1,5 +1,5 @@
 [package]
-name = "goatd_kernel"
+name = "goatdkernel"
 version = "0.2.3"
 edition = "2021"
 description = "GOATd Kernel Builder - Pure Rust + egui UI"
@@ -9,11 +9,11 @@ repository = "https://github.com/yourusername/goatd-kernel"
 readme = "README.md"
 
 [[bin]]
-name = "goatd_kernel"
+name = "goatdkernel"
 path = "src/main.rs"
 
 [lib]
-name = "goatd_kernel"
+name = "goatdkernel"
 path = "src/lib.rs"
 
 [dependencies]

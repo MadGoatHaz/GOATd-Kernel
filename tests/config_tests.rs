@@ -17,9 +17,9 @@
 //! - Driver Exclusions (3 tests)
 //! - Edge Cases (2+ tests)
 
-use goatd_kernel::config::{exclusions, loader, modprobed, validator, whitelist, ConfigManager};
-use goatd_kernel::error::ConfigError;
-use goatd_kernel::models::{KernelConfig, LtoType};
+use goatdkernel::config::{exclusions, loader, modprobed, validator, whitelist, ConfigManager};
+use goatdkernel::error::ConfigError;
+use goatdkernel::models::{KernelConfig, LtoType};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -33,7 +33,7 @@ fn create_test_config() -> KernelConfig {
         use_whitelist: false,
         driver_exclusions: vec![],
         config_options: HashMap::new(),
-        hardening: goatd_kernel::models::HardeningLevel::Standard,
+        hardening: goatdkernel::models::HardeningLevel::Standard,
         secure_boot: false,
         profile: "Generic".to_string(),
         version: "latest".to_string(),

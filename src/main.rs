@@ -2,20 +2,20 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use goatd_kernel::log_collector::{ensure_logs_dir_exists, get_global_logs_path};
-use goatd_kernel::system::performance::diagnostic_buffer::init_global_buffer;
-use goatd_kernel::ui::app::AppUI;
-use goatd_kernel::ui::controller::{AppController, BuildEvent};
-use goatd_kernel::{LogCollector, LogLine};
+use goatdkernel::log_collector::{ensure_logs_dir_exists, get_global_logs_path};
+use goatdkernel::system::performance::diagnostic_buffer::init_global_buffer;
+use goatdkernel::ui::app::AppUI;
+use goatdkernel::ui::controller::{AppController, BuildEvent};
+use goatdkernel::{LogCollector, LogLine};
 
 #[tokio::main]
-async fn main() -> goatd_kernel::Result<()> {
+async fn main() -> goatdkernel::Result<()> {
     // =========================================================================
     // LOGGING INITIALIZATION - MUST BE FIRST
     // =========================================================================
-    // Initialize unified logging system via goatd_kernel::system
+    // Initialize unified logging system via goatdkernel::system
     // This is the single source of truth for log file creation and rotation
-    goatd_kernel::system::initialize_logging();
+    goatdkernel::system::initialize_logging();
     eprintln!("[Main] ✓ Unified logging system initialized via system::initialize_logging()");
 
     // =========================================================================
@@ -74,7 +74,7 @@ async fn main() -> goatd_kernel::Result<()> {
     // LLVM TOOLCHAIN VERIFICATION - CRITICAL PRE-FLIGHT CHECK
     // =========================================================================
     eprintln!("[Main] ▶ Verifying full LLVM toolchain availability...");
-    match goatd_kernel::system::verification::verify_llvm_toolchain() {
+    match goatdkernel::system::verification::verify_llvm_toolchain() {
         Ok(true) => {
             eprintln!("[Main] ✓ Full LLVM toolchain verified and available");
             log::info!("Full LLVM toolchain verification: PASSED");
@@ -134,7 +134,7 @@ async fn main() -> goatd_kernel::Result<()> {
 
     tokio::spawn(async move {
         eprintln!("[Main] [HW] Starting background hardware detection");
-        let mut detector = goatd_kernel::hardware::HardwareDetector::new();
+        let mut detector = goatdkernel::hardware::HardwareDetector::new();
         match detector.detect_all() {
             Ok(hw_info) => {
                 eprintln!(

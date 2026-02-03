@@ -32,7 +32,7 @@ async fn test_async_orchestrator_timeout_with_log_capture() {
     let (ui_tx, mut _ui_rx) = tokio::sync::mpsc::channel(1000);
 
     // Initialize LogCollector
-    let log_collector = goatd_kernel::LogCollector::new(log_dir.clone(), ui_tx)
+    let log_collector = goatdkernel::LogCollector::new(log_dir.clone(), ui_tx)
         .expect("Failed to create LogCollector");
 
     // Start a new session with explicit log file path
@@ -47,36 +47,36 @@ async fn test_async_orchestrator_timeout_with_log_capture() {
     // ========================================================================
     // CREATE MOCK HARDWARE AND CONFIG
     // ========================================================================
-    let hardware = goatd_kernel::models::HardwareInfo {
+    let hardware = goatdkernel::models::HardwareInfo {
         cpu_model: "Test CPU".to_string(),
         cpu_cores: 8,
         cpu_threads: 16,
         ram_gb: 16,
         disk_free_gb: 100,
-        gpu_vendor: goatd_kernel::models::GpuVendor::Nvidia,
+        gpu_vendor: goatdkernel::models::GpuVendor::Nvidia,
         gpu_model: "Test GPU".to_string(),
         gpu_active_driver: true,
-        storage_type: goatd_kernel::models::StorageType::Nvme,
+        storage_type: goatdkernel::models::StorageType::Nvme,
         storage_model: "Test Storage".to_string(),
-        boot_type: goatd_kernel::models::BootType::Efi,
-        boot_manager: goatd_kernel::models::BootManager {
+        boot_type: goatdkernel::models::BootType::Efi,
+        boot_manager: goatdkernel::models::BootManager {
             detector: "systemd-boot".to_string(),
             is_efi: true,
         },
-        init_system: goatd_kernel::models::InitSystem {
+        init_system: goatdkernel::models::InitSystem {
             name: "systemd".to_string(),
         },
         all_drives: Vec::new(),
     };
 
-    let mut config = goatd_kernel::models::KernelConfig {
+    let mut config = goatdkernel::models::KernelConfig {
         version: "6.6.0".to_string(),
-        lto_type: goatd_kernel::models::LtoType::Thin,
+        lto_type: goatdkernel::models::LtoType::Thin,
         use_modprobed: true,
         use_whitelist: false,
         driver_exclusions: vec![],
         config_options: std::collections::HashMap::new(),
-        hardening: goatd_kernel::models::HardeningLevel::Standard,
+        hardening: goatdkernel::models::HardeningLevel::Standard,
         secure_boot: false,
         profile: "Generic".to_string(),
         use_bore: false,
@@ -110,7 +110,7 @@ async fn test_async_orchestrator_timeout_with_log_capture() {
     // ========================================================================
     let (_, cancel_rx) = tokio::sync::watch::channel(false);
 
-    let orch_result = goatd_kernel::orchestrator::AsyncOrchestrator::new(
+    let orch_result = goatdkernel::orchestrator::AsyncOrchestrator::new(
         hardware.clone(),
         config.clone(),
         checkpoint_dir.clone(),
@@ -157,7 +157,7 @@ async fn test_async_orchestrator_timeout_with_log_capture() {
     // Verify timeout was set
     assert_eq!(
         orch.current_phase().await,
-        goatd_kernel::orchestrator::BuildPhaseState::Preparation,
+        goatdkernel::orchestrator::BuildPhaseState::Preparation,
         "Orchestrator should start in Preparation phase"
     );
 
@@ -254,12 +254,12 @@ async fn test_async_orchestrator_timeout_with_log_capture() {
     // Failed (if build failed), or some other valid phase
     let is_valid_phase = matches!(
         final_phase,
-        goatd_kernel::orchestrator::BuildPhaseState::Preparation
-            | goatd_kernel::orchestrator::BuildPhaseState::Configuration
-            | goatd_kernel::orchestrator::BuildPhaseState::Patching
-            | goatd_kernel::orchestrator::BuildPhaseState::Building
-            | goatd_kernel::orchestrator::BuildPhaseState::Validation
-            | goatd_kernel::orchestrator::BuildPhaseState::Failed
+        goatdkernel::orchestrator::BuildPhaseState::Preparation
+            | goatdkernel::orchestrator::BuildPhaseState::Configuration
+            | goatdkernel::orchestrator::BuildPhaseState::Patching
+            | goatdkernel::orchestrator::BuildPhaseState::Building
+            | goatdkernel::orchestrator::BuildPhaseState::Validation
+            | goatdkernel::orchestrator::BuildPhaseState::Failed
     );
 
     assert!(
@@ -288,7 +288,7 @@ async fn test_llvm_toolchain_verification_in_build_environment() {
     eprintln!("[LLVM-BUILD-TEST] Starting LLVM toolchain verification test");
 
     // Verify the function is robust and returns a Result
-    let toolchain_result = goatd_kernel::system::verification::verify_llvm_toolchain();
+    let toolchain_result = goatdkernel::system::verification::verify_llvm_toolchain();
 
     eprintln!("[LLVM-BUILD-TEST] Toolchain verification result: {:?}", toolchain_result.is_ok());
 
@@ -333,7 +333,7 @@ async fn test_log_collector_timeout_diagnostics() {
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(100);
 
     // Create LogCollector
-    let log_collector = goatd_kernel::LogCollector::new(log_dir.clone(), ui_tx)
+    let log_collector = goatdkernel::LogCollector::new(log_dir.clone(), ui_tx)
         .expect("Failed to create LogCollector");
 
     // Log some sample output
@@ -424,7 +424,7 @@ async fn test_build_pipe_lifecycle_gaming() {
     let (ui_tx, mut _ui_rx) = tokio::sync::mpsc::channel(1000);
 
     // Initialize LogCollector
-    let log_collector = goatd_kernel::LogCollector::new(log_dir.clone(), ui_tx)
+    let log_collector = goatdkernel::LogCollector::new(log_dir.clone(), ui_tx)
         .expect("Failed to create LogCollector");
 
     // Start a new session
@@ -448,36 +448,36 @@ async fn test_build_pipe_lifecycle_gaming() {
     // ========================================================================
     // CREATE MOCK HARDWARE AND CONFIG
     // ========================================================================
-    let hardware = goatd_kernel::models::HardwareInfo {
+    let hardware = goatdkernel::models::HardwareInfo {
         cpu_model: "Test CPU (Gaming)".to_string(),
         cpu_cores: 8,
         cpu_threads: 16,
         ram_gb: 32,
         disk_free_gb: 200,
-        gpu_vendor: goatd_kernel::models::GpuVendor::Nvidia,
+        gpu_vendor: goatdkernel::models::GpuVendor::Nvidia,
         gpu_model: "Test GPU (Gaming)".to_string(),
         gpu_active_driver: true,
-        storage_type: goatd_kernel::models::StorageType::Nvme,
+        storage_type: goatdkernel::models::StorageType::Nvme,
         storage_model: "Test Storage (Gaming)".to_string(),
-        boot_type: goatd_kernel::models::BootType::Efi,
-        boot_manager: goatd_kernel::models::BootManager {
+        boot_type: goatdkernel::models::BootType::Efi,
+        boot_manager: goatdkernel::models::BootManager {
             detector: "systemd-boot".to_string(),
             is_efi: true,
         },
-        init_system: goatd_kernel::models::InitSystem {
+        init_system: goatdkernel::models::InitSystem {
             name: "systemd".to_string(),
         },
         all_drives: Vec::new(),
     };
 
-    let mut config = goatd_kernel::models::KernelConfig {
+    let mut config = goatdkernel::models::KernelConfig {
         version: "6.18.0".to_string(),
-        lto_type: goatd_kernel::models::LtoType::Full,
+        lto_type: goatdkernel::models::LtoType::Full,
         use_modprobed: true,
         use_whitelist: true,
         driver_exclusions: vec![],
         config_options: std::collections::HashMap::new(),
-        hardening: goatd_kernel::models::HardeningLevel::Minimal,
+        hardening: goatdkernel::models::HardeningLevel::Minimal,
         secure_boot: false,
         profile: "Gaming".to_string(),
         use_bore: false,
@@ -533,7 +533,7 @@ async fn test_build_pipe_lifecycle_gaming() {
 
     log_collector.log_str("[FULL-BUILD-PIPE] Creating AsyncOrchestrator with 5-second timeout");
 
-    let orch_result = goatd_kernel::orchestrator::AsyncOrchestrator::new(
+    let orch_result = goatdkernel::orchestrator::AsyncOrchestrator::new(
         hardware.clone(),
         config.clone(),
         checkpoint_dir.clone(),
@@ -702,12 +702,12 @@ async fn test_build_pipe_lifecycle_gaming() {
 
     let is_valid_phase = matches!(
         final_phase,
-        goatd_kernel::orchestrator::BuildPhaseState::Preparation
-            | goatd_kernel::orchestrator::BuildPhaseState::Configuration
-            | goatd_kernel::orchestrator::BuildPhaseState::Patching
-            | goatd_kernel::orchestrator::BuildPhaseState::Building
-            | goatd_kernel::orchestrator::BuildPhaseState::Validation
-            | goatd_kernel::orchestrator::BuildPhaseState::Failed
+        goatdkernel::orchestrator::BuildPhaseState::Preparation
+            | goatdkernel::orchestrator::BuildPhaseState::Configuration
+            | goatdkernel::orchestrator::BuildPhaseState::Patching
+            | goatdkernel::orchestrator::BuildPhaseState::Building
+            | goatdkernel::orchestrator::BuildPhaseState::Validation
+            | goatdkernel::orchestrator::BuildPhaseState::Failed
     );
 
     assert!(

@@ -3,12 +3,12 @@
 //! These tests verify the complete orchestration flow including phase transitions,
 //! state updates, and error handling across multiple phases.
 
-use goatd_kernel::log_collector::LogCollector;
-use goatd_kernel::models::{
+use goatdkernel::log_collector::LogCollector;
+use goatdkernel::models::{
     BootManager, BootType, GpuVendor, HardeningLevel, HardwareInfo, InitSystem, KernelConfig,
     LtoType, StorageType,
 };
-use goatd_kernel::orchestrator::{AsyncOrchestrator, BuildPhaseState};
+use goatdkernel::orchestrator::{AsyncOrchestrator, BuildPhaseState};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;

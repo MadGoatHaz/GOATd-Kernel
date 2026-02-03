@@ -1,5 +1,5 @@
-use goatd_kernel::LogCollector;
-use goatd_kernel::LogLine;
+use goatdkernel::LogCollector;
+use goatdkernel::LogLine;
 use std::fs;
 use std::time::Duration;
 use tokio::sync::mpsc;

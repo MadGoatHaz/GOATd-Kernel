@@ -17,7 +17,7 @@ fn test_monitoring_state_lifecycle() {
 
     // Test 1: Idle state initialization
     {
-        use goatd_kernel::system::performance::LifecycleState;
+        use goatdkernel::system::performance::LifecycleState;
 
         let state = Arc::new(RwLock::new(LifecycleState::Idle));
         assert_eq!(*state.read().unwrap(), LifecycleState::Idle);
@@ -26,7 +26,7 @@ fn test_monitoring_state_lifecycle() {
 
     // Test 2: State transition to Running
     {
-        use goatd_kernel::system::performance::LifecycleState;
+        use goatdkernel::system::performance::LifecycleState;
 
         let state = Arc::new(RwLock::new(LifecycleState::Idle));
         {
@@ -39,7 +39,7 @@ fn test_monitoring_state_lifecycle() {
 
     // Test 3: State transition to Completed
     {
-        use goatd_kernel::system::performance::LifecycleState;
+        use goatdkernel::system::performance::LifecycleState;
 
         let state = Arc::new(RwLock::new(LifecycleState::Running));
         {
@@ -52,7 +52,7 @@ fn test_monitoring_state_lifecycle() {
 
     // Test 4: Full cycle Idle → Running → Completed
     {
-        use goatd_kernel::system::performance::LifecycleState;
+        use goatdkernel::system::performance::LifecycleState;
 
         let state = Arc::new(RwLock::new(LifecycleState::Idle));
 
@@ -78,7 +78,7 @@ fn test_monitoring_state_lifecycle() {
 fn test_monitoring_state_atomics() {
     println!("[TEST] Starting monitoring state atomics test");
 
-    use goatd_kernel::system::performance::MonitoringState;
+    use goatdkernel::system::performance::MonitoringState;
 
     let state = MonitoringState::default();
 
@@ -109,7 +109,7 @@ fn test_monitoring_state_atomics() {
 fn test_monitoring_mode_duration() {
     println!("[TEST] Starting monitoring mode duration test");
 
-    use goatd_kernel::system::performance::MonitoringMode;
+    use goatdkernel::system::performance::MonitoringMode;
 
     // Test 1: Benchmark mode with 10s duration
     {
@@ -133,7 +133,7 @@ fn test_monitoring_mode_duration() {
 fn test_session_summary_initialization() {
     println!("[TEST] Starting session summary initialization test");
 
-    use goatd_kernel::system::performance::{KernelContext, PerformanceMetrics, SessionSummary};
+    use goatdkernel::system::performance::{KernelContext, PerformanceMetrics, SessionSummary};
     use std::time::Instant;
 
     let metrics = PerformanceMetrics {
@@ -206,7 +206,7 @@ fn test_session_summary_initialization() {
 fn test_session_summary_sample_capture() {
     println!("[TEST] Starting session summary sample capture test");
 
-    use goatd_kernel::system::performance::{KernelContext, PerformanceMetrics, SessionSummary};
+    use goatdkernel::system::performance::{KernelContext, PerformanceMetrics, SessionSummary};
 
     let metrics = PerformanceMetrics::default();
     let kernel_context = KernelContext {
@@ -241,7 +241,7 @@ fn test_session_summary_sample_capture() {
 fn test_performance_metrics_clone() {
     println!("[TEST] Starting performance metrics clone test");
 
-    use goatd_kernel::system::performance::PerformanceMetrics;
+    use goatdkernel::system::performance::PerformanceMetrics;
 
     let metrics1 = PerformanceMetrics {
         current_us: 15.0,
@@ -284,7 +284,7 @@ fn test_performance_metrics_clone() {
 fn test_benchmark_mode_duration_validation() {
     println!("[TEST] Starting benchmark mode duration validation test");
 
-    use goatd_kernel::system::performance::MonitoringMode;
+    use goatdkernel::system::performance::MonitoringMode;
 
     // Test various durations
     let durations = vec![
@@ -307,7 +307,7 @@ fn test_benchmark_mode_duration_validation() {
 fn test_continuous_mode_vs_benchmark() {
     println!("[TEST] Starting continuous vs benchmark mode test");
 
-    use goatd_kernel::system::performance::MonitoringMode;
+    use goatdkernel::system::performance::MonitoringMode;
 
     let benchmark_mode = MonitoringMode::Benchmark(Duration::from_secs(30));
     let continuous_mode = MonitoringMode::Continuous;
@@ -326,7 +326,7 @@ fn test_continuous_mode_vs_benchmark() {
 fn test_latency_processor_sample_counting() {
     println!("[TEST] Starting latency processor sample counting test");
 
-    use goatd_kernel::system::performance::collector::LatencyProcessor;
+    use goatdkernel::system::performance::collector::LatencyProcessor;
 
     let mut processor = LatencyProcessor::new().expect("Failed to create LatencyProcessor");
 
@@ -394,7 +394,7 @@ fn test_ring_buffer_empty_drain_safety() {
 fn test_atomic_stop_flag_correctness() {
     println!("[TEST] Starting atomic stop flag correctness test");
 
-    use goatd_kernel::system::performance::MonitoringState;
+    use goatdkernel::system::performance::MonitoringState;
 
     let state = MonitoringState::default();
 
@@ -417,7 +417,7 @@ fn test_atomic_stop_flag_correctness() {
 fn test_performance_config_defaults() {
     println!("[TEST] Starting performance config defaults test");
 
-    use goatd_kernel::system::performance::PerformanceConfig;
+    use goatdkernel::system::performance::PerformanceConfig;
 
     let config = PerformanceConfig::default();
 
@@ -441,7 +441,7 @@ fn test_performance_config_defaults() {
 fn test_state_machine_no_skip_states() {
     println!("[TEST] Starting state machine no-skip-states test");
 
-    use goatd_kernel::system::performance::LifecycleState;
+    use goatdkernel::system::performance::LifecycleState;
 
     // Test: Valid transition path
     let mut state = LifecycleState::Running;

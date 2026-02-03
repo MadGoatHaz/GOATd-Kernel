@@ -500,7 +500,7 @@ create_tarball() {
     
     cd "$REPO_ROOT"
     
-    local binary_name="goatd_kernel"
+    local binary_name="goatdkernel"
     local tarball_name="goatdkernel-${version}-x86_64.tar.gz"
     
     # Check if binary exists
@@ -508,12 +508,23 @@ create_tarball() {
         die "Release binary not found: target/release/$binary_name"
     fi
     
-    # Create tarball with binary, wrapper script, and install script
+    # Create staging directory structure
+    local staging_dir="goatdkernel-${version}-x86_64"
+    rm -rf "$staging_dir"
+    mkdir -p "$staging_dir/bin"
+    
+    # Copy binary to staging directory
+    cp "target/release/$binary_name" "$staging_dir/bin/" || die "Failed to copy binary to staging directory"
+    
+    # Create tarball with staged binary, wrapper script, and install script
     tar -czf "$tarball_name" \
-        -C target/release "$binary_name" \
+        -C . "$staging_dir/bin/$binary_name" \
         -C "$REPO_ROOT" goatdkernel.sh \
         -C "$REPO_ROOT/scripts" install.sh \
         || die "Failed to create tarball"
+    
+    # Clean up staging directory
+    rm -rf "$staging_dir"
     
     # Generate SHA256 checksum
     sha256sum "$tarball_name" > "${tarball_name}.sha256"
@@ -561,6 +572,7 @@ upload_release_assets() {
     
     local tarball_name="goatdkernel-${version}-x86_64.tar.gz"
     local sha256_file="${tarball_name}.sha256"
+    local png_file="$REPO_ROOT/assets/goatdkernel.png"
     
     # Upload tarball
     if [ -f "$tarball_name" ]; then
@@ -572,6 +584,14 @@ upload_release_assets() {
     if [ -f "$sha256_file" ]; then
         gh release upload "v$version" "$sha256_file" --repo "$GITHUB_REPO"
         log_success "SHA256 checksum uploaded"
+    fi
+    
+    # Upload PNG icon asset
+    if [ -f "$png_file" ]; then
+        gh release upload "v$version" "$png_file" --repo "$GITHUB_REPO"
+        log_success "PNG icon uploaded"
+    else
+        log_warn "PNG icon not found at $png_file - skipping icon upload"
     fi
 }
 
@@ -722,7 +742,21 @@ main() {
     log_debug "main: Step 14 - Publishing release"
     publish_release "$version"
     
-    # Step 15: Invoke AUR maintenance (non-blocking)
+    # Step 15: Invoke AUR maintenance (metadata synchronization - non-blocking)
+    log_info "Step 15: Synchronizing AUR metadata..."
+    (
+        export PKGVER=$(grep "^pkgver=" aur/PKGBUILD | awk -F= '{print $2}' | tr -d "\"'")
+        export PKGREL=$(grep "^pkgrel=" aur/PKGBUILD | awk -F= '{print $2}' | tr -d "\"'")
+        if command -v python3 &> /dev/null; then
+            python3 aur/maintenance_aur.py \
+                --version "$PKGVER" \
+                --release "$PKGREL" \
+                2>&1 | sed 's/^/[AUR] /' || log_warn "AUR maintenance encountered an error (non-blocking)"
+        else
+            log_warn "python3 not found; skipping AUR metadata synchronization"
+        fi
+    ) &
+
     # Step 16: Cleanup local files
     log_debug "main: Step 16 - Cleaning up local files"
     cleanup_local_files "$version"

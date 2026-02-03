@@ -37,7 +37,7 @@ use crate::models::{BootManager, BootType, GpuVendor, HardwareInfo, InitSystem, 
 /// # Examples
 ///
 /// ```ignore
-/// use goatd_kernel::hardware::HardwareDetector;
+/// use goatdkernel::hardware::HardwareDetector;
 ///
 /// let mut detector = HardwareDetector::new();
 /// match detector.detect_all() {

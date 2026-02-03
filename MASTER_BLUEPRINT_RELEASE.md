@@ -28,9 +28,9 @@
 1. **Release Build:**
     - Execute optimized build: `cargo build --release`.
 2. **Binary Stripping:**
-    - Strip debug symbols: `strip target/release/goatd_kernel`.
+    - Strip debug symbols: `strip target/release/goatdkernel`.
 3. **Artifact Packaging:**
-    - Create release tarball: `tar -czvf goatdkernel-0.2.1-x86_64.tar.gz -C target/release goatd_kernel`.
+    - Create release tarball: `tar -czvf goatdkernel-0.2.1-x86_64.tar.gz -C target/release goatdkernel`.
 4. **Checksum Generation:**
     - Generate SHA256: `sha256sum goatdkernel-0.2.1-x86_64.tar.gz > goatdkernel-0.2.1-x86_64.tar.gz.sha256`.
 
@@ -69,8 +69,8 @@
 1. **Build Test:**
     - Run `makepkg -s` in the AUR directory to verify the download and build process.
 2. **Installation Test:**
-    - Verify binary placement: `ls -l /usr/bin/goatd_kernel` (post-install).
-    - Execution check: `goatd_kernel --version`.
+    - Verify binary placement: `ls -l /usr/bin/goatdkernel` (post-install).
+    - Execution check: `goatdkernel --version`.
 3. **Integrity Audit:** Verify binary matches the expected release checksum.
 
 ---

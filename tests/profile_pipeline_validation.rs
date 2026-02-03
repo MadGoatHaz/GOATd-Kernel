@@ -11,7 +11,7 @@
 //! - Server: No Preemption (Server), EEVDF scheduler, Full LTO, Polly disabled, MGLRU enabled
 //! - Laptop: Voluntary Preemption, EEVDF scheduler, Thin LTO, Polly disabled, MGLRU enabled
 
-use goatd_kernel::{
+use goatdkernel::{
     config::profiles,
     models::{
         BootManager, BootType, GpuVendor, HardeningLevel, HardwareInfo, InitSystem, KernelConfig,

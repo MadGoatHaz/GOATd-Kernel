@@ -1,6 +1,6 @@
 /// Diagnostic tests to validate critical stressor implementation details
 /// These tests specifically check CPU affinity, priority settings, and error handling
-use goatd_kernel::system::performance::stressor::{Intensity, StressorManager, StressorType};
+use goatdkernel::system::performance::stressor::{Intensity, StressorManager, StressorType};
 use std::thread;
 use std::time::Duration;
 

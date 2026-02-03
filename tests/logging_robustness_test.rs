@@ -11,8 +11,8 @@
 async fn test_log_collector_high_volume() {
     use std::fs;
     // use std::path::PathBuf; // Unused import
-    use goatd_kernel::LogCollector;
-    use goatd_kernel::LogLine;
+    use goatdkernel::LogCollector;
+    use goatdkernel::LogLine;
     use tokio::sync::mpsc;
 
     let temp_dir = std::env::temp_dir().join("test_logs_high_volume");
@@ -103,8 +103,8 @@ async fn test_log_collector_high_volume() {
 
 #[tokio::test]
 async fn test_log_collector_non_blocking() {
-    use goatd_kernel::LogCollector;
-    use goatd_kernel::LogLine;
+    use goatdkernel::LogCollector;
+    use goatdkernel::LogLine;
     use std::fs;
     use std::time::Instant;
     use tokio::sync::mpsc;
@@ -163,8 +163,8 @@ async fn test_log_collector_non_blocking() {
 
 #[tokio::test]
 async fn test_log_collector_directory_creation() {
-    use goatd_kernel::LogCollector;
-    use goatd_kernel::LogLine;
+    use goatdkernel::LogCollector;
+    use goatdkernel::LogLine;
     use std::fs;
     use tokio::sync::mpsc;
 
@@ -192,8 +192,8 @@ async fn test_log_collector_directory_creation() {
 
 #[tokio::test]
 async fn test_log_collector_concurrent_access() {
-    use goatd_kernel::LogCollector;
-    use goatd_kernel::LogLine;
+    use goatdkernel::LogCollector;
+    use goatdkernel::LogLine;
     use std::fs;
     use std::sync::Arc;
     use tokio::sync::mpsc;

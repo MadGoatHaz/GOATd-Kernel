@@ -8,7 +8,7 @@
 //!
 //! Expected overhead: ~50µs due to cache contention and ring buffer overhead
 
-use goatd_kernel::system::performance::collector::{
+use goatdkernel::system::performance::collector::{
     CollectionMode, LatencyCollector, DISABLE_MSR_POLLER,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

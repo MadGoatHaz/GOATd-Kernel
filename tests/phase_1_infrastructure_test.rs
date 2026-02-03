@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 // Import the performance module
-use goatd_kernel::system::performance::freezer::{BenchmarkFreezer, FreezerConfig};
-use goatd_kernel::system::performance::watchdog::{BenchmarkWatchdog, WatchdogConfig};
+use goatdkernel::system::performance::freezer::{BenchmarkFreezer, FreezerConfig};
+use goatdkernel::system::performance::watchdog::{BenchmarkWatchdog, WatchdogConfig};
 
 /// Test 1: Verify cgroup creation and initialization
 #[test]

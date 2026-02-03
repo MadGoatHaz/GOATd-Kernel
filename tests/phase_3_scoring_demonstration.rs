@@ -3,7 +3,7 @@
 //! This test demonstrates the GOAT Score calculation and Personality Analysis Engine
 //! with sample data from different kernel configurations.
 
-use goatd_kernel::system::performance::{BenchmarkMetrics, PerformanceMetrics, PerformanceScorer};
+use goatdkernel::system::performance::{BenchmarkMetrics, PerformanceMetrics, PerformanceScorer};
 
 #[test]
 fn demonstrate_gaming_personality() {
@@ -25,7 +25,7 @@ fn demonstrate_gaming_personality() {
         package_temperature: 75.0,
         benchmark_metrics: Some(BenchmarkMetrics {
             micro_jitter: Some(
-                goatd_kernel::system::performance::jitter::MicroJitterMetrics {
+                goatdkernel::system::performance::jitter::MicroJitterMetrics {
                     p99_99_us: 180.0,
                     max_us: 350.0,
                     avg_us: 60.0,
@@ -34,7 +34,7 @@ fn demonstrate_gaming_personality() {
                 },
             ),
             context_switch_rtt: Some(
-                goatd_kernel::system::performance::context_switch::ContextSwitchMetrics {
+                goatdkernel::system::performance::context_switch::ContextSwitchMetrics {
                     avg_rtt_us: 12.0, // Professional calibration: healthy kernel threshold
                     min_rtt_us: 8.0,
                     max_rtt_us: 18.0,
@@ -43,7 +43,7 @@ fn demonstrate_gaming_personality() {
                 },
             ),
             syscall_saturation: Some(
-                goatd_kernel::system::performance::syscall::SyscallSaturationMetrics {
+                goatdkernel::system::performance::syscall::SyscallSaturationMetrics {
                     avg_ns_per_call: 800.0,
                     min_ns_per_call: 600.0,
                     max_ns_per_call: 2000.0,
@@ -52,7 +52,7 @@ fn demonstrate_gaming_personality() {
                 },
             ),
             task_wakeup: Some(
-                goatd_kernel::system::performance::task_wakeup::TaskWakeupMetrics {
+                goatdkernel::system::performance::task_wakeup::TaskWakeupMetrics {
                     avg_latency_us: 95.0,
                     min_latency_us: 70.0,
                     max_latency_us: 180.0,
@@ -112,7 +112,7 @@ fn demonstrate_real_time_personality() {
         package_temperature: 72.0,
         benchmark_metrics: Some(BenchmarkMetrics {
             micro_jitter: Some(
-                goatd_kernel::system::performance::jitter::MicroJitterMetrics {
+                goatdkernel::system::performance::jitter::MicroJitterMetrics {
                     p99_99_us: 120.0, // Ultra-precise
                     max_us: 250.0,
                     avg_us: 40.0,
@@ -121,7 +121,7 @@ fn demonstrate_real_time_personality() {
                 },
             ),
             context_switch_rtt: Some(
-                goatd_kernel::system::performance::context_switch::ContextSwitchMetrics {
+                goatdkernel::system::performance::context_switch::ContextSwitchMetrics {
                     avg_rtt_us: 10.0, // Professional calibration: excellent efficiency
                     min_rtt_us: 7.0,
                     max_rtt_us: 14.0,
@@ -130,7 +130,7 @@ fn demonstrate_real_time_personality() {
                 },
             ),
             syscall_saturation: Some(
-                goatd_kernel::system::performance::syscall::SyscallSaturationMetrics {
+                goatdkernel::system::performance::syscall::SyscallSaturationMetrics {
                     avg_ns_per_call: 750.0,
                     min_ns_per_call: 550.0,
                     max_ns_per_call: 1800.0,
@@ -139,7 +139,7 @@ fn demonstrate_real_time_personality() {
                 },
             ),
             task_wakeup: Some(
-                goatd_kernel::system::performance::task_wakeup::TaskWakeupMetrics {
+                goatdkernel::system::performance::task_wakeup::TaskWakeupMetrics {
                     avg_latency_us: 78.0,
                     min_latency_us: 55.0,
                     max_latency_us: 150.0,
@@ -198,7 +198,7 @@ fn demonstrate_balanced_personality() {
         package_temperature: 56.0,
         benchmark_metrics: Some(BenchmarkMetrics {
             micro_jitter: Some(
-                goatd_kernel::system::performance::jitter::MicroJitterMetrics {
+                goatdkernel::system::performance::jitter::MicroJitterMetrics {
                     p99_99_us: 280.0,
                     max_us: 500.0,
                     avg_us: 100.0,
@@ -207,7 +207,7 @@ fn demonstrate_balanced_personality() {
                 },
             ),
             context_switch_rtt: Some(
-                goatd_kernel::system::performance::context_switch::ContextSwitchMetrics {
+                goatdkernel::system::performance::context_switch::ContextSwitchMetrics {
                     avg_rtt_us: 22.0, // Professional calibration: mid-range efficiency
                     min_rtt_us: 16.0,
                     max_rtt_us: 35.0,
@@ -216,7 +216,7 @@ fn demonstrate_balanced_personality() {
                 },
             ),
             syscall_saturation: Some(
-                goatd_kernel::system::performance::syscall::SyscallSaturationMetrics {
+                goatdkernel::system::performance::syscall::SyscallSaturationMetrics {
                     avg_ns_per_call: 1200.0,
                     min_ns_per_call: 900.0,
                     max_ns_per_call: 2500.0,
@@ -225,7 +225,7 @@ fn demonstrate_balanced_personality() {
                 },
             ),
             task_wakeup: Some(
-                goatd_kernel::system::performance::task_wakeup::TaskWakeupMetrics {
+                goatdkernel::system::performance::task_wakeup::TaskWakeupMetrics {
                     avg_latency_us: 150.0,
                     min_latency_us: 110.0,
                     max_latency_us: 250.0,
@@ -285,7 +285,7 @@ fn demonstrate_throughput_personality() {
         package_temperature: 60.0,
         benchmark_metrics: Some(BenchmarkMetrics {
             micro_jitter: Some(
-                goatd_kernel::system::performance::jitter::MicroJitterMetrics {
+                goatdkernel::system::performance::jitter::MicroJitterMetrics {
                     p99_99_us: 350.0,
                     max_us: 700.0,
                     avg_us: 140.0,
@@ -294,7 +294,7 @@ fn demonstrate_throughput_personality() {
                 },
             ),
             context_switch_rtt: Some(
-                goatd_kernel::system::performance::context_switch::ContextSwitchMetrics {
+                goatdkernel::system::performance::context_switch::ContextSwitchMetrics {
                     avg_rtt_us: 35.0, // Professional calibration: acceptable efficiency
                     min_rtt_us: 25.0,
                     max_rtt_us: 50.0,
@@ -303,7 +303,7 @@ fn demonstrate_throughput_personality() {
                 },
             ),
             syscall_saturation: Some(
-                goatd_kernel::system::performance::syscall::SyscallSaturationMetrics {
+                goatdkernel::system::performance::syscall::SyscallSaturationMetrics {
                     avg_ns_per_call: 400.0, // Very fast syscalls!
                     min_ns_per_call: 250.0,
                     max_ns_per_call: 1200.0,
@@ -312,7 +312,7 @@ fn demonstrate_throughput_personality() {
                 },
             ),
             task_wakeup: Some(
-                goatd_kernel::system::performance::task_wakeup::TaskWakeupMetrics {
+                goatdkernel::system::performance::task_wakeup::TaskWakeupMetrics {
                     avg_latency_us: 180.0,
                     min_latency_us: 140.0,
                     max_latency_us: 350.0,

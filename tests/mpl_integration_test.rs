@@ -14,8 +14,8 @@
 //! - makepkg sources the patched PKGBUILD in a child shell
 //! - GOATD_KERNELRELEASE must be correctly populated
 
-use goatd_kernel::kernel::patcher::KernelPatcher;
-use goatd_kernel::models::MPLMetadata;
+use goatdkernel::kernel::patcher::KernelPatcher;
+use goatdkernel::models::MPLMetadata;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

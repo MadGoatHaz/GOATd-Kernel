@@ -15,7 +15,7 @@
 //! ```no_run
 //! use std::path::Path;
 //! use std::collections::HashSet;
-//! # use goatd_kernel::config::modprobed::*;
+//! # use goatdkernel::config::modprobed::*;
 //!
 //! // Load modprobed database
 //! let modules = load_modprobed_db(Path::new("modprobed-db.json"))?;
@@ -61,7 +61,7 @@ use std::path::Path;
 ///
 /// ```no_run
 /// use std::path::Path;
-/// # use goatd_kernel::config::modprobed::load_modprobed_db;
+/// # use goatdkernel::config::modprobed::load_modprobed_db;
 ///
 /// match load_modprobed_db(Path::new("/etc/modprobed-db.json")) {
 ///     Ok(modules) => println!("Loaded {} modules", modules.len()),
@@ -134,7 +134,7 @@ pub fn load_modprobed_db(path: &Path) -> Result<HashSet<String>, ConfigError> {
 /// # Examples
 ///
 /// ```
-/// # use goatd_kernel::config::modprobed::parse_modprobed_json;
+/// # use goatdkernel::config::modprobed::parse_modprobed_json;
 /// # use std::collections::HashSet;
 ///
 /// let json = r#"{"modules": ["nouveau", "NVIDIA", "i915"]}"#;
@@ -193,7 +193,7 @@ pub fn parse_modprobed_json(json_str: &str) -> Result<HashSet<String>, ConfigErr
 /// # Examples
 ///
 /// ```
-/// # use goatd_kernel::config::modprobed::is_module_used;
+/// # use goatdkernel::config::modprobed::is_module_used;
 /// # use std::collections::HashSet;
 ///
 /// let modules: HashSet<_> = vec!["nouveau", "i915"]
@@ -226,8 +226,8 @@ pub fn is_module_used(module_name: &str, modprobed_modules: &HashSet<String>) ->
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::modprobed::*;
-/// # use goatd_kernel::models::{KernelConfig, LtoType};
+/// # use goatdkernel::config::modprobed::*;
+/// # use goatdkernel::models::{KernelConfig, LtoType};
 /// # use std::collections::HashSet;
 /// # use std::collections::HashMap;
 ///
@@ -295,8 +295,8 @@ pub fn add_missing_modules(config: &mut KernelConfig, modprobed_modules: &HashSe
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::modprobed::prepare_modprobed_db;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::modprobed::prepare_modprobed_db;
+/// # use goatdkernel::models::KernelConfig;
 ///
 /// let mut config = KernelConfig::default();
 /// prepare_modprobed_db(&mut config)?;

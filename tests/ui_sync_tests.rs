@@ -15,9 +15,9 @@
 
 #[cfg(test)]
 mod ui_sync_tests {
-    use goatd_kernel::config::AppState;
-    use goatd_kernel::models::HardeningLevel;
-    use goatd_kernel::ui::controller::{AppController, BuildEvent};
+    use goatdkernel::config::AppState;
+    use goatdkernel::models::HardeningLevel;
+    use goatdkernel::ui::controller::{AppController, BuildEvent};
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -1044,7 +1044,7 @@ mod ui_sync_tests {
         // VERIFICATION 5: Hardening is applied independently
         assert_eq!(
             state_after_hardening.kernel_hardening,
-            goatd_kernel::models::HardeningLevel::Hardened,
+            goatdkernel::models::HardeningLevel::Hardened,
             "Hardening should be hardened"
         );
 

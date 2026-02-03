@@ -55,7 +55,7 @@ impl Default for PackageBuild {
 /// # Examples
 ///
 /// ```
-/// use goatd_kernel::kernel::parser::parse_pkgbuild;
+/// use goatdkernel::kernel::parser::parse_pkgbuild;
 ///
 /// let content = r#"
 /// pkgver=6.6.0

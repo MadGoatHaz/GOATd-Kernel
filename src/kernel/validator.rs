@@ -32,7 +32,7 @@ pub type ValidationResult<T> = std::result::Result<T, PatchError>;
 ///
 /// ```
 /// use std::path::Path;
-/// use goatd_kernel::kernel::validator::validate_patch_application;
+/// use goatdkernel::kernel::validator::validate_patch_application;
 ///
 /// // Note: This is a documentation example, it won't run without a real file.
 /// // We use '#' to hide lines in documentation if needed, but here we just show the call.
@@ -253,7 +253,7 @@ pub fn validate_lto_shielding(makefile_path: &Path) -> ValidationResult<()> {
 ///
 /// ```ignore
 /// use std::path::Path;
-/// use goatd_kernel::kernel::validator::validate_kbuild_path;
+/// use goatdkernel::kernel::validator::validate_kbuild_path;
 ///
 /// let result = validate_kbuild_path(Path::new("/home/user/kernel"));
 /// assert!(result.is_ok());

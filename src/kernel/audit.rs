@@ -173,7 +173,7 @@ impl SystemAudit {
     /// - `Err(String)` if kernel version detection fails
     pub fn get_summary() -> Result<AuditSummary, String> {
         let kernel_version = get_booted_kernel_version();
-        let is_goatd = detect_goatd_kernel();
+        let is_goatd = detect_goatdkernel();
 
         Ok(AuditSummary {
             kernel_version,
@@ -313,7 +313,7 @@ impl SystemAudit {
 }
 
 /// Detect if the booted kernel is a GOATd kernel
-fn detect_goatd_kernel() -> bool {
+fn detect_goatdkernel() -> bool {
     let version = get_booted_kernel_version();
     version.to_lowercase().contains("goatd")
 }

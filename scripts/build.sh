@@ -17,4 +17,4 @@ cargo build --release
 
 echo "✅ Rust backend built successfully"
 echo "✨ GOATd Kernel ready!"
-echo "Binary location: $PROJECT_ROOT/target/release/goatd_kernel"
+echo "Binary location: $PROJECT_ROOT/target/release/goatdkernel"

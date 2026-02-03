@@ -14,8 +14,8 @@
 //! # Examples
 //!
 //! ```no_run
-//! use goatd_kernel::config::exclusions::*;
-//! use goatd_kernel::models::KernelConfig;
+//! use goatdkernel::config::exclusions::*;
+//! use goatdkernel::models::KernelConfig;
 //! use std::collections::HashMap;
 //!
 //! let mut config = KernelConfig::default();
@@ -59,8 +59,8 @@ use crate::models::{GpuVendor, HardwareInfo, KernelConfig};
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::add_exclusion;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::exclusions::add_exclusion;
+/// # use goatdkernel::models::KernelConfig;
 /// # use std::collections::HashMap;
 /// #
 /// # let mut config = KernelConfig::default();
@@ -118,8 +118,8 @@ pub fn add_exclusion(config: &mut KernelConfig, driver: &str) -> Result<(), Conf
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::*;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::exclusions::*;
+/// # use goatdkernel::models::KernelConfig;
 /// # use std::collections::HashMap;
 /// #
 /// # let mut config = KernelConfig::default();
@@ -159,8 +159,8 @@ pub fn remove_exclusion(config: &mut KernelConfig, driver: &str) -> bool {
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::clear_exclusions;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::exclusions::clear_exclusions;
+/// # use goatdkernel::models::KernelConfig;
 /// #
 /// # let mut config = KernelConfig::default();
 /// # config.driver_exclusions = vec!["custom_driver".to_string()];
@@ -188,8 +188,8 @@ pub fn clear_exclusions(config: &mut KernelConfig) {
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::*;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::exclusions::*;
+/// # use goatdkernel::models::KernelConfig;
 /// #
 /// # let mut config = KernelConfig::default();
 /// # config.driver_exclusions = vec!["zebra".to_string(), "alpha".to_string()];
@@ -224,8 +224,8 @@ pub fn get_exclusions(config: &KernelConfig) -> Vec<String> {
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::validate_exclusions;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::exclusions::validate_exclusions;
+/// # use goatdkernel::models::KernelConfig;
 /// #
 /// # let mut config = KernelConfig::default();
 /// # config.driver_exclusions = vec!["custom_driver".to_string()];
@@ -258,8 +258,8 @@ pub fn validate_exclusions(config: &KernelConfig) -> Result<(), ConfigError> {
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::apply_exclusions;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::exclusions::apply_exclusions;
+/// # use goatdkernel::models::KernelConfig;
 /// #
 /// # let mut config = KernelConfig::default();
 /// #
@@ -340,8 +340,8 @@ fn detect_active_gpu_vendors() -> u8 {
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::exclusions::apply_gpu_exclusions;
-/// # use goatd_kernel::models::{KernelConfig, HardwareInfo, GpuVendor};
+/// # use goatdkernel::config::exclusions::apply_gpu_exclusions;
+/// # use goatdkernel::models::{KernelConfig, HardwareInfo, GpuVendor};
 /// #
 /// # let mut config = KernelConfig::default();
 /// # let hardware = HardwareInfo {

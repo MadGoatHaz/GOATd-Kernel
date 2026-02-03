@@ -13,7 +13,7 @@
 //! 7. **Reference Benchmark Sensitivity**: Test impact of different baselines
 //! 8. **Brief Template Validation**: Verify grammatical correctness
 
-use goatd_kernel::system::performance::{
+use goatdkernel::system::performance::{
     context_switch::ContextSwitchMetrics, jitter::MicroJitterMetrics,
     syscall::SyscallSaturationMetrics, task_wakeup::TaskWakeupMetrics, BenchmarkMetrics,
     PerformanceMetrics, PerformanceScorer,
@@ -638,7 +638,7 @@ fn audit_brief_references_strengths() {
 
 #[test]
 fn audit_reference_benchmark_impact_on_scoring() {
-    use goatd_kernel::system::performance::ReferenceBenchmarks;
+    use goatdkernel::system::performance::ReferenceBenchmarks;
 
     let standard_benchmarks = ReferenceBenchmarks::default();
     let aggressive_benchmarks = ReferenceBenchmarks {

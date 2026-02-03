@@ -49,7 +49,7 @@ jobs:
           VERSION="${{ github.ref }}" 
           VERSION="${VERSION#refs/tags/v}"
           mkdir -p goatdkernel-${VERSION}-x86_64
-          cp target/release/goatd_kernel goatdkernel-${VERSION}-x86_64/
+          cp target/release/goatdkernel goatdkernel-${VERSION}-x86_64/
           cp README.md goatdkernel-${VERSION}-x86_64/
           cp LICENSE goatdkernel-${VERSION}-x86_64/
           tar -czf goatdkernel-${VERSION}-x86_64.tar.gz goatdkernel-${VERSION}-x86_64/

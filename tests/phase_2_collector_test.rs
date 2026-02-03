@@ -8,7 +8,7 @@
 //!
 //! Validates that metrics are within reasonable physical bounds and no resource leaks occur.
 
-use goatd_kernel::system::performance::{
+use goatdkernel::system::performance::{
     ContextSwitchCollector, ContextSwitchConfig, MicroJitterCollector, MicroJitterConfig,
     SyscallSaturationCollector, SyscallSaturationConfig, TaskWakeupCollector, TaskWakeupConfig,
 };

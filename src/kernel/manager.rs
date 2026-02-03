@@ -36,7 +36,7 @@ impl KernelPackage {
 /// # Example
 /// ```
 /// use std::path::PathBuf;
-/// let registry_result = goatd_kernel::kernel::manager::KernelArtifactRegistry::new(
+/// let registry_result = goatdkernel::kernel::manager::KernelArtifactRegistry::new(
 ///     PathBuf::from("/path/to/linux-6.18.3-x86_64.pkg.tar.zst"),
 ///     "linux".to_string(),
 ///     "6.18.3-arch1-1".to_string(),

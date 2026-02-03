@@ -17,7 +17,7 @@ VERSION="2.1.0"
 PACKAGE_NAME="goatd-kernel"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="${INSTALL_DIR:-$PROJECT_DIR}"
-BINARY_NAME="goatd_kernel"
+BINARY_NAME="goatdkernel"
 BINARY_PATH="$INSTALL_DIR/target/release/$BINARY_NAME"
 
 # Functions

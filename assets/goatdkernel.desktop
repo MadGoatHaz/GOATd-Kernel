@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=GOATd Kernel Builder
 Comment=Pure Rust + egui UI for building and managing kernels
-Exec=goatd_kernel
+Exec=goatdkernel
 Icon=goatdkernel
 Terminal=false
 Type=Application

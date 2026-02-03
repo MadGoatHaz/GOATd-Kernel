@@ -60,8 +60,8 @@ use crate::models::{GpuVendor, HardwareInfo, KernelConfig, LtoType};
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::finalizer::finalize_kernel_config;
-/// # use goatd_kernel::models::{KernelConfig, HardwareInfo, GpuVendor};
+/// # use goatdkernel::config::finalizer::finalize_kernel_config;
+/// # use goatdkernel::models::{KernelConfig, HardwareInfo, GpuVendor};
 /// #
 /// # let mut config = KernelConfig {
 /// #     profile: "Gaming".to_string(),

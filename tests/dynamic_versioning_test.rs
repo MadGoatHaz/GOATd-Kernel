@@ -4,8 +4,8 @@
 //! can be set to "latest" and is resolved to a concrete version through a fallback
 //! hierarchy (poll → cache → local parse → hardcoded baseline).
 
-use goatd_kernel::models::KernelConfig;
-use goatd_kernel::orchestrator::executor::resolve_dynamic_version;
+use goatdkernel::models::KernelConfig;
+use goatdkernel::orchestrator::executor::resolve_dynamic_version;
 use std::collections::HashMap;
 
 /// Helper to create a test KernelConfig with dynamic version
@@ -13,12 +13,12 @@ fn create_dynamic_config(variant: &str) -> KernelConfig {
     KernelConfig {
         version: "latest".to_string(),
         kernel_variant: variant.to_string(),
-        lto_type: goatd_kernel::models::LtoType::Thin,
+        lto_type: goatdkernel::models::LtoType::Thin,
         use_modprobed: false,
         use_whitelist: false,
         driver_exclusions: Vec::new(),
         config_options: HashMap::new(),
-        hardening: goatd_kernel::models::HardeningLevel::Standard,
+        hardening: goatdkernel::models::HardeningLevel::Standard,
         secure_boot: false,
         profile: "Generic".to_string(),
         use_polly: false,

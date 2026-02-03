@@ -26,7 +26,7 @@ NC='\033[0m'
 
 # Variables
 BUILD_PROFILE="release"
-BINARY_PATH="${PROJECT_ROOT}/target/${BUILD_PROFILE}/goatd_kernel"
+BINARY_PATH="${PROJECT_ROOT}/target/${BUILD_PROFILE}/goatdkernel"
 
 # Help function
 print_help() {
@@ -93,7 +93,7 @@ main() {
             ;;
         --debug)
             BUILD_PROFILE="debug"
-            BINARY_PATH="${PROJECT_ROOT}/target/${BUILD_PROFILE}/goatd_kernel"
+            BINARY_PATH="${PROJECT_ROOT}/target/${BUILD_PROFILE}/goatdkernel"
             clean_build
             build_project
             exit 0

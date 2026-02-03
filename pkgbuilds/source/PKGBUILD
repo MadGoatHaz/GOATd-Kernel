@@ -31,7 +31,7 @@ package() {
     cd "${pkgname}"
     
     # Install binary
-    install -Dm 755 target/release/goatd_kernel "${pkgdir}/usr/bin/goatd_kernel"
+    install -Dm 755 target/release/goatdkernel "${pkgdir}/usr/bin/goatdkernel"
     
     # Install desktop entry
     install -Dm 644 assets/goatdkernel.desktop "${pkgdir}/usr/share/applications/goatdkernel.desktop"
@@ -49,7 +49,7 @@ package() {
 # Post-install message
 post_install() {
     echo "GOATd Kernel Builder has been installed!"
-    echo "To run: goatd_kernel"
+    echo "To run: goatdkernel"
     echo ""
     echo "Optional dependencies for enhanced features:"
     echo "  - Install modprobed-db: yay -S modprobed-db"

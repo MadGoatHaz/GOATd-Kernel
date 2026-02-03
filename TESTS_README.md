@@ -1,78 +1,86 @@
 # GOATd Kernel Test Suite
-This document provides an inventory of the test infrastructure for the GOATd Kernel project, including unit tests, integration tests, and specialized performance benchmarks.
+
+This document provides an inventory of the tests within the GOATd Kernel project and instructions for their execution.
+
+## Test Inventory
+
+The test suite is divided into unit tests (within `src/`) and integration tests (within `tests/`).
+
+### Integration Tests (`master/tests/`)
+
+*   **`chunk_3_header_discovery_sync.rs`**: Validates kernel header discovery and synchronization logic.
+*   **`chunk_4_alpm_hook_verification.rs`**: Verifies ALPM hook structures and post-install system integrity checks.
+*   **`comprehensive_feature_realization.rs`**: Ensures performance features are correctly applied across different profiles (Gaming, Server).
+*   **`config_tests.rs`**: Validates configuration loading, saving, and validation logic.
+*   **`dynamic_versioning_test.rs`**: Tests the dynamic versioning system for kernel builds.
+*   **`forensic_diagnostic.rs`**: Tests raw latency data collection and forensic analysis capabilities.
+*   **`git_tests.rs`**: Validates Git operations for kernel source management.
+*   **`hardware_tests.rs`**: Verifies hardware detection logic (CPU, GPU, RAM, etc.).
+*   **`integration_tests.rs`**: Comprehensive end-to-end testing of the orchestrator and build phases.
+*   **`lifecycle_pipe_integration.rs`**: Tests the performance monitoring lifecycle state transitions.
+*   **`logging_integration_test.rs`**: Verifies integration with the logging system.
+*   **`logging_robustness_test.rs`**: Tests logging under stress and high-frequency events.
+*   **`modprobed_localmodconfig_validation.rs`**: Validates `modprobed-db` integration and `localmodconfig` generation.
+*   **`mpl_integration_test.rs`**: Tests the Monitor-Profile-Loop (MPL) architecture.
+*   **`performance_baseline_calibration.rs`**: Calibrates the performance monitoring baseline overhead.
+*   **`performance_battle_tests.rs`**: Stress tests the performance monitoring system under heavy load.
+*   **`performance_monitoring_lifecycle_test.rs`**: Detailed testing of performance monitoring states and configs.
+*   **`phase_1_infrastructure_test.rs`**: Tests the underlying infrastructure for performance monitoring.
+*   **`phase_2_collector_test.rs`**: Tests data collection mechanisms for performance metrics.
+*   **`phase_3_scoring_audit.rs`**: Audits the scoring logic for performance diagnostics.
+*   **`phase_3_scoring_demonstration.rs`**: Demonstrates the scoring system with sample data.
+*   **`phase_3_variant_aware_rebranding.rs`**: Validates rebranding logic based on kernel variants.
+*   **`profile_pipeline_validation.rs`**: Validates the end-to-end profile application pipeline.
+*   **`real_kernel_build_integration.rs`**: Integration test simulating a real kernel build process.
+*   **`stressor_diagnostic_tests.rs`**: Validates the implementation details of system stressors.
+*   **`stressor_integration_tests.rs`**: Tests the integration of stressors with the performance monitor.
+*   **`ui_scaling_tests.rs`**: Validates UI behavior and state updates across different scales.
+*   **`ui_sync_tests.rs`**: Extensive testing of UI state synchronization with the underlying controller.
+
+### Unit Tests
+
+Unit tests are located within the `src/` directory alongside the implementation code. They cover:
+*   Configuration management (`config/`)
+*   Hardware detection (`hardware/`)
+*   Kernel management and patching (`kernel/`)
+*   Orchestration logic (`orchestrator/`)
+*   System performance monitoring (`system/performance/`)
+*   UI state and logic (`ui/`)
 
 ## Execution Instructions
-To run the standard test suite:
+
+To run the full test suite, navigate to the `master/` directory and use `cargo`:
+
 ```bash
+cd master
 cargo test
 ```
 
-To run a specific test file:
+### Running Specific Tests
+
+To run a specific integration test file:
+
 ```bash
-cargo test --test <test_name>
+cargo test --test <test_file_name>
+```
+Example: `cargo test --test hardware_tests`
+
+To run a specific test function:
+
+```bash
+cargo test <test_function_name>
 ```
 
-To run performance benchmarks:
+### Doc Tests
+
+Documentation tests can be run using:
+
 ```bash
-cargo run --bin efficiency_test
-cargo run --bin latency_test
+cargo test --doc
 ```
 
-## Test Inventory
-### Integration Tests (`tests/`)
-These tests verify the interaction between different components of the system.
-- **`chunk_3_header_discovery_sync.rs`**: Verifies header discovery and synchronization logic.
-- **`chunk_4_alpm_hook_verification.rs`**: Validates ALPM hook installation and detection.
-- **`comprehensive_feature_realization.rs`**: Top-level feature verification.
-- **`config_tests.rs`**: Validates configuration management and persistence.
-- **`dynamic_versioning_test.rs`**: Ensures kernel versioning logic is correct.
-- **`forensic_diagnostic.rs`**: Tests system diagnostic and forensic capabilities.
-- **`git_tests.rs`**: Verifies Git operations for kernel source management.
-- **`hardware_tests.rs`**: Validates hardware detection (CPU, GPU, RAM, etc.).
-- **`integration_tests.rs`**: General integration scenarios.
-- **`lifecycle_pipe_integration.rs`**: Tests the end-to-end build lifecycle.
-- **`logging_integration_test.rs`**: Verifies the logging system.
-- **`modprobed_localmodconfig_validation.rs`**: Validates `modprobed-db` integration.
-- **`mpl_integration_test.rs`**: Tests the Master Profile Layer logic.
-- **`performance_baseline_calibration.rs`**: Calibrates performance metrics.
-- **`performance_battle_tests.rs`**: Stress tests for the performance monitor.
-- **`phase_1_infrastructure_test.rs`**: Validates core project infrastructure.
-- **`phase_2_collector_test.rs`**: Tests data collection mechanisms.
-- **`phase_3_scoring_audit.rs`**: Audits the scoring algorithm.
-- **`profile_pipeline_validation.rs`**: Validates the profile application pipeline.
-- **`real_kernel_build_integration.rs`**: Simulates/Verifies actual kernel build steps.
-- **`ui_scaling_tests.rs`**: Verifies UI responsiveness and scaling.
-- **`ui_sync_tests.rs`**: Ensures UI state remains synchronized with the backend.
+## Hygiene Requirements
 
-### Unit Tests (Internal)
-Located within the `src/` directory, these test individual modules in isolation.
-- **`src/lib.rs`**: Core library exports and versioning.
-- **`src/config/`**: Comprehensive tests for exclusions, whitelists, and profile finalization.
-- **`src/hardware/`**: Unit tests for individual hardware component detection.
-- **`src/kernel/patcher/tests.rs`**: Specialized tests for the kernel patching and rebranding engine.
-- **`src/system/performance/`**: Extensive tests for benchmarks, stressors, and diagnostics.
-
-### Performance Binaries (`src/bin/`)
-- **`efficiency_test.rs`**: Measures system efficiency under load.
-- **`latency_test.rs`**: Specialized latency measurement tool.
-
-## Release Verification
-### AUR Release Workflow (Manual)
-The AUR release process is now a **manual** step to ensure maximum control over the package repository.
-- **Tool**: `aur/maintenance_aur.py`
-- **Purpose**: Updates AUR package metadata (`PKGBUILD`, `.SRCINFO`) and verifies source integrity.
-- **Manual Flow**: 
-    1. Complete the main release via `master/scripts/release.sh`.
-    2. Run the AUR maintenance script manually:
-       ```bash
-       python3 aur/maintenance_aur.py --force-version <VERSION>
-       ```
-    3. Verify generated artifacts in the `aur/` directory.
-    4. Commit and push to the AUR repository.
-
-## Test Results
-Last full suite run: **SYSTEM GREEN** (2026-02-02)
-- **Unit Tests**: Passed
-- **Integration Tests**: Passed
-- **Doc Tests**: Passed
-- **AUR Verification**: Manual flow verified and documented.
+*   All tests must use the `goatdkernel` crate name for imports.
+*   Tests should avoid external side effects or clean up after themselves (e.g., using `tempfile`).
+*   Mocking should be used for hardware-dependent logic where possible.

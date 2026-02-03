@@ -15,7 +15,7 @@
 //! - Sufficient permissions to install/uninstall packages (or headless mode)
 //! - Network access (for DKMS operations)
 
-use goatd_kernel::ui::KernelManagerTrait;
+use goatdkernel::ui::KernelManagerTrait;
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,9 +41,9 @@ async fn test_install_pipe_lifecycle_kernel() -> Result<(), Box<dyn std::error::
     // =========================================================================
     // STEP 2: Initialize LogCollector and register as global logger
     // =========================================================================
-    let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<goatd_kernel::LogLine>(256);
+    let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<goatdkernel::LogLine>(256);
     let log_collector = Arc::new(
-        goatd_kernel::LogCollector::new(test_logs_dir.clone(), ui_tx)
+        goatdkernel::LogCollector::new(test_logs_dir.clone(), ui_tx)
             .expect("Failed to create LogCollector"),
     );
 
@@ -69,7 +69,7 @@ async fn test_install_pipe_lifecycle_kernel() -> Result<(), Box<dyn std::error::
     // =========================================================================
     // STEP 3: Load AppState to get workspace path
     // =========================================================================
-    let app_state = goatd_kernel::config::SettingsManager::load().expect("Failed to load AppState");
+    let app_state = goatdkernel::config::SettingsManager::load().expect("Failed to load AppState");
 
     let workspace_path = if app_state.workspace_path.is_empty() {
         std::env::current_dir()
@@ -85,7 +85,7 @@ async fn test_install_pipe_lifecycle_kernel() -> Result<(), Box<dyn std::error::
     // =========================================================================
     // STEP 4: Scan workspace for available kernel artifacts
     // =========================================================================
-    let kernel_manager = goatd_kernel::kernel::manager::KernelManagerImpl::new()
+    let kernel_manager = goatdkernel::kernel::manager::KernelManagerImpl::new()
         .expect("Failed to create KernelManager");
 
     let available_kernels = kernel_manager.scan_workspace(&workspace_path);
@@ -117,7 +117,7 @@ async fn test_install_pipe_lifecycle_kernel() -> Result<(), Box<dyn std::error::
     let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
 
     let app_controller = Arc::new(
-        goatd_kernel::ui::controller::AppController::new_async(
+        goatdkernel::ui::controller::AppController::new_async(
             build_tx.clone(),
             cancel_tx.clone(),
             Some(log_collector.clone()),
@@ -154,13 +154,13 @@ async fn test_install_pipe_lifecycle_kernel() -> Result<(), Box<dyn std::error::
             tokio::time::timeout(Duration::from_millis(100), build_rx.recv()).await
         {
             match event {
-                goatd_kernel::ui::controller::BuildEvent::InstallationComplete(success) => {
+                goatdkernel::ui::controller::BuildEvent::InstallationComplete(success) => {
                     installation_completed = true;
                     installation_success = success;
                     println!("[TEST] ✓ Installation completed: success={}", success);
                     break;
                 }
-                goatd_kernel::ui::controller::BuildEvent::Log(msg) => {
+                goatdkernel::ui::controller::BuildEvent::Log(msg) => {
                     println!("[TEST] [INSTALL_LOG] {}", msg);
                 }
                 _ => {}
@@ -355,7 +355,7 @@ async fn test_log_collector_initialization() {
 
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(256);
 
-    let result = goatd_kernel::LogCollector::new(test_logs_dir.clone(), ui_tx);
+    let result = goatdkernel::LogCollector::new(test_logs_dir.clone(), ui_tx);
     assert!(result.is_ok(), "LogCollector creation failed");
 
     let log_collector = Arc::new(result.unwrap());
@@ -396,11 +396,11 @@ async fn test_log_collector_initialization() {
 fn test_kernel_manager_scan_workspace() {
     println!("[TEST] Testing KernelManager workspace scanning");
 
-    let result = goatd_kernel::kernel::manager::KernelManagerImpl::new();
+    let result = goatdkernel::kernel::manager::KernelManagerImpl::new();
     assert!(result.is_ok(), "KernelManager creation failed");
 
     let kernel_manager = result.unwrap();
-    let app_state = goatd_kernel::config::SettingsManager::load().expect("Failed to load AppState");
+    let app_state = goatdkernel::config::SettingsManager::load().expect("Failed to load AppState");
 
     let workspace_path = if app_state.workspace_path.is_empty() {
         std::env::current_dir()

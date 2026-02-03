@@ -33,8 +33,8 @@
 //! # Examples
 //!
 //! ```no_run
-//! use goatd_kernel::config::whitelist::*;
-//! use goatd_kernel::models::KernelConfig;
+//! use goatdkernel::config::whitelist::*;
+//! use goatdkernel::models::KernelConfig;
 //! use std::collections::HashMap;
 //!
 //! let mut config = KernelConfig::default();
@@ -141,7 +141,7 @@ const ESSENTIAL_DRIVERS: &[&str] = &[
 /// # Examples
 ///
 /// ```
-/// # use goatd_kernel::config::whitelist::get_essential_drivers;
+/// # use goatdkernel::config::whitelist::get_essential_drivers;
 ///
 /// let drivers = get_essential_drivers();
 /// assert!(drivers.contains(&"ext4"));
@@ -168,7 +168,7 @@ pub fn get_essential_drivers() -> Vec<&'static str> {
 /// # Examples
 ///
 /// ```
-/// # use goatd_kernel::config::whitelist::is_essential_driver;
+/// # use goatdkernel::config::whitelist::is_essential_driver;
 ///
 /// assert!(is_essential_driver("ext4"));
 /// assert!(is_essential_driver("EXT4")); // case-insensitive
@@ -195,8 +195,8 @@ pub fn is_essential_driver(driver_name: &str) -> bool {
 /// # Examples
 ///
 /// ```no_run
-/// # use goatd_kernel::config::whitelist::apply_whitelist;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::whitelist::apply_whitelist;
+/// # use goatdkernel::models::KernelConfig;
 ///
 /// let mut config = KernelConfig::default();
 /// config.use_whitelist = true;
@@ -230,8 +230,8 @@ pub fn apply_whitelist(config: &mut KernelConfig) {
 /// # Examples
 ///
 /// ```
-/// # use goatd_kernel::config::whitelist::get_whitelist_violations;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::whitelist::get_whitelist_violations;
+/// # use goatdkernel::models::KernelConfig;
 ///
 /// let mut config = KernelConfig::default();
 /// config.use_whitelist = true;
@@ -268,8 +268,8 @@ pub fn get_whitelist_violations(config: &KernelConfig) -> Vec<String> {
 /// # Examples
 ///
 /// ```
-/// # use goatd_kernel::config::whitelist::validate_whitelist;
-/// # use goatd_kernel::models::KernelConfig;
+/// # use goatdkernel::config::whitelist::validate_whitelist;
+/// # use goatdkernel::models::KernelConfig;
 ///
 /// let mut config_bad = KernelConfig::default();
 /// config_bad.driver_exclusions = vec!["nvme".to_string()];

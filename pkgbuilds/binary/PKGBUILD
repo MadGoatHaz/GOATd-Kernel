@@ -23,7 +23,7 @@ sha256sums=('b915145b72f49533b4248119eeda979878cb1fc7e10871c0c76347915c3a58c7'
 
 package() {
     # Install binary from the downloaded tarball
-    install -Dm 755 "${srcdir}/goatd_kernel" "${pkgdir}/usr/bin/goatd_kernel"
+    install -Dm 755 "${srcdir}/goatdkernel" "${pkgdir}/usr/bin/goatdkernel"
     
     # Install desktop entry from source
     cd "${srcdir}/GOATd-Kernel"
@@ -42,7 +42,7 @@ package() {
 # Post-install message
 post_install() {
     echo "GOATd Kernel Builder has been installed!"
-    echo "To run: goatd_kernel"
+    echo "To run: goatdkernel"
     echo ""
     echo "Optional dependencies for enhanced features:"
     echo "  - Install modprobed-db: yay -S modprobed-db"
