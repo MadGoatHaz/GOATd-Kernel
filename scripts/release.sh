@@ -26,16 +26,16 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Path Configuration:
-# This script is located at master/scripts/release.sh
-# REPO_ROOT is set to the master/ directory (where .git lives)
-# This ensures all git operations and path references are within the master/ repository
+# This script is located at scripts/release.sh
+# REPO_ROOT is set to the ./ directory (where .git lives)
+# This ensures all git operations and path references are within the ./ repository
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Verify REPO_ROOT is the git repository root (master/)
+# Verify REPO_ROOT is the git repository root (./)
 if [ ! -d "$REPO_ROOT/.git" ]; then
     echo -e "${RED}[✗]${NC} REPO_ROOT does not contain .git directory: $REPO_ROOT" >&2
-    echo -e "${RED}[✗]${NC} This script must be run from within the master/ git repository." >&2
+    echo -e "${RED}[✗]${NC} This script must be run from within the root git repository." >&2
     exit 1
 fi
 

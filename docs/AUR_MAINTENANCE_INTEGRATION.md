@@ -1,7 +1,7 @@
 # AUR Maintenance Integration Documentation
 
 ## Overview
-The AUR maintenance pipeline integrates `aur/maintenance_aur.py` into `master/scripts/release.sh` (Step 15) to automatically synchronize package metadata (version, pkgrel, sha256) to the AUR repository.
+The AUR maintenance pipeline integrates `aur/maintenance_aur.py` into `./scripts/release.sh` (Step 15) to automatically synchronize package metadata (version, pkgrel, sha256) to the AUR repository.
 
 ## Components
 
@@ -19,7 +19,7 @@ The AUR maintenance pipeline integrates `aur/maintenance_aur.py` into `master/sc
 - **SHA256:** Maintained by maintenance_aur.py
 
 ### 3. release.sh Integration
-- **Location:** `master/scripts/release.sh`, Step 15
+- **Location:** `./scripts/release.sh`, Step 15
 - **Trigger:** After GitHub release published, before cleanup
 - **Exports:** PKGVER, PKGREL from aur/PKGBUILD
 - **Invocation:** `python3 aur/maintenance_aur.py --version $PKGVER --release $PKGREL`
@@ -33,7 +33,7 @@ The AUR maintenance pipeline integrates `aur/maintenance_aur.py` into `master/sc
 
 ## Development Workflow
 1. Make code changes and tag release: `v0.2.3`
-2. Run `./master/scripts/release.sh` (builds, uploads, and triggers AUR sync)
+2. Run `./scripts/release.sh` (builds, uploads, and triggers AUR sync)
 3. Step 15 automatically:
    - Extracts version from aur/PKGBUILD
    - Calls maintenance_aur.py to update metadata
@@ -41,4 +41,4 @@ The AUR maintenance pipeline integrates `aur/maintenance_aur.py` into `master/sc
 4. Manual AUR push: `cd aur && git push` (when ready)
 
 ## Testing
-- See `master/TESTS_README.md` for AUR integration test references
+- See `./TESTS_README.md` for AUR integration test references

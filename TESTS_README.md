@@ -6,7 +6,7 @@ This document provides an inventory of the tests within the GOATd Kernel project
 
 The test suite is divided into unit tests (within `src/`) and integration tests (within `tests/`).
 
-### Integration Tests (`master/tests/`)
+### Integration Tests (`tests/`)
 
 *   **`chunk_3_header_discovery_sync.rs`**: Validates kernel header discovery and synchronization logic.
 *   **`chunk_4_alpm_hook_verification.rs`**: Verifies ALPM hook structures and post-install system integrity checks.
@@ -49,7 +49,7 @@ Unit tests are located within the `src/` directory alongside the implementation 
 
 ## Execution Instructions
 
-To run the full test suite, navigate to the `master/` directory and use `cargo`:
+To run the full test suite, navigate to the `./` directory and use `cargo`:
 
 ```bash
 cd master
