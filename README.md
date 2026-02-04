@@ -11,8 +11,7 @@
 
 ---
 
-> **The Precision Orchestrator for Linux Kernel Sovereignty.**
-> Built for power users who demand total control over their kernel lifecycle, transforming complex optimization into a streamlined, high-performance workflow grounded in mechanism, not marketing.
+> A high-performance orchestration layer for the Linux kernel, designed to bridge the gap between uncompromising security and deterministic system responsiveness. By optimizing for superior 1% lows and minimizing perceived latency, GOATd Kernel ensures your system 'feels' as fast as your hardware allows, without the stutters of generic builds. Built on the principle of verifiable sovereignty, it empowers you to build, harden, and own your kernel—eliminating the need to trust external sources by putting the build pipeline in your hands.
 
 ---
 
